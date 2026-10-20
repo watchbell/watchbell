@@ -2,6 +2,34 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.1.0
+
+### Time zone
+
+- Times, schedules and messages follow `WATCHBELL_TIMEZONE` (an IANA name such as `Europe/Berlin`). New installs
+  write your computer's zone; an existing `.env` without it keeps Western Indonesian Time (WIB), so nothing changes
+  for you after the update. The daily job (03:00), the email digest (07:00) and weekly maintenance windows use local
+  wall-clock time and stay correct across daylight-saving changes. An invalid name falls back to WIB with a warning.
+  See [Time zone](docs/configuration.md#time-zone).
+
+### npm package
+
+- `watchbell` tells you when a newer version is on npm (at most once a day, a plain request to the npm registry;
+  turn it off with `WATCHBELL_NO_UPDATE_CHECK=1` in `~/.watchbell/.env` or the environment).
+- `watchbell update` installs the latest version with the npm next to your Node.js, stopping and restarting the
+  service if you installed one. 1.0 has no `watchbell update`, so update from 1.0.x once by hand: `watchbell stop`
+  (or stop the service), then `npm install -g watchbell@latest`.
+- `watchbell --host <address> --port <port>` for one run. A host other than this machine prints the addresses on
+  your network and a warning. [Open it from another computer](docs/install.md#open-it-from-another-computer) explains the SSH tunnel and `--host`.
+- With `HOST` (or `--host`) set to one address of this machine, not `0.0.0.0`, and `SITE_URL` left at its default,
+  links in alerts now use `http://<that address>:<port>` instead of localhost, so they open from other computers.
+- `watchbell service install` on macOS now installs a launchd agent (it printed instructions before).
+- `watchbell status` warns when the installed service points at a Node.js that no longer exists.
+
+### Other
+
+- LICENSE and the READMEs now name the copyright holder.
+
 ## 1.0.0
 
 The first public release.

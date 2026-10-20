@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clock, dayKey, resetTimeZoneForTests } from "@/lib/time";
 import { dailyDue, selfhostDaily, startScheduler } from "./scheduler";
 
 describe("dailyDue", () => {
@@ -16,7 +17,91 @@ describe("dailyDue", () => {
   });
 });
 
-const idle = { daily: async () => {}, readLastDay: async () => "2099-01-01" as string | null, writeLastDay: async () => {} };
+// Every minute from `from` to `to`, remembering the last day like startScheduler does: when and on which day it ran.
+function simulate(due: (now: Date, last: string | null) => boolean, from: string, to: string): { day: string; at: string }[] {
+  const runs: { day: string; at: string }[] = [];
+  let last: string | null = null;
+  for (let t = Date.parse(from); t < Date.parse(to); t += 60_000) {
+    const now = new Date(t);
+    if (!due(now, last)) continue;
+    last = dayKey(now);
+    runs.push({ day: last, at: clock(now) });
+  }
+  return runs;
+}
+
+describe("dailyDue in a zone with daylight saving (1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+
+  it("Europe/Berlin: once a local day at 03:00, also on 29 Mar (23 h) and 25 Oct (25 h)", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    const spring = simulate(dailyDue, "2026-03-27T23:00:00Z", "2026-03-31T22:00:00Z");
+    expect(spring).toEqual(["2026-03-28", "2026-03-29", "2026-03-30", "2026-03-31"].map((day) => ({ day, at: "03:00" })));
+    const autumn = simulate(dailyDue, "2026-10-23T22:00:00Z", "2026-10-27T23:00:00Z");
+    expect(autumn).toEqual(["2026-10-24", "2026-10-25", "2026-10-26", "2026-10-27"].map((day) => ({ day, at: "03:00" })));
+    expect(dailyDue(new Date("2026-03-29T00:59:00Z"), "2026-03-28")).toBe(false); // 01:59 CET
+    expect(dailyDue(new Date("2026-03-29T01:00:00Z"), "2026-03-28")).toBe(true); // 03:00 CEST, an hour later
+    expect(dailyDue(new Date("2026-10-25T01:59:00Z"), "2026-10-24")).toBe(false); // 02:59 CET, the second time round
+    expect(dailyDue(new Date("2026-10-25T02:00:00Z"), "2026-10-24")).toBe(true); // 03:00 CET
+  });
+
+  it("America/New_York: once a local day at 03:00 around 8 Mar and 1 Nov", () => {
+    resetTimeZoneForTests("America/New_York");
+    expect(simulate(dailyDue, "2026-03-07T05:00:00Z", "2026-03-10T04:00:00Z")).toEqual(["2026-03-07", "2026-03-08", "2026-03-09"].map((day) => ({ day, at: "03:00" })));
+    expect(simulate(dailyDue, "2026-10-31T04:00:00Z", "2026-11-03T05:00:00Z")).toEqual(["2026-10-31", "2026-11-01", "2026-11-02"].map((day) => ({ day, at: "03:00" })));
+  });
+
+  it("Asia/Kathmandu: 03:00 is 21:15 UTC", () => {
+    resetTimeZoneForTests("Asia/Kathmandu");
+    expect(dailyDue(new Date("2026-10-18T21:14:00Z"), "2026-10-18")).toBe(false);
+    expect(dailyDue(new Date("2026-10-18T21:15:00Z"), "2026-10-18")).toBe(true);
+  });
+
+  it("after the zone moves back a day (WIB → America/Los_Angeles) it doesn't run again", () => {
+    resetTimeZoneForTests("America/Los_Angeles");
+    // Ran at 03:00 WIB on 19 Oct (stored "2026-10-19"); at 20:00Z it is 13:00 on 18 Oct in Los Angeles.
+    expect(dailyDue(new Date("2026-10-18T20:00:00Z"), "2026-10-19")).toBe(false);
+    expect(dailyDue(new Date("2026-10-19T10:00:00Z"), "2026-10-19")).toBe(false); // 03:00 on the 19th there: done already
+    expect(dailyDue(new Date("2026-10-20T10:00:00Z"), "2026-10-19")).toBe(true);
+  });
+
+  it("recovers from a stored day more than one day ahead (a clock that was once wrong); tomorrow is still trusted", () => {
+    resetTimeZoneForTests();
+    const now = new Date("2026-10-19T05:00:00Z"); // 12:00 WIB on the 19th
+    expect(dailyDue(now, "2027-03-01")).toBe(true);
+    expect(dailyDue(now, "2026-10-21")).toBe(true);
+    expect(dailyDue(now, "2026-10-20")).toBe(false); // a change of zone can put it one day ahead
+    expect(dailyDue(now, "2026-10-19")).toBe(false);
+    expect(dailyDue(now, "not a day")).toBe(true);
+    expect(dailyDue(new Date("2026-10-18T19:59:00Z"), "2027-03-01")).toBe(false); // 02:59 WIB: not 03:00 yet
+    resetTimeZoneForTests("America/Los_Angeles");
+    expect(dailyDue(new Date("2026-10-18T20:00:00Z"), "2026-10-20")).toBe(true); // 13:00 on the 18th there
+    expect(dailyDue(new Date("2026-10-18T20:00:00Z"), "2026-10-19")).toBe(false);
+  });
+
+  it("a stored day from a wrong clock runs the missed job once, then keeps today's", () => {
+    resetTimeZoneForTests();
+    let last: string | null = "2027-03-01";
+    const runs: string[] = [];
+    for (let t = Date.parse("2026-10-19T00:00:00Z"); t < Date.parse("2026-10-21T00:00:00Z"); t += 60_000) {
+      const now = new Date(t);
+      if (!dailyDue(now, last)) continue;
+      last = dayKey(now);
+      runs.push(`${last} ${clock(now)}`);
+    }
+    // Until 07:00 WIB on the 21st: the missed run at once (07:00 on the 19th), then 03:00 every day.
+    expect(runs).toEqual(["2026-10-19 07:00", "2026-10-20 03:00", "2026-10-21 03:00"]);
+  });
+
+  it("the default zone still runs at 03:00 WIB", () => {
+    resetTimeZoneForTests();
+    expect(simulate(dailyDue, "2026-10-17T17:00:00Z", "2026-10-19T17:00:00Z")).toEqual([{ day: "2026-10-18", at: "03:00" }, { day: "2026-10-19", at: "03:00" }]);
+  });
+});
+
+// Today (in the configured zone) is already done, so the daily job stays idle. Not a far-future day: a stored day more
+// than one day ahead is not trusted (a clock that was once wrong), and the job would run.
+const idle = { daily: async () => {}, readLastDay: async () => dayKey(new Date()) as string | null, writeLastDay: async () => {} };
 
 describe("startScheduler", () => {
   beforeEach(() => vi.useFakeTimers());

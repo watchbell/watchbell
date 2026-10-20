@@ -1,10 +1,62 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { resetTimeZoneForTests, toLocalInput } from "@/lib/time";
 import {
-  activeFor, covers, hasEnded, durationText, DURATIONS_MIN, MAX_WINDOWS, maintenanceSet, nextOccurrence, occurrence, parseWindowForm, splitTarget, targetValue, type Window, windowText, wibInput,
+  activeFor, covers, hasEnded, durationText, DURATIONS_MIN, MAX_WINDOWS, maintenanceSet, nextOccurrence, occurrence, parseWindowForm, splitTarget, targetValue, type Window, windowText,
 } from "./maintenance";
 
 const w = (o: Partial<Window> = {}): Window => ({ id: "w", scope: "app", appId: "a1", monitorId: null, startsAt: new Date("2026-10-12T18:00:00Z"), durationMin: 60, weekly: false, note: null, ...o });
 // 2026-10-12T18:00Z is Tue 13 Oct 01:00 WIB.
+
+describe("weekly windows keep their local wall time across daylight saving (Europe/Berlin, 1.1)", () => {
+  beforeEach(() => resetTimeZoneForTests("Europe/Berlin"));
+  afterEach(() => resetTimeZoneForTests());
+  // Created for Monday 19 Oct 2026 10:00 CEST (08:00Z); clocks go back on Sunday 25 Oct.
+  const weekly = () => w({ scope: "all", appId: null, startsAt: new Date("2026-10-19T08:00:00Z"), durationMin: 60, weekly: true });
+
+  it("repeats on 26 Oct at 10:00 CET, which is 09:00Z, not 08:00Z", () => {
+    expect(occurrence(weekly(), new Date("2026-10-26T08:30:00Z"))).toBeNull(); // 09:30 CET: not yet
+    expect(occurrence(weekly(), new Date("2026-10-26T09:00:00Z"))).toEqual({ start: new Date("2026-10-26T09:00:00Z"), end: new Date("2026-10-26T10:00:00Z") });
+    expect(occurrence(weekly(), new Date("2026-10-26T09:59:00Z"))).not.toBeNull();
+    expect(occurrence(weekly(), new Date("2026-10-26T10:00:00Z"))).toBeNull();
+    expect(nextOccurrence(weekly(), new Date("2026-10-20T12:00:00Z"))).toEqual({ start: new Date("2026-10-26T09:00:00Z"), end: new Date("2026-10-26T10:00:00Z") });
+  });
+
+  it("keeps 10:00 for months, and goes back to 08:00Z when summer time returns", () => {
+    expect(nextOccurrence(weekly(), new Date("2027-01-01T00:00:00Z"))?.start.toISOString()).toBe("2027-01-04T09:00:00.000Z");
+    expect(nextOccurrence(weekly(), new Date("2027-03-25T00:00:00Z"))?.start.toISOString()).toBe("2027-03-29T08:00:00.000Z"); // after 28 Mar
+    expect(occurrence(weekly(), new Date("2027-03-29T08:15:00Z"))?.start.toISOString()).toBe("2027-03-29T08:00:00.000Z");
+  });
+
+  it("reads and writes the dialog's start and the Every … text in local time", () => {
+    const p = parseWindowForm({ scope: "all", start: "2026-10-19T10:00", durationMin: 60, weekly: true });
+    expect(p.ok && p.value.startsAt.toISOString()).toBe("2026-10-19T08:00:00.000Z");
+    expect(toLocalInput(new Date("2026-10-26T09:00:00Z"))).toBe("2026-10-26T10:00");
+    const t = windowText(weekly(), new Date("2026-10-26T09:30:00Z"));
+    expect(t.when).toBe("Every Monday 10:00–11:00");
+    expect(t.status.text).toBe("Active · until 11:00");
+    // Sunday 23:30 local is still Sunday, though it is Sunday 21:30Z or 22:30Z.
+    expect(windowText(w({ startsAt: new Date("2026-10-25T22:30:00Z"), weekly: true }), new Date("2026-10-20T00:00:00Z")).when).toBe("Every Sunday 23:30–00:30");
+  });
+
+  it("after a repeat the spring-forward gap moved (02:30 → 03:30), the next one is back at 02:30", () => {
+    // Sunday 22 Mar 2026 02:30 CET (01:30Z); clocks go forward on Sunday 29 Mar at 02:00.
+    const sunday = w({ scope: "all", appId: null, startsAt: new Date("2026-03-22T01:30:00Z"), durationMin: 60, weekly: true });
+    expect(occurrence(sunday, new Date("2026-03-29T01:45:00Z"))?.start.toISOString()).toBe("2026-03-29T01:30:00.000Z"); // 03:30 CEST
+    const next = nextOccurrence(sunday, new Date("2026-03-29T05:00:00Z"));
+    expect(next?.start.toISOString()).toBe("2026-04-05T00:30:00.000Z"); // 5 Apr 02:30 CEST
+    expect(windowText(sunday, new Date("2026-03-29T05:00:00Z")).status.text).toBe("Next: 5 Apr 02:30");
+    expect(occurrence(sunday, new Date("2026-04-05T00:40:00Z"))?.start.toISOString()).toBe("2026-04-05T00:30:00.000Z");
+  });
+
+  it("a weekly window starts exactly once a week, never twice in the 25-hour week", () => {
+    const starts = new Set<string>();
+    for (let t = Date.parse("2026-10-19T00:00:00Z"); t < Date.parse("2026-11-10T00:00:00Z"); t += 15 * 60_000) {
+      const o = occurrence(weekly(), new Date(t));
+      if (o) starts.add(o.start.toISOString());
+    }
+    expect([...starts]).toEqual(["2026-10-19T08:00:00.000Z", "2026-10-26T09:00:00.000Z", "2026-11-02T09:00:00.000Z", "2026-11-09T09:00:00.000Z"]);
+  });
+});
 
 describe("occurrence", () => {
   it("covers a one-off window from start to end", () => {
@@ -120,8 +172,8 @@ describe("dialog helpers", () => {
     expect(splitTarget("bogus")).toEqual({ scope: "", targetId: "" });
   });
   it("gives a stored start back as the WIB datetime-local value it was typed as", () => {
-    expect(wibInput(new Date("2026-10-13T15:00:00Z"))).toBe("2026-10-13T22:00");
-    const p = parseWindowForm({ scope: "all", start: wibInput(new Date("2026-10-12T18:00:00Z")), durationMin: 60 });
+    expect(toLocalInput(new Date("2026-10-13T15:00:00Z"))).toBe("2026-10-13T22:00");
+    const p = parseWindowForm({ scope: "all", start: toLocalInput(new Date("2026-10-12T18:00:00Z")), durationMin: 60 });
     expect(p.ok && p.value.startsAt).toEqual(new Date("2026-10-12T18:00:00Z"));
   });
 });

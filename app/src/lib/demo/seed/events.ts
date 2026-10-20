@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { events } from "@/db/schema";
 import { rowsOf } from "@/db/rows";
 import type { State } from "@/lib/status";
+import { zoneName } from "@/lib/time";
 import { hostPath } from "@/lib/view/format";
 import type { SeededAlerts } from "./alerts";
 import type { SeededApps } from "./apps";
@@ -79,7 +80,7 @@ export async function seedEvents(ctx: SeedCtx, apps: SeededApps, uptime: SeededU
   act("db-link", 5, `Database link: ${linkedApp.name} → ${supa.name}`, linkedApp.id);
   act("keep-active", 5, `Keep active on: ${supa.name}`, supa.id);
   act("rule", 4, "Alert rule edited: HighLatency", null, "threshold 1,500 ms");
-  act("maintenance", 3, "Maintenance window added", null, "Sundays 02:00 WIB, 30 min");
+  act("maintenance", 3, "Maintenance window added", null, `Sundays 02:00 ${zoneName()}, 30 min`);
   act("check-now", 1, `Check now: ${hostPath(outMon.url)}`, outMon.appId);
   // The Cloudflare token that was about to expire, replaced a few minutes before its alert resolved.
   const cred = al.resolved.credential;

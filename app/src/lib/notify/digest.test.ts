@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { clock, dayKey, resetTimeZoneForTests } from "@/lib/time";
 import { buildDigest, type DigestState, digestDue, stepDigest } from "./digest";
 
 describe("digestDue", () => {
@@ -7,6 +8,58 @@ describe("digestDue", () => {
     expect(digestDue(new Date("2026-10-13T00:00:00Z"), null)).toBe(true);       // 07:00 WIB
     expect(digestDue(new Date("2026-10-13T05:00:00Z"), "2026-10-13")).toBe(false);
     expect(digestDue(new Date("2026-10-13T05:00:00Z"), "2026-10-12")).toBe(true);
+  });
+});
+
+describe("digestDue in a zone with daylight saving (1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+
+  // Every minute, remembering the day it went out: once a local day, at 07:00 on the local clock.
+  const sends = (from: string, to: string) => {
+    const out: string[] = [];
+    let last: string | null = null;
+    for (let t = Date.parse(from); t < Date.parse(to); t += 60_000) {
+      const now = new Date(t);
+      if (!digestDue(now, last)) continue;
+      last = dayKey(now);
+      out.push(`${last} ${clock(now)}`);
+    }
+    return out;
+  };
+
+  it("Europe/Berlin: once on 29 Mar and once on 25 Oct, at 07:00 local", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    expect(sends("2026-03-28T00:00:00Z", "2026-03-30T22:00:00Z")).toEqual(["2026-03-28 07:00", "2026-03-29 07:00", "2026-03-30 07:00"]);
+    expect(sends("2026-10-24T00:00:00Z", "2026-10-26T23:00:00Z")).toEqual(["2026-10-24 07:00", "2026-10-25 07:00", "2026-10-26 07:00"]);
+    expect(digestDue(new Date("2026-03-29T04:59:00Z"), "2026-03-28")).toBe(false); // 06:59 CEST
+    expect(digestDue(new Date("2026-03-29T05:00:00Z"), "2026-03-28")).toBe(true);
+    expect(digestDue(new Date("2026-10-25T05:59:00Z"), "2026-10-24")).toBe(false); // 06:59 CET
+    expect(digestDue(new Date("2026-10-25T06:00:00Z"), "2026-10-24")).toBe(true);
+  });
+
+  it("isn't sent twice when the zone moves back a day", () => {
+    resetTimeZoneForTests("America/Los_Angeles");
+    expect(digestDue(new Date("2026-10-19T15:00:00Z"), "2026-10-19")).toBe(false); // 08:00 on the 19th in LA, sent in WIB
+    expect(digestDue(new Date("2026-10-20T15:00:00Z"), "2026-10-19")).toBe(true);
+  });
+
+  it("recovers from a stored day more than one day ahead (a clock that was once wrong); tomorrow is still trusted", () => {
+    resetTimeZoneForTests();
+    const now = new Date("2026-10-13T05:00:00Z"); // 12:00 WIB on the 13th
+    expect(digestDue(now, "2027-03-01")).toBe(true);
+    expect(digestDue(now, "2026-10-15")).toBe(true);
+    expect(digestDue(now, "2026-10-14")).toBe(false); // a change of zone can put it one day ahead
+    expect(digestDue(now, "garbage")).toBe(true);
+    expect(digestDue(new Date("2026-10-12T23:59:00Z"), "2027-03-01")).toBe(false); // 06:59 WIB: not 07:00 yet
+    resetTimeZoneForTests("America/Los_Angeles");
+    expect(digestDue(new Date("2026-10-19T15:00:00Z"), "2026-10-21")).toBe(true); // 08:00 on the 19th there
+    expect(digestDue(new Date("2026-10-19T15:00:00Z"), "2026-10-20")).toBe(false);
+  });
+
+  it("Asia/Kolkata: 07:00 is 01:30 UTC", () => {
+    resetTimeZoneForTests("Asia/Kolkata");
+    expect(digestDue(new Date("2026-10-13T01:29:00Z"), "2026-10-12")).toBe(false);
+    expect(digestDue(new Date("2026-10-13T01:30:00Z"), "2026-10-12")).toBe(true);
   });
 });
 

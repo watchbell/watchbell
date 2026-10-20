@@ -1,9 +1,10 @@
 // U5 / B3. Checks keep running inside a maintenance window and are stored with in_maintenance = true: they are left
-// out of uptime % and open no alerts. WIB is UTC+7 all year, so a weekly window is exactly 7 × 24 h after the previous
-// one. Pure: the collector, the alert evaluation, Check now and the Uptime page all decide with these functions.
+// out of uptime % and open no alerts. A weekly window repeats at the same local wall time (lib/time.ts), so across a
+// daylight-saving change it is 7 × 24 h ± 1 h after the previous one; in WIB (no daylight saving) always exactly 7 × 24 h.
+// Pure: the collector, the alert evaluation, Check now and the Uptime page all decide with these functions.
 import { isUuid } from "@/lib/ids";
 import type { State } from "@/lib/status";
-import { clock, dayMonth } from "@/lib/time";
+import { addLocalDays, clock, dayMonth, fromLocalInput, zonedParts } from "@/lib/time";
 
 export type Window = { id: string; scope: "all" | "app" | "monitor"; appId: string | null; monitorId: string | null; startsAt: Date; durationMin: number; weekly: boolean; note: string | null };
 export type Target = { monitorId: string; appId: string };
@@ -11,16 +12,31 @@ export const MAX_WINDOWS = 20;
 export const DURATIONS_MIN = [30, 60, 90, 180, 360] as const;
 export const NOTE_MAX = 120;
 const WEEK = 7 * 86_400_000;
-const WIB_MS = 7 * 3_600_000;
 
 const span = (start: number, w: Window) => ({ start: new Date(start), end: new Date(start + w.durationMin * 60_000) });
+
+// The start of a weekly window's k-th repeat: the same local wall time 7k days later.
+const weekStart = (w: Window, k: number): number => (k === 0 ? w.startsAt.getTime() : addLocalDays(w.startsAt, 7 * k).getTime());
+
+// The last repeat that started at or before t (t >= startsAt): its number k and its start. A repeat is at most an
+// hour or two off 7 × 24 h, so the plain division is right or one off either way.
+function lastWeek(w: Window, t: number): { k: number; start: number } {
+  let k = Math.floor((t - w.startsAt.getTime()) / WEEK);
+  let s = weekStart(w, k);
+  while (k > 0 && s > t) s = weekStart(w, --k);
+  for (let next = weekStart(w, k + 1); next <= t; next = weekStart(w, k + 1)) {
+    k++;
+    s = next;
+  }
+  return { k, start: s };
+}
 
 // The occurrence that covers `now` (start inclusive, end exclusive), or null.
 export function occurrence(w: Window, now: Date): { start: Date; end: Date } | null {
   const t = now.getTime();
   const s = w.startsAt.getTime();
   if (t < s) return null;
-  const o = span(w.weekly ? s + Math.floor((t - s) / WEEK) * WEEK : s, w);
+  const o = span(w.weekly ? lastWeek(w, t).start : s, w);
   return t < o.end.getTime() ? o : null;
 }
 
@@ -32,7 +48,10 @@ export function nextOccurrence(w: Window, now: Date): { start: Date; end: Date }
   const s = w.startsAt.getTime();
   if (t < s) return span(s, w);
   if (!w.weekly) return null;
-  return span(s + Math.ceil((t - s) / WEEK) * WEEK, w);
+  // Counted from the stored start, never from the last repeat: a repeat the spring-forward gap moved (02:30 → 03:30)
+  // must not move the ones after it.
+  const last = lastWeek(w, t);
+  return span(last.start === t ? last.start : weekStart(w, last.k + 1), w);
 }
 
 export function covers(w: Window, t: Target): boolean {
@@ -79,15 +98,14 @@ export const ENDED = "That window has already ended.";
 
 export type WindowForm = { scope?: unknown; targetId?: unknown; start?: unknown; durationMin?: unknown; weekly?: unknown; note?: unknown };
 
-// The dialog's fields. `start` is a datetime-local value ("2026-10-13T22:00"), read as WIB.
+// The dialog's fields. `start` is a datetime-local value ("2026-10-13T22:00"), read in the configured zone.
 export function parseWindowForm(f: WindowForm): { ok: true; value: Omit<Window, "id"> } | { ok: false; fieldErrors: Record<string, string> } {
   const errors: Record<string, string> = {};
   const scope = f.scope === "all" || f.scope === "app" || f.scope === "monitor" ? f.scope : null;
   if (!scope) errors.scope = "Pick what it applies to.";
   const raw = typeof f.start === "string" ? f.start : "";
-  let startsAt: Date | null = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(raw) ? new Date(`${raw}:00+07:00`) : null;
-  // A date that doesn't exist (31 Feb) is rolled over by Date; it must read back as typed.
-  if (startsAt && (Number.isNaN(startsAt.getTime()) || new Date(startsAt.getTime() + WIB_MS).toISOString().slice(0, 16) !== raw)) startsAt = null;
+  // A date that doesn't exist (31 Feb) is refused, not rolled over.
+  const startsAt = fromLocalInput(raw);
   if (!startsAt) errors.start = "Pick a start time.";
   const durationMin = Number(f.durationMin);
   if (!(DURATIONS_MIN as readonly number[]).includes(durationMin)) errors.durationMin = "Pick how long it lasts.";
@@ -96,11 +114,6 @@ export function parseWindowForm(f: WindowForm): { ok: true; value: Omit<Window, 
   if (Object.keys(errors).length || !scope || !startsAt) return { ok: false, fieldErrors: errors };
   const note = (typeof f.note === "string" ? f.note : "").trim().slice(0, NOTE_MAX) || null;
   return { ok: true, value: { scope, appId: scope === "app" ? target : null, monitorId: scope === "monitor" ? target : null, startsAt, durationMin, weekly: f.weekly === true, note } };
-}
-
-// The datetime-local value of a stored start, in WIB (the Edit dialog's starting value).
-export function wibInput(d: Date): string {
-  return new Date(d.getTime() + WIB_MS).toISOString().slice(0, 16);
 }
 
 // The dialog's Lasts options: "30 min", "1 h", "1 h 30 min", "3 h", "6 h".
@@ -126,8 +139,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 // Uptime → Maintenance windows: "Every Sunday 01:00–02:00" / "13 Oct 22:00–23:30", and Active / Next / Over.
 export function windowText(w: Window, now: Date): { when: string; status: { state: State; text: string } } {
   const end = new Date(w.startsAt.getTime() + w.durationMin * 60_000);
-  const wibDow = new Date(w.startsAt.getTime() + WIB_MS).getUTCDay();
-  const when = w.weekly ? `Every ${DAYS[wibDow]} ${clock(w.startsAt)}–${clock(end)}` : `${dayMonth(w.startsAt)} ${clock(w.startsAt)}–${clock(end)}`;
+  const when = w.weekly ? `Every ${DAYS[zonedParts(w.startsAt).weekday]} ${clock(w.startsAt)}–${clock(end)}` : `${dayMonth(w.startsAt)} ${clock(w.startsAt)}–${clock(end)}`;
   const cur = occurrence(w, now);
   if (cur) return { when, status: { state: "maint", text: `Active · until ${clock(cur.end)}` } };
   const next = nextOccurrence(w, now);

@@ -17,6 +17,7 @@ import { ROLES, type Role } from "@/lib/roles";
 import { BUDGET_DEFAULTS, budgetChanges, validateBudget } from "@/lib/settings/budget";
 import { retentionChanges, validateRetention } from "@/lib/settings/retention";
 import { adminClient } from "@/lib/supabase/admin";
+import { dailyRunText } from "@/lib/time";
 
 const deps = { requireActionMember };
 
@@ -188,7 +189,7 @@ export async function saveRetention(input: Record<string, string>): Promise<Acti
     await saveRetentionDays(v.value);
     await audit(actor.userId, "Settings: retention changed", changes);
     revalidatePath("/settings");
-    return { ok: true, message: "Retention saved. The daily job uses it from its next run (03:00 WIB)." };
+    return { ok: true, message: `Retention saved. The daily job uses it from its next run (${dailyRunText()}).` };
   }, deps, "local");
 }
 

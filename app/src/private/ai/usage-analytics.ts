@@ -1,8 +1,10 @@
 import { USAGE_COPY } from "@/lib/copy/edition";
+import { dayKey, dayStart, zonedFormat, zonedParts, zoneLabel } from "@/lib/time";
+import { dayKeys } from "@/lib/view/uptime";
 import type { AgRunning } from "./agent-usage";
 import { agoShort } from "./time-text";
 
-// AI › Usage & Analytics (owner 13 Oct). Pure maths over ai_usage rows: the range and its buckets (WIB), the stat
+// AI › Usage & Analytics (owner 13 Oct). Pure maths over ai_usage rows: the range and its buckets (local time), the stat
 // cards, the Tokens/Requests chart, the recent-requests rows and the provider graph. No DB, no "server-only".
 
 export const RANGES = [
@@ -25,28 +27,28 @@ export function parseRange(raw: unknown): Range {
 
 const H = 3_600_000;
 const D = 86_400_000;
-const WIB = 7 * H; // Asia/Jakarta, no daylight saving
-const hourStart = (t: number) => Math.floor(t / H) * H;
-export const wibDayStart = (t: number) => Math.floor((t + WIB) / D) * D - WIB;
+const MINUTE = 60_000;
+// The start of the local hour t is in: a whole UTC hour in WIB, :30 past one in Asia/Kolkata.
+const hourStart = (t: number) => Math.floor(t / MINUTE) * MINUTE - zonedParts(new Date(t)).minute * MINUTE;
+// Local midnight of the day t is in (lib/time.ts; a day can be 23 or 25 hours long).
+export const localDayStart = (t: number) => dayStart(dayKey(new Date(t))).getTime();
 
 export type Window = { range: Range; since: Date; bucket: "hour" | "day"; starts: Date[] };
 
-// Buckets oldest first; `since` is the first bucket's start, so the cards and the chart cover the same rows.
+// Buckets oldest first; `since` is the first bucket's start, so the cards and the chart cover the same rows. Hour
+// buckets are an hour apart; day buckets start at local midnight.
 export function rangeWindow(range: Range, now: Date): Window {
   const t = now.getTime();
-  const span = (first: number, last: number, step: number) => {
-    const out: Date[] = [];
-    for (let x = first; x <= last; x += step) out.push(new Date(x));
-    return out;
-  };
   if (range === "today" || range === "24h") {
     const last = hourStart(t);
-    const first = range === "today" ? wibDayStart(t) : last - 23 * H;
-    return { range, since: new Date(first), bucket: "hour", starts: span(first, last, H) };
+    const first = range === "today" ? localDayStart(t) : last - 23 * H;
+    const starts: Date[] = [];
+    for (let x = first; x <= last; x += H) starts.push(new Date(x));
+    return { range, since: new Date(first), bucket: "hour", starts };
   }
-  const today = wibDayStart(t);
-  const first = range === "7d" ? today - 6 * D : range === "30d" ? today - 29 * D : wibDayStart(t - RETENTION_DAYS * D);
-  return { range, since: new Date(first), bucket: "day", starts: span(first, today, D) };
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : Math.round((localDayStart(t) - localDayStart(t - RETENTION_DAYS * D)) / D) + 1;
+  const starts = dayKeys(now, days).map(dayStart);
+  return { range, since: starts[0], bucket: "day", starts };
 }
 
 export type UsageRow = {
@@ -78,20 +80,22 @@ export function usageStats(rows: UsageRow[]): UsageStats {
   return s;
 }
 
-const fmt = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", ...o });
-const hh = fmt({ hour: "2-digit", minute: "2-digit", hour12: false });
-const dayMonth = fmt({ day: "numeric", month: "short" });
-const year = fmt({ year: "numeric" });
+// In the configured zone (lib/time.ts), read when called: the zone is known by then, also in tests.
+const fmt = (o: Intl.DateTimeFormatOptions) => zonedFormat("en-GB", o);
+const hh = (d: Date) => fmt({ hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+const dayMonth = (d: Date) => fmt({ day: "numeric", month: "short" }).format(d);
+const year = (d: Date) => fmt({ year: "numeric" }).format(d);
 
 export type SeriesPoint = { t: Date; label: string; fresh: number; cached: number; output: number; requests: number };
 
 export function usageSeries(rows: UsageRow[], w: Window): SeriesPoint[] {
-  const pts: SeriesPoint[] = w.starts.map((t) => ({ t, label: w.bucket === "hour" ? hh.format(t) : dayMonth.format(t), fresh: 0, cached: 0, output: 0, requests: 0 }));
+  const pts: SeriesPoint[] = w.starts.map((t) => ({ t, label: w.bucket === "hour" ? hh(t) : dayMonth(t), fresh: 0, cached: 0, output: 0, requests: 0 }));
   const first = w.starts[0]?.getTime() ?? 0;
-  const step = w.bucket === "hour" ? H : D;
+  // Hour buckets are an hour apart; a day bucket is found by its local day (23 or 25 hours on a daylight-saving day).
+  const dayIndex = new Map(w.bucket === "day" ? w.starts.map((t, i) => [dayKey(t), i] as const) : []);
   for (const r of rows) {
     if (!isModelWork(r)) continue;
-    const i = Math.floor((r.at.getTime() - first) / step);
+    const i = w.bucket === "hour" ? Math.floor((r.at.getTime() - first) / H) : dayIndex.get(dayKey(r.at)) ?? -1;
     if (i < 0 || i >= pts.length) continue;
     const p = pts[i];
     p.requests++;
@@ -102,8 +106,8 @@ export function usageSeries(rows: UsageRow[], w: Window): SeriesPoint[] {
   return pts;
 }
 
-// "13 Oct 2026, 10:10 WIB"
-export const wibStamp = (d: Date): string => `${dayMonth.format(d)} ${year.format(d)}, ${hh.format(d)} WIB`;
+// "13 Oct 2026, 10:10 WIB" (the zone's label, lib/time.ts)
+export const localStamp = (d: Date): string => `${dayMonth(d)} ${year(d)}, ${hh(d)} ${zoneLabel(d)}`;
 
 export type RecentRow = {
   key: string; model: string; purpose: string; fresh: number | null; cached: number | null; out: number | null; durationMs: number;
@@ -118,7 +122,7 @@ export function recentRow(r: UsageRow, now: Date, i = 0): RecentRow {
     key: `${r.at.getTime()}-${i}`, model, purpose,
     fresh: hasTokens ? n(r.tokensIn) : null, cached: hasTokens ? n(r.tokensCached) : null, out: hasTokens ? n(r.tokensOut) + n(r.tokensThinking) : null,
     durationMs: r.latencyMs, status: r.status, tone: r.status === 429 ? "warn" : r.status >= 400 ? "err" : "ok",
-    when: agoShort(r.at, now), whenTitle: wibStamp(r.at),
+    when: agoShort(r.at, now), whenTitle: localStamp(r.at),
   };
 }
 

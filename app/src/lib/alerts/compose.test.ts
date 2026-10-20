@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import { composeMessage, nextStep, type Notice } from "./compose";
 
 const now = new Date("2026-10-13T12:44:00Z");
@@ -114,5 +115,30 @@ describe("composeMessage in Indonesian", () => {
     expect(nextStep("CollectorStale", "id")).toBe("Langkah: watchdog udah jalanin collector sendiri tiap 5 menit. Cek job di cron-job.org dan deploy terakhir di Vercel.");
     expect(nextStep("MonitorDown", "id")).toBeNull();
     expect(nextStep("CollectorStale")).toMatch(/^Next step: the watchdog/);
+  });
+});
+
+describe("composeMessage in the configured zone (1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+
+  it("says WIB by default, as before", () => {
+    resetTimeZoneForTests();
+    const m = composeMessage([n()], now, "https://ops.example.com");
+    expect(m.telegram).toContain("<b>Watchbell</b>: 1 firing · 19:44 WIB");
+    expect(m.telegram).toContain("since 19:44 WIB");
+    expect(m.discord).toContain("**Watchbell**: 1 firing · 19:44 WIB");
+  });
+
+  it("Europe/Berlin: local clock with CEST in summer time and CET in winter time", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    const summer = composeMessage([n()], now, "https://ops.example.com");
+    expect(summer.telegram).toContain("<b>Watchbell</b>: 1 firing · 14:44 CEST");
+    expect(summer.telegram).toContain("since 14:44 CEST");
+    expect(summer.discord).toContain("**Watchbell**: 1 firing · 14:44 CEST");
+    const winter = new Date("2026-11-13T12:44:00Z");
+    const m = composeMessage([n({ startedAt: new Date("2026-10-24T12:00:00Z") })], winter, "https://ops.example.com", "id");
+    expect(m.telegram).toContain("· 13:44 CET");
+    expect(m.telegram).toContain("sejak 14:00 CEST"); // it started before the clocks went back
+    expect(m.telegram).not.toContain("WIB");
   });
 });

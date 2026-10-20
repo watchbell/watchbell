@@ -17,6 +17,7 @@ import { ports } from "@/private/assist/ports";
 import { AdvisorNotesControls } from "./advisor-controls";
 import { NoAccess } from "@/components/no-access";
 import { pageGate } from "@/lib/auth";
+import { zoneName } from "@/lib/time";
 import { scheduleModelRefresh } from "@/private/ai/providers/refresh";
 
 // Test / Scan all wait for the provider (4 at a time, up to ~50 s); Vercel Hobby allows 60 s.
@@ -80,7 +81,7 @@ export default async function ModelsPage() {
         actions={<RefreshModelsButton />}
       />
       {provider && (
-        <Card title="Advisor notes" meta="07:00 and 19:00 WIB · your provider">
+        <Card title="Advisor notes" meta={`07:00 and 19:00 ${zoneName()} · your provider`}>
           <p className="m-0 mb-3 text-[13px] text-ink-soft">{ALWAYS_APP ? `Short notes for ${ALWAYS_APP} and up to 3 apps that need attention` : "Short notes for up to 3 apps that need attention"}, written from scrubbed console data. They show with the other AI notes.</p>
           <AdvisorNotesControls enabled={advisor.enabled} model={advisor.model} defaultLabel={provider.model}
             models={rows.filter((m) => m.enabled && m.providerEnabled).map((m) => m.publicId)} />

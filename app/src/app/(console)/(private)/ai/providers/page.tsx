@@ -13,6 +13,7 @@ import { providersInfo } from "@/private/ui/ai-banner";
 import { pageGate } from "@/lib/auth";
 import { PROVIDERS_COPY } from "@/lib/copy/edition";
 import { mode } from "@/lib/mode";
+import { clock } from "@/lib/time";
 
 // The custom provider dialog's Base URL help depends on the runtime mode (ruling Q11: self-host allows local servers).
 const selfhost = () => mode() === "selfhost";
@@ -22,7 +23,7 @@ const selfhost = () => mode() === "selfhost";
 
 function lastTest(c: ConnectionView): string {
   if (!c.lastTestAt) return "—";
-  const t = c.lastTestAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Jakarta" });
+  const t = clock(c.lastTestAt);
   return `${t} · ${c.lastTestStatus === 200 ? "ok" : c.lastTestStatus ?? "—"}`;
 }
 

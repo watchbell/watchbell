@@ -5,7 +5,7 @@ import type { ChannelKind } from "@/db/schema";
 import type { ChannelView } from "@/lib/data/notify-db";
 import type { State } from "@/lib/status";
 import type { NotifyChannel, NotifyLangs } from "@/lib/notify/lang";
-import { ago } from "@/lib/time";
+import { ago, zoneName } from "@/lib/time";
 import { ChannelControls } from "./channel-dialog";
 import { LanguageSelect } from "./language-select";
 import { TelegramApprovals } from "./telegram-approvals";
@@ -13,7 +13,7 @@ import { TelegramApprovals } from "./telegram-approvals";
 const ROWS: { kind: ChannelKind; label: string; help: string }[] = [
   { kind: "telegram", label: "Telegram bot", help: "Free. One message per collector run, listing every alert that opened, repeated (every 6 h) or resolved." },
   { kind: "discord", label: "Discord webhook", help: "Free. Same messages as Telegram." },
-  { kind: "email_digest", label: "Daily email digest", help: "Sent through Resend at 07:00 WIB: what fired, what resolved, uptime and stored errors of the last 24 h. Free plan: 100 emails a day, we send 1." },
+  { kind: "email_digest", label: "Daily email digest", help: "Sent through Resend at 07:00 {zone}: what fired, what resolved, uptime and stored errors of the last 24 h. Free plan: 100 emails a day, we send 1." },
 ];
 
 // The mockup's form-row: a 260 px label column with its help, then the status and the buttons.
@@ -47,7 +47,7 @@ export function ChannelsCard({ views, owner, now, approvals = false, langs = DEF
             <div key={r.kind} className={ROW}>
               <div>
                 <div className="font-medium">{r.label}</div>
-                <div className="text-[12.5px] text-ink-soft">{r.help}</div>
+                <div className="text-[12.5px] text-ink-soft">{r.help.replace("{zone}", zoneName())}</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Status state={s.state}><Masked kind="text" real={s.text} masked={s.shot} /></Status>

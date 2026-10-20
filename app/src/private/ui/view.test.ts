@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import type { LogRow } from "@/private/ai/views-db";
-import { csvCell, LOG_CSV_HEADER, logsToCsv } from "./csv";
+import { csvCell, logCsvHeader, logsToCsv } from "./csv";
 import { LIMITS } from "./limits";
 import { fmtCtx, fmtLatency, fmtTokens, logTone, modelOrTool, providerTile, ringPct, ringTone, windowTime } from "./view";
 
@@ -73,8 +74,8 @@ describe("csv", () => {
   it("has the same columns as the table, one line per row, metadata only", () => {
     const csv = logsToCsv([row(), row({ id: 2, kind: "chat", model: "gemini/gemini-3.8-flash", tool: null, tokensIn: 412, tokensOut: 188, latencyMs: 1100, stream: true, status: 429, errorClass: "key_rate_limit" })]);
     const lines = csv.trim().split("\r\n");
-    expect(lines[0]).toBe(LOG_CSV_HEADER.join(","));
-    expect(LOG_CSV_HEADER).toEqual(["Time (WIB)", "Key", "Client", "Model / tool", "Tokens in", "Tokens out", "Latency ms", "Status", "Stream", "Error class"]);
+    expect(lines[0]).toBe(logCsvHeader().join(","));
+    expect(logCsvHeader()).toEqual(["Time (WIB)", "Key", "Client", "Model / tool", "Tokens in", "Tokens out", "Latency ms", "Status", "Stream", "Error class"]);
     expect(lines).toHaveLength(3);
     expect(lines[1]).toBe("2026-10-13 07:41:12,laptop-agents,gemini-cli/0.9.0,MCP · get_app,,,180,200,no,");
     expect(lines[2]).toBe("2026-10-13 07:41:12,laptop-agents,gemini-cli/0.9.0,gemini/gemini-3.8-flash,412,188,1100,429,yes,key_rate_limit");
@@ -109,5 +110,17 @@ describe("logTime", () => {
     const now = new Date("2026-10-13T05:00:00Z");
     expect(logTime(new Date("2026-10-13T00:41:12Z"), now)).toBe("07:41:12");
     expect(logTime(new Date("2026-10-12T16:41:12Z"), now)).toBe("10-12 23:41:12");
+  });
+});
+
+describe("csv and log times in the configured zone (1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+  it("names the zone in the header and writes local times", () => {
+    resetTimeZoneForTests("Asia/Kolkata");
+    expect(logCsvHeader()[0]).toBe("Time (Asia/Kolkata)");
+    const lines = logsToCsv([row()]).trim().split("\r\n");
+    expect(lines[0].startsWith("Time (Asia/Kolkata),Key,")).toBe(true);
+    expect(lines[1].startsWith("2026-10-13 06:11:12,")).toBe(true);
+    expect(windowTime(new Date("2026-10-13T00:41:12Z"))).toBe("06:11:12");
   });
 });

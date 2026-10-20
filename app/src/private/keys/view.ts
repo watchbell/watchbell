@@ -1,5 +1,5 @@
 import type { State } from "@/lib/status";
-import { ago, clock, dayMonth, wibDate } from "@/lib/time";
+import { ago, calendarDate, clock, dayMonth } from "@/lib/time";
 import { type KeyStatus, keyStatus } from "./key";
 
 // What the keys table shows per row. Pure, so the wording is tested without rendering.
@@ -17,7 +17,7 @@ type Times = { createdAt: Date; expiresAt: Date | null; revokedAt: Date | null; 
 
 export function keyView(k: Times, now: Date): { status: KeyStatus; state: State; label: string; created: string; expires: string; lastUsed: string } {
   const status = keyStatus(k, now);
-  const { day, month, year } = k.expiresAt ? wibDate(k.expiresAt) : { day: 0, month: "", year: 0 };
+  const { day, month, year } = k.expiresAt ? calendarDate(k.expiresAt) : { day: 0, month: "", year: 0 };
   return {
     status,
     ...KEY_STATE[status],

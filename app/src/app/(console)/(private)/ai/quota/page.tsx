@@ -12,6 +12,7 @@ import { groupedQuota } from "@/private/ui/deps";
 import { LimitsForm } from "./limits-form";
 import { NoAccess } from "@/components/no-access";
 import { pageGate } from "@/lib/auth";
+import { zoneName } from "@/lib/time";
 
 const sourceText = (r: { source: "header" | "own"; used: number | null; limit: number | null }) =>
   r.source === "header" ? "from the provider's headers" : `Watchbell's count of ${(r.used ?? 0).toLocaleString("en-US")} / ${(r.limit ?? 0).toLocaleString("en-US")}`;
@@ -46,7 +47,7 @@ export default async function QuotaPage() {
       <RouterQuotaSection view={router} now={now} />
 
       <div className="grid grid-cols-1 gap-4 min-[1001px]:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
-        <Card title="Provider usage" meta="Today (WIB) · last 7 days" flush>
+        <Card title="Provider usage" meta={`Today (${zoneName()}) · last 7 days`} flush>
           {usage.length === 0 ? (
             <EmptyState title="No provider connected" action={<Link href="/ai/providers" className={buttonClass({ size: "sm" })}>Bring your own key</Link>}>
               Connect a provider to see its requests and tokens here.

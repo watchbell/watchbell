@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import { RETENTION_DAYS } from "@/lib/collector/retention";
 import { TASKS } from "@/lib/collector/schedule";
 import { BUDGET_DEFAULTS } from "@/lib/settings/budget";
-import { budgetRows, durationText, everyText, retentionRows, runRows, taskScheduleRows, truncate, WATCHDOG_MESSAGES_PER_DAY } from "./settings";
+import { budgetRows, durationText, everyText, retentionRows, retentionSchedule, runRows, taskScheduleRows, truncate, WATCHDOG_MESSAGES_PER_DAY, zoneSetting } from "./settings";
 
 const apps = { total: 0, read: 0, enabled: 0 };
 
@@ -109,5 +110,48 @@ describe("retentionRows", () => {
     expect(rows.find((r) => r.kind === "Raw checks")?.keeps).toBe(`${RETENTION_DAYS.checks} days`);
     expect(rows.find((r) => r.kind === "Stored logs")?.keeps).toBe("7 days");
     expect(retentionRows({ ...RETENTION_DAYS, events: 30 }).find((r) => r.kind === "Events")?.keeps).toBe("30 days");
+  });
+});
+
+describe("texts in the configured zone (1.1)", () => {
+  afterEach(() => {
+    resetTimeZoneForTests();
+    vi.unstubAllEnvs();
+  });
+
+  it("say WIB by default", () => {
+    resetTimeZoneForTests();
+    expect(retentionSchedule()).toBe("Cleaned daily at 03:00 WIB");
+    expect(zoneSetting(false)).toMatchObject({ zone: "Asia/Jakarta", label: "WIB", text: "Time zone: Asia/Jakarta (WIB). To change it, set WATCHBELL_TIMEZONE in .env." });
+  });
+
+  it("name another zone (self-host)", () => {
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    resetTimeZoneForTests("America/New_York");
+    expect(retentionSchedule()).toBe("Cleaned daily at 03:00 America/New_York");
+    expect(zoneSetting().zone).toBe("America/New_York");
+    expect(["EST", "EDT"]).toContain(zoneSetting().label);
+    expect(zoneSetting().text).toMatch(/^Time zone: America\/New_York \(E[SD]T\)\. To change it, set WATCHBELL_TIMEZONE in \.env\.$/);
+  });
+});
+
+describe("the Settings time zone row (fix round 1)", () => {
+  afterEach(() => {
+    resetTimeZoneForTests();
+    vi.restoreAllMocks();
+  });
+
+  it("in cloud says the daily job keeps Vercel Cron's time and where the variable is set", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    const z = zoneSetting(true);
+    expect(z.text).toMatch(/^Time zone: Europe\/Berlin \(CES?T\)\. To change it, set WATCHBELL_TIMEZONE as a Vercel environment variable and redeploy\.$/);
+    expect(z.follows).toMatch(/^Times and the digest \(07:00\) follow it\. The daily job is Vercel Cron at 20:00 UTC \(2[12]:00 CES?T\)\.$/);
+    expect(zoneSetting(false).follows).toBe("Times, the daily job (03:00) and the digest (07:00) follow it.");
+  });
+
+  it("names a refused setting instead of showing the fallback silently", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    resetTimeZoneForTests("Asia/Jakata");
+    expect(zoneSetting(false).text).toBe("WATCHBELL_TIMEZONE=Asia/Jakata isn't a time zone; using Asia/Jakarta (WIB). Set an IANA name such as Europe/Berlin in .env.");
   });
 });

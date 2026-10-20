@@ -1,13 +1,13 @@
 import type { LogLine } from "@/lib/data/logs-db";
-import { clock } from "@/lib/time";
+import { clockSeconds } from "@/lib/time";
 
-// A log line as the browser gets it: the time is already WIB text, the message already scrubbed on the server.
+// A log line as the browser gets it: the time is already text in the configured zone, the message already scrubbed on the server.
 export type WireLine = { id: string; time: string; level: string; app: string; text: string };
 
-// clock() gives HH:MM in WIB; seconds are the same in every whole-hour zone, so they come from the ISO string.
+// HH:MM:SS in the configured zone, all three read from the zone (lib/time.ts), not from the UTC ISO string.
 export function toWire(l: LogLine): WireLine {
   return {
-    id: l.id, time: `${clock(l.at)}${l.at.toISOString().slice(16, 19)}`, level: l.level, app: l.app,
+    id: l.id, time: clockSeconds(l.at), level: l.level, app: l.app,
     text: [l.method, l.path, l.status, l.message].filter((x) => x !== null && x !== "").join(" "),
   };
 }

@@ -3,7 +3,7 @@ import type { ModelTest } from "@/private/ai/providers/routing";
 import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { settings } from "@/db/schema";
-import { wibDay, wibDayStart } from "@/lib/view/uptime";
+import { dayKey, dayStart } from "@/lib/time";
 import { AI_DEFAULT_MODEL_SETTING, type CallKind } from "@/private/ai/types";
 import { aiAgents, aiProviders, aiUsage, apiKeys } from "@/private/db/schema";
 import { providerSlug } from "@/private/ui/slug";
@@ -94,7 +94,7 @@ export type OverviewCounts = {
 
 // The four Overview tiles. "Today" is the WIB day, like every other day count in the console.
 export async function overviewCounts(now: Date): Promise<OverviewCounts> {
-  const dayStart = wibDayStart(wibDay(now));
+  const today = dayStart(dayKey(now));
   const since = new Date(now.getTime() - 24 * HOUR);
   const [providers, keyRows, usage, agents] = await Promise.all([
     db().select({ name: aiProviders.name, kind: aiProviders.kind, enabled: aiProviders.enabled, isDefault: aiProviders.isDefault, lastTestStatus: aiProviders.lastTestStatus }).from(aiProviders).orderBy(desc(aiProviders.isDefault), asc(aiProviders.name)),
@@ -103,7 +103,7 @@ export async function overviewCounts(now: Date): Promise<OverviewCounts> {
       requests: count(),
       rateLimited: sql<number>`count(*) filter (where ${aiUsage.status} = 429)`.mapWith(Number),
       refused: sql<number>`count(*) filter (where ${aiUsage.status} in (401, 403))`.mapWith(Number),
-    }).from(aiUsage).where(gte(aiUsage.at, dayStart)),
+    }).from(aiUsage).where(gte(aiUsage.at, today)),
     db().select({ clientName: aiAgents.clientName, lastSeenAt: aiAgents.lastSeenAt }).from(aiAgents).where(gte(aiAgents.lastSeenAt, since)).orderBy(desc(aiAgents.lastSeenAt)).limit(50),
   ]);
   const live = keyRows.filter((k) => !k.revokedAt && !(k.expiresAt && k.expiresAt <= now));
@@ -133,7 +133,7 @@ export type KeyUsageRow = { id: string; name: string; ratePerMin: number; lastMi
 
 // Per-key table on Quota: the key's limit, calls in the last 60 s and calls today (WIB), from ai_usage in one grouped query.
 export async function keyUsage(now: Date): Promise<KeyUsageRow[]> {
-  const dayStart = wibDayStart(wibDay(now));
+  const today = dayStart(dayKey(now));
   const minuteAgo = new Date(now.getTime() - 60_000);
   const [keys, usage] = await Promise.all([
     db().select({ id: apiKeys.id, name: apiKeys.name, ratePerMin: apiKeys.ratePerMin, expiresAt: apiKeys.expiresAt, lastUsedAt: apiKeys.lastUsedAt }).from(apiKeys).where(isNull(apiKeys.revokedAt)).orderBy(asc(apiKeys.name)).limit(100),
@@ -141,7 +141,7 @@ export async function keyUsage(now: Date): Promise<KeyUsageRow[]> {
       keyId: aiUsage.keyId,
       today: count(),
       lastMinute: sql<number>`count(*) filter (where ${aiUsage.at} >= ${minuteAgo.toISOString()}::timestamptz)`.mapWith(Number),
-    }).from(aiUsage).where(and(gte(aiUsage.at, dayStart), isNotNull(aiUsage.keyId))).groupBy(aiUsage.keyId),
+    }).from(aiUsage).where(and(gte(aiUsage.at, today), isNotNull(aiUsage.keyId))).groupBy(aiUsage.keyId),
   ]);
   const by = new Map(usage.map((r) => [r.keyId, r]));
   return keys

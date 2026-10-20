@@ -171,11 +171,16 @@ database, prints a one-time setup code and opens http://localhost:3100/setup in 
 | Command | What it does |
 |---|---|
 | `watchbell` | Start Watchbell (`--no-open` skips the browser) |
+| `watchbell --host 0.0.0.0` | Open it to your network for this run (`--port <n>` for another port); prints the addresses and what to secure first |
 | `watchbell stop` / `watchbell status` | Stop it cleanly / show whether it runs and where |
-| `watchbell service install` | Start it when you log in (systemd user service or a per-user Scheduled Task, no admin) |
+| `watchbell update` | Update to the latest version (a service is stopped and started again) |
+| `watchbell service install` | Start it when you log in (systemd user service, per-user Scheduled Task or launchd agent, no admin) |
 | `watchbell reset-login <email>` | Locked out? Set a temporary password (while Watchbell is stopped) |
 
-Update with `npm install -g watchbell@latest`; your settings and data stay in `~/.watchbell/`.
+Update with `watchbell update`; your settings and data stay in `~/.watchbell/`. From 1.0.x, update once by hand
+(1.0 has no `watchbell update`): `watchbell stop` or stop the service, then `npm install -g watchbell@latest`. No
+telemetry: the only request of its own is a once-a-day check of registry.npmjs.org for a newer version
+(`WATCHBELL_NO_UPDATE_CHECK=1` turns it off).
 
 ### From the source, with the installers
 
@@ -217,7 +222,7 @@ of as a service, run `npm run start:selfhost` in `app/`; if you are ever locked 
 flowchart LR
   subgraph machine["Your machine"]
     console["Watchbell console<br/>localhost:3100"]
-    scheduler["Built-in scheduler<br/>collector every minute,<br/>daily job at 03:00 WIB"]
+    scheduler["Built-in scheduler<br/>collector every minute,<br/>daily job at 03:00 local time"]
     db[("PGlite database<br/>app/data")]
     console --- db
     scheduler --> db
@@ -231,12 +236,14 @@ flowchart LR
 - **Local database.** PGlite (Postgres compiled to WebAssembly) keeps everything in `app/data`. You don't need a
   database server.
 - **Built-in scheduler.** A collector runs every minute (each task only when its own interval has passed), alert rules
-  run after every collector run, and a daily job runs at 03:00 WIB. Nothing runs while the machine is asleep. A missed
-  daily job runs once when Watchbell is back.
+  run after every collector run, and a daily job runs at 03:00 in your time zone. Nothing runs while the machine is
+  asleep. A missed daily job runs once when Watchbell is back.
 - **Your own provider tokens.** Watchbell reads each provider through its official API with a token you create. It
   encrypts tokens with your `OPS_ENCRYPTION_KEY` and uses them only to talk to that provider.
 - **Nothing phones home.** Watchbell talks only to the providers, notification channels, AI provider and Google Drive
   you set up, plus public status pages and RDAP. There is no telemetry, and no account with the Watchbell project.
+  The npm package also checks registry.npmjs.org once a day for a newer version (`WATCHBELL_NO_UPDATE_CHECK=1` turns
+  it off).
 
 ## Requirements
 
@@ -282,11 +289,12 @@ it on a machine that stays on. [More](docs/faq.md#what-happens-when-my-laptop-sl
 **Can I run it on a server?** Yes. The same installer works on a Linux server. Put a reverse proxy with HTTPS in front
 if you want to reach it from elsewhere. [More](docs/faq.md#can-i-run-it-on-a-server-instead-of-a-laptop)
 
-**Is there a Docker image?** Not in version 1.0. Use the installers or the
+**Is there a Docker image?** Not yet. Use the installers or the
 [manual steps](docs/install.md#macos-and-manual-installs).
 
-**Why are times in WIB?** Schedules and message times use Western Indonesian Time (UTC+7), where Watchbell was first
-written. The time zone isn't a setting yet. [More](docs/faq.md#why-are-times-shown-in-wib)
+**Which time zone does it use?** The one in `WATCHBELL_TIMEZONE`. A new install gets your computer's: the installers
+and the npm CLI write it into a new `.env`, and you can change it there. An install from before 1.1 stays on WIB
+until you set it. [More](docs/faq.md#which-time-zone-does-watchbell-use)
 
 See the [FAQ](docs/faq.md) for the rest.
 

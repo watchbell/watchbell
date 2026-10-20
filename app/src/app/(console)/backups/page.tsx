@@ -44,8 +44,8 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
       <div className="grid grid-cols-1 gap-4 min-[721px]:grid-cols-2 min-[1101px]:grid-cols-4">
         <Card title="Google Drive"><DriveStateBlock state={state} folderName={folderLabel(folder)} /></Card>
         <Card title="Next backup">
-          <span className={metric}>{next.runsOn.replace(", ~03:00 WIB", "")}</span>
-          <p className={sub}>Covers {next.covers}{next.runsOn.includes("03:00") ? " · ~03:00 WIB, with the daily job" : ""}</p>
+          <span className={metric}>{next.date ?? next.runsOn}</span>
+          <p className={sub}>Covers {next.covers} · {next.at}, with the daily job</p>
         </Card>
         <Card title="Keep"><span className={metric}>{KEEP_TEXT}</span><p className={sub}>Then moved to trash</p></Card>
         <Card title="Drive access"><span className={cn(metric, "font-mono text-[18px]")}>drive.file</span><p className={sub}>Can&apos;t see your other files</p></Card>

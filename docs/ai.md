@@ -44,8 +44,8 @@ Once a provider is connected:
 
 - **Ask** (AI Gateway › Ask): questions about your console ("which apps were down this week, and why?"), answered by
   your provider from a scrubbed snapshot of your console data. Questions are kept 7 days.
-- **Advisor notes**: twice a day, at 07:00 and 19:00 WIB, one provider call writes short notes about the apps that need
-  attention. They show on Overview and the app pages. Switch them off, or pick their model, on **AI Gateway › Models**.
+- **Advisor notes**: twice a day, at 07:00 and 19:00 in your time zone, one provider call writes short notes about the
+  apps that need attention. They show on Overview and the app pages. Switch them off, or pick their model, on **AI Gateway › Models**.
 - **Summaries and explanations**: a short daily summary of the recommendations, and an AI explanation on an app's
   problems, each made with your default model.
 - **Playground**: try a model with your owner session. "Plain" sends only your messages; "Ask the console" adds a

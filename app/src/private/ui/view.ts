@@ -1,3 +1,4 @@
+import { clockSeconds, dayKey } from "@/lib/time";
 import type { LogRow } from "@/private/ai/views-db";
 
 // Pure formatting for the AI Gateway pages (no DB, safe in client components).
@@ -26,9 +27,9 @@ export function fmtCtx(n: number | null): string {
   return n >= 1000 ? `${Math.round(n / 1024)}k` : String(n);
 }
 
-// "07:41:12" on the WIB clock (the console shows every time in WIB).
-export const windowTime = (d: Date): string => d.toLocaleTimeString("en-GB", { timeZone: "Asia/Jakarta", hour12: false });
-export const windowDateTime = (d: Date): string => `${d.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" })} ${windowTime(d)}`;
+// "07:41:12" on the configured zone's clock (lib/time.ts; WIB by default), like every time in the console.
+export const windowTime = (d: Date): string => clockSeconds(d);
+export const windowDateTime = (d: Date): string => `${dayKey(d)} ${windowTime(d)}`;
 
 export type ProviderBrief = { name: string; kind: string; enabled: boolean; isDefault: boolean; lastTestStatus: number | null };
 
@@ -58,8 +59,7 @@ export function topQuotaRows(groups: QuotaGroupLike[], n = 2): QuotaPreviewRow[]
   return [...daily, ...flat.filter((r) => !daily.includes(r))].slice(0, n);
 }
 
-// A log row's time: the WIB clock with seconds for today, "10-12 23:41:12" for an earlier day.
+// A log row's time: the local clock with seconds for today, "10-12 23:41:12" for an earlier day.
 export function logTime(d: Date, now: Date): string {
-  const day = (x: Date) => x.toLocaleDateString("en-CA", { timeZone: "Asia/Jakarta" });
-  return day(d) === day(now) ? windowTime(d) : `${day(d).slice(5)} ${windowTime(d)}`;
+  return dayKey(d) === dayKey(now) ? windowTime(d) : `${dayKey(d).slice(5)} ${windowTime(d)}`;
 }

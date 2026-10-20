@@ -1,9 +1,10 @@
 import { gunzipSync } from "node:zlib";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import { buildAliasBook } from "@/lib/view/display-name";
 import {
   type BackupInput, buildTabs, csvCell, csvName, dueMonth, folderLabel, gzipCsv, monthLabel, monthOf, monthRange, nextBackupMonth, previousMonth, rawCsv,
-  retentionPlan, sheetTitle, wibStamp,
+  localStamp, retentionPlan, sheetTitle,
 } from "./content";
 
 const book = buildAliasBook([
@@ -27,7 +28,29 @@ describe("months in WIB", () => {
     expect(monthLabel("2026-10")).toBe("October 2026");
     expect(sheetTitle("2026-10")).toBe("Watchbell · 2026-10");
     expect(csvName("2026-10")).toBe("watchbell-2026-10-raw.csv.gz");
-    expect(wibStamp(new Date("2026-10-31T20:05:00Z"))).toBe("2026-11-01 03:05");
+    expect(localStamp(new Date("2026-10-31T20:05:00Z"))).toBe("2026-11-01 03:05");
+  });
+});
+
+describe("months in another zone (Europe/Berlin, 1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+
+  it("bounds a month at local midnight, with summer and winter offsets", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    // October 2026 starts in summer time (UTC+2) and ends in winter time (UTC+1).
+    expect(monthRange("2026-10")).toEqual({ start: new Date("2026-09-30T22:00:00Z"), end: new Date("2026-10-31T23:00:00Z") });
+    expect(monthRange("2026-03")).toEqual({ start: new Date("2026-02-28T23:00:00Z"), end: new Date("2026-03-31T22:00:00Z") });
+    expect(monthRange("2026-12").end).toEqual(new Date("2026-12-31T23:00:00Z"));
+    expect(monthOf(new Date("2026-10-31T22:59:59Z"))).toBe("2026-10");
+    expect(monthOf(new Date("2026-10-31T23:00:00Z"))).toBe("2026-11");
+    expect(localStamp(new Date("2026-10-31T23:05:00Z"))).toBe("2026-11-01 00:05");
+  });
+
+  it("Asia/Kolkata: the month turns at 18:30 UTC", () => {
+    resetTimeZoneForTests("Asia/Kolkata");
+    expect(monthRange("2026-11").start).toEqual(new Date("2026-10-31T18:30:00Z"));
+    expect(monthOf(new Date("2026-10-31T18:29:00Z"))).toBe("2026-10");
+    expect(monthOf(new Date("2026-10-31T18:30:00Z"))).toBe("2026-11");
   });
 });
 
@@ -47,8 +70,26 @@ describe("dueMonth (B4)", () => {
     expect(dueMonth([{ month: "2026-10", status: "ok" }], now)).toBeNull();
   });
   it("says when the next one runs", () => {
-    expect(nextBackupMonth([{ month: "2026-09", status: "ok" }], new Date("2026-10-15T03:00:00Z"))).toEqual({ runsOn: "1 November 2026, ~03:00 WIB", covers: "October 2026" });
+    expect(nextBackupMonth([{ month: "2026-09", status: "ok" }], new Date("2026-10-15T03:00:00Z"))).toEqual({ runsOn: "1 November 2026, ~03:00 WIB", covers: "October 2026", date: "1 November 2026", at: "~03:00 WIB" });
     expect(nextBackupMonth([], new Date("2026-10-15T03:00:00Z")).covers).toBe("September 2026");
+  });
+  it("gives the page the date and the time apart (1.1), so nothing parses runsOn", () => {
+    expect(nextBackupMonth([], new Date("2026-10-15T03:00:00Z"))).toEqual({ runsOn: "the next daily run (~03:00 WIB)", covers: "September 2026", date: null, at: "~03:00 WIB" });
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    resetTimeZoneForTests("Europe/Berlin");
+    try {
+      expect(nextBackupMonth([{ month: "2026-09", status: "ok" }], new Date("2026-10-15T03:00:00Z"))).toEqual({
+        runsOn: "1 November 2026, ~03:00 Europe/Berlin", covers: "October 2026", date: "1 November 2026", at: "~03:00 Europe/Berlin",
+      });
+      const o = Object.fromEntries(buildTabs(input()).find((t) => t.title === "Overview")!.rows.filter((r) => r.length === 2).map(([k, v]) => [k, v]));
+      expect(o.Covers).toBe("2026-10-01 00:00 to 2026-11-01 00:00 Europe/Berlin");
+      expect(buildTabs(input()).find((t) => t.title === "Incidents")!.rows[0]).toContain("Started (Europe/Berlin)");
+      vi.stubEnv("WATCHBELL_MODE", ""); // cloud: Vercel Cron at 20:00 UTC, 22:00 CEST in October
+      expect(nextBackupMonth([], new Date("2026-10-15T03:00:00Z")).at).toBe("~22:00 CEST");
+    } finally {
+      resetTimeZoneForTests();
+      vi.unstubAllEnvs();
+    }
   });
 });
 

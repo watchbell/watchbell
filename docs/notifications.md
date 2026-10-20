@@ -15,8 +15,8 @@ they are set up on **Alerts › Notifications** (owner only; everyone else sees 
 - **Telegram and Discord:** one message per collector run, listing every alert that opened, is still firing (repeated
   every 6 hours) or resolved. Auto-action proposals and results also go to Telegram (see
   [Auto-actions](auto-actions.md)).
-- **Email digest:** one email a day at 07:00 WIB (UTC+7): what fired, what resolved, uptime and stored errors of the
-  last 24 hours.
+- **Email digest:** one email a day at 07:00 in your [time zone](configuration.md#time-zone): what fired, what
+  resolved, uptime and stored errors of the last 24 hours.
 
 Each channel has **Send test**, and a switch to turn it off without forgetting its settings. If a send fails, the
 reason shows under the channel.

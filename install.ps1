@@ -210,6 +210,19 @@ function New-Base64UrlSecret([int]$count) {
   return [Convert]::ToBase64String((New-RandomBytes $count)).TrimEnd('=').Replace('+', '-').Replace('/', '_')
 }
 
+# This computer's IANA time zone (Europe/Berlin) as Node.js names it, or '' when it can't name a usable one. Written as
+# WATCHBELL_TIMEZONE into a NEW app\.env only; an existing file keeps the app's default, Asia/Jakarta.
+function Get-MachineTimeZone {
+  if (-not $script:NodePath) { return '' }
+  # The few old names ICU still prefers are written by their current name (Asia/Calcutta -> Asia/Kolkata). Keep this
+  # map and the name rule below in step with app\src\lib\time.ts (LEGACY_ZONES, ZONE_NAME), install.sh and the CLI.
+  # A full Area/Location name or UTC/GMT only: an abbreviation (CET, IST) means another zone to Postgres.
+  $probe = "const m={'Asia/Calcutta':'Asia/Kolkata','Asia/Katmandu':'Asia/Kathmandu','Asia/Saigon':'Asia/Ho_Chi_Minh','Asia/Rangoon':'Asia/Yangon'};const r=Intl.DateTimeFormat().resolvedOptions().timeZone;const z=m[r]??r;new Intl.DateTimeFormat('en-US',{timeZone:z});process.stdout.write(z)"
+  $r = Get-ProgramOutput $script:NodePath @('-e', $probe)
+  if ($r.Code -eq 0 -and $r.Text -cmatch '^(?:UTC|GMT|[A-Za-z]+(?:/[A-Za-z0-9_+-]+)+)$') { return $r.Text }
+  return ''
+}
+
 function Test-PortBusy([int]$port) {
   try {
     $conn = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop
@@ -454,6 +467,10 @@ function Write-EnvFile([System.Collections.Specialized.OrderedDictionary]$existi
       '# Watchbell settings, written by install.ps1. app\.env.example explains every option.',
       '# Never change or lose OPS_ENCRYPTION_KEY: it encrypts the tokens you save, without it they cannot be read.'
     ) + @($fill.Keys | ForEach-Object { "$_=$($fill[$_])" })
+    $zone = Get-MachineTimeZone
+    if ($zone) {
+      $out += @("# Times, the daily job (03:00) and the digest (07:00) follow this zone: this computer's when the file was made.", "WATCHBELL_TIMEZONE=$zone")
+    }
     [IO.File]::WriteAllText($EnvFile, ($out -join "`r`n") + "`r`n", $utf8)
     Write-Host "Created $EnvFile with new secrets (they are not shown here)."
   } elseif ($fill.Count -eq 0) {

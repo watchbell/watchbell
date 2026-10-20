@@ -1,5 +1,5 @@
 import type { State } from "@/lib/status";
-import { TZ } from "@/lib/time";
+import { dayKey } from "@/lib/time";
 
 export type SummaryCounts = { ok: number; warn: number; err: number; maint: number; paused: number };
 
@@ -25,20 +25,12 @@ export type Bar = { day: string; tone: Tone; title: string; deploy?: string };
 export const BAR_DAYS = 90;
 export const UPTIME_DAYS = 30;
 
-// R3: days are WIB calendar days ("2026-10-13").
-export function wibDay(d: Date): string {
-  return d.toLocaleDateString("en-CA", { timeZone: TZ });
-}
+// R3: days are local calendar days ("2026-10-13") in the configured zone: lib/time.ts dayKey and dayStart.
 
-// The last n WIB days, oldest first, ending today. Calendar maths on the date itself, so month ends just work.
+// The last n local days, oldest first, ending today. Calendar maths on the date itself, so month ends just work.
 export function dayKeys(now: Date, n: number): string[] {
-  const [y, m, d] = wibDay(now).split("-").map(Number);
+  const [y, m, d] = dayKey(now).split("-").map(Number);
   return Array.from({ length: n }, (_, i) => new Date(Date.UTC(y, m - 1, d - (n - 1 - i))).toISOString().slice(0, 10));
-}
-
-// WIB is UTC+7 all year, so a WIB day starts at 17:00 UTC the day before.
-export function wibDayStart(day: string): Date {
-  return new Date(`${day}T00:00:00+07:00`);
 }
 
 // R3: no data grey, no failures green, 1–2 failures amber, 3 or more red (as "down after 3"). U5: a day with only
@@ -67,7 +59,7 @@ export function mergeDays(rows: MonitorDay[]): Map<string, Map<string, DayCount>
 
 const agoLabel = (n: number) => (n === 0 ? "Today" : n === 1 ? "1 day ago" : `${n} days ago`);
 
-// The 90-bar strip: oldest left, newest right, each with a tooltip. `deploys` (WIB day → commits, A1) marks the days
+// The 90-bar strip: oldest left, newest right, each with a tooltip. `deploys` (local day → commits, A1) marks the days
 // that had a production deploy and names them in the tooltip.
 export function uptimeBars(days: Map<string, DayCount> | undefined, now: Date, n = BAR_DAYS, deploys?: Map<string, string>): Bar[] {
   return dayKeys(now, n).map((day, i) => {

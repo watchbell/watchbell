@@ -12,6 +12,10 @@ Your data stays in `app/data` on your machine. Watchbell talks only to the provi
 when you ask, to act), to the notification services you set up, to your AI provider and Google Drive if you set them
 up, and to public status pages and RDAP for domain expiry. There is no telemetry and nothing is sent to the Watchbell project.
 
+The one request of its own is in the npm package: `watchbell` and `watchbell status` ask registry.npmjs.org at most
+once a day whether a newer version exists. It is a plain request for the version number, with no id and nothing about
+you or your install, and `WATCHBELL_NO_UPDATE_CHECK=1` (or `NO_UPDATE_NOTIFIER=1`, or `CI`) turns it off.
+
 ### Can I run it on a server instead of a laptop?
 
 Yes. The same installer works on a Linux server. Run `loginctl enable-linger "$USER"` so the service keeps running
@@ -26,7 +30,7 @@ stays on.
 
 ### Is there a Docker image?
 
-Not in version 1.0. Use the installers or the [manual steps](install.md#macos-and-manual-installs).
+Not yet. Use the installers or the [manual steps](install.md#macos-and-manual-installs).
 
 ### Is there an installer for macOS?
 
@@ -55,11 +59,16 @@ can make an HTTP request to Watchbell.
 Only if the job can reach Watchbell's address. A job on the same machine can call `http://localhost:3100/api/ping/<token>`.
 Jobs elsewhere need the console to be reachable (LAN access or a reverse proxy).
 
-### Why are times shown in WIB?
+### Which time zone does Watchbell use?
 
-Watchbell's schedules (the daily job at 03:00, the email digest at 07:00, advisor notes at 07:00 and 19:00) and the
-times in messages use Western Indonesian Time (WIB, UTC+7, no daylight saving), the time zone it was first written
-for. The time zone isn't a setting yet.
+The one in `WATCHBELL_TIMEZONE` in your `.env`, an IANA name such as `Europe/Berlin`. Only a new install gets your
+computer's zone: the installers and the npm CLI write it when they create the file. An upgraded install keeps its
+`.env` and so stays on WIB until you add the setting, and a `.env` copied by hand from `.env.example` has to set it
+too. Change it and restart Watchbell to use another. Every time in the console and in messages is
+shown in that zone, and the schedules follow its clock, daylight saving included: the daily job at 03:00, the email
+digest at 07:00, advisor notes at 07:00 and 19:00. Without the setting (an install from before 1.1) it is
+Western Indonesian Time (WIB, `Asia/Jakarta`), where Watchbell was first written. See
+[Configuration](configuration.md#time-zone).
 
 ### Can I change the language?
 
@@ -75,7 +84,9 @@ is kept. See [Backups](backups.md#why-appenv-matters).
 
 ### How do I update?
 
-See [Upgrade](install.md#upgrade).
+With the npm package: `watchbell update` (see [Quick install with npm](install.md#quick-install-with-npm)). From
+1.0.x, update once by hand, because 1.0 has no `watchbell update`: `watchbell stop` (or stop the service), then
+`npm install -g watchbell@latest`. With the installers: see [Upgrade](install.md#upgrade).
 
 ### How do I report a bug or a security problem?
 

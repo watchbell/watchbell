@@ -4,13 +4,36 @@ import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
 import { checks, deployments, monitors, resources, rollupsHourly } from "@/db/schema";
 import type { DeployMark } from "@/lib/view/deploy-marks";
-import { BAR_DAYS, type DayCount, dayKeys, firstBucket, mergeDays, type MonitorDay, series, wibDayStart } from "@/lib/view/uptime";
+import { dayStart, timeZone, utcOffsetMinutes } from "@/lib/time";
+import { BAR_DAYS, type DayCount, dayKeys, firstBucket, mergeDays, type MonitorDay, series } from "@/lib/view/uptime";
 import { WINDOWS } from "@/lib/view/windows";
 
 const HOUR = 3_600_000;
 
-// R3: days are WIB calendar days. Rollup hours are whole UTC hours and WIB is UTC+7, so an hour never straddles two days.
-const wibDaySql = (col: AnyPgColumn) => sql<string>`to_char(${col} at time zone 'Asia/Jakarta', 'YYYY-MM-DD')`;
+// R3: days are local calendar days in the configured zone (lib/time.ts), passed as a bound parameter. A rollup hour is a
+// whole UTC hour and counts on the local day it starts in: exact in whole-hour zones (WIB), off by the extra 30 or 45
+// minutes at midnight in a zone such as Asia/Kolkata. Each use of the expression binds its own parameter, and Postgres
+// can't tell two parameters are equal, so a query groups by this column's position (DAY_COLUMN), not by the expression.
+// A zone Postgres doesn't know (its tz data can be older than Node's) is read instead as a fixed offset from UTC: see
+// monitorDays.
+type DayZone = string | { offsetMinutes: number };
+const localDaySql = (col: AnyPgColumn, zone: DayZone) =>
+  typeof zone === "string"
+    ? sql<string>`to_char(${col} at time zone ${zone}, 'YYYY-MM-DD')`
+    : sql<string>`to_char((${col} at time zone 'UTC') + ${sql.raw(`interval '${Math.trunc(zone.offsetMinutes)} minutes'`)}, 'YYYY-MM-DD')`;
+// `day` is the second field of both selects in monitorDays.
+const DAY_COLUMN = sql.raw("2");
+
+// Postgres's "time zone "…" not recognized" (SQLSTATE 22023), also when drizzle wraps it (DrizzleQueryError.cause).
+export function unknownZoneError(e: unknown): boolean {
+  let x: unknown = e;
+  for (let i = 0; i < 4 && x && typeof x === "object"; i++, x = (x as { cause?: unknown }).cause) {
+    const { code, message } = x as { code?: unknown; message?: unknown };
+    if (code === "22023" && typeof message === "string" && /time zone .* not recognized/i.test(message)) return true;
+  }
+  return false;
+}
+type Warned = { __watchbellPgZoneWarned?: boolean };
 
 // Bucket start in epoch ms, binned from the same origin as BIN_ORIGIN in view/uptime. The size is a fixed literal,
 // not a parameter, so the expression in SELECT and GROUP BY is identical.
@@ -39,16 +62,33 @@ export async function rolledUntil(): Promise<Date | null> {
   return r?.h ? new Date(r.h.getTime() + HOUR) : null;
 }
 
-// Checks and failures per monitor per WIB day for the last 90 days (R3): rollups for the rolled-up hours, raw checks
+// Checks and failures per monitor per local day for the last 90 days (R3): rollups for the rolled-up hours, raw checks
 // (at most 7 days) for the rest. At most monitors × 90 rows come back. U5: `checks` and `failures` leave out the
 // checks made inside a maintenance window, which are counted apart as `maint` (a day of only those is drawn blue).
-export async function monitorDays(monitorIds: string[], now: Date): Promise<Map<string, Map<string, DayCount>>> {
+// A zone Postgres refuses never takes the Uptime, app or public status pages down: the days are then counted at the
+// zone's offset at `now` (exact but for an hour around a daylight-saving change), with one warning per process.
+// `zone` is for tests (a name Postgres doesn't know); callers leave it out.
+export async function monitorDays(monitorIds: string[], now: Date, zone: string = timeZone()): Promise<Map<string, Map<string, DayCount>>> {
   if (!monitorIds.length) return new Map();
-  const since = wibDayStart(dayKeys(now, BAR_DAYS)[0]);
+  try {
+    return await readMonitorDays(monitorIds, now, zone);
+  } catch (e) {
+    if (!unknownZoneError(e)) throw e;
+    const g = globalThis as Warned;
+    if (!g.__watchbellPgZoneWarned) {
+      g.__watchbellPgZoneWarned = true;
+      console.warn(`Watchbell: the database doesn't know the time zone ${zone}; uptime days use its current UTC offset instead.`);
+    }
+    return readMonitorDays(monitorIds, now, { offsetMinutes: utcOffsetMinutes(now) });
+  }
+}
+
+async function readMonitorDays(monitorIds: string[], now: Date, zone: DayZone): Promise<Map<string, Map<string, DayCount>>> {
+  const since = dayStart(dayKeys(now, BAR_DAYS)[0]);
   const until = await rolledUntil();
   const rawFrom = rawChecksFrom(since, until, now);
-  const rDay = wibDaySql(rollupsHourly.hour);
-  const cDay = wibDaySql(checks.at);
+  const rDay = localDaySql(rollupsHourly.hour, zone);
+  const cDay = localDaySql(checks.at, zone);
   // The rollup and raw-check reads are independent once `until` is known: sent together (perf P4).
   const [rolled, raw]: MonitorDay[][] = await Promise.all([
     until
@@ -58,7 +98,7 @@ export async function monitorDays(monitorIds: string[], now: Date): Promise<Map<
         maint: sql<number>`sum(${rollupsHourly.maintenance})::int`,
       }).from(rollupsHourly)
         .where(and(inArray(rollupsHourly.monitorId, monitorIds), gte(rollupsHourly.hour, since), lt(rollupsHourly.hour, until)))
-        .groupBy(rollupsHourly.monitorId, rDay)
+        .groupBy(rollupsHourly.monitorId, DAY_COLUMN)
       : Promise.resolve([]),
     db().select({
       monitorId: checks.monitorId, day: cDay,
@@ -68,7 +108,7 @@ export async function monitorDays(monitorIds: string[], now: Date): Promise<Map<
     })
       .from(checks)
       .where(and(inArray(checks.monitorId, monitorIds), gte(checks.at, rawFrom)))
-      .groupBy(checks.monitorId, cDay),
+      .groupBy(checks.monitorId, DAY_COLUMN),
   ]);
   return mergeDays([...rolled, ...raw]);
 }

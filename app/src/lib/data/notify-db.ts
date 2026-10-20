@@ -18,7 +18,7 @@ import { sendEmail } from "@/lib/notify/resend";
 import { type SendResult, sendTelegram } from "@/lib/notify/telegram";
 import { tookText } from "@/lib/view/alerts";
 import { type AliasBook, EMPTY_BOOK, hideAlert, hideEmails } from "@/lib/view/display-name";
-import { wibDay } from "@/lib/view/uptime";
+import { dayKey } from "@/lib/time";
 import { PAGE_ROWS } from "@/lib/view/windows";
 
 const DROP_AFTER_MS = 30 * 60_000;
@@ -225,7 +225,7 @@ export async function taskDigest(now: Date, deps: { build?: () => Promise<Digest
   if (!env.resendKey || !env.digestFrom || !ch?.row.enabled || !ch.config?.to) return;
   const { resendKey, digestFrom } = env;
   const to = ch.config.to;
-  const day = wibDay(now);
+  const day = dayKey(now);
   const step = await stepDigest(now, {
     lastSentDay: last,
     state: (rows.find((r) => r.key === DIGEST_STATE_KEY)?.value as DigestState | undefined) ?? null,

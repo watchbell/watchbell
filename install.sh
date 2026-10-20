@@ -179,6 +179,19 @@ gen_secret() {
   printf '%s' "$out"
 }
 
+# machine_zone -> this computer's IANA time zone (Europe/Berlin) on stdout, as Node.js names it; nothing when Node
+# can't name a usable one. Written as WATCHBELL_TIMEZONE into a NEW app/.env only (an existing file keeps the app's
+# default, Asia/Jakarta).
+machine_zone() {
+  local out=""
+  # The few old names ICU still prefers are written by their current name (Asia/Calcutta -> Asia/Kolkata). Keep this
+  # map and the name rule below in step with app/src/lib/time.ts (LEGACY_ZONES, ZONE_NAME), install.ps1 and the CLI.
+  out="$("$WP_NODE_BIN" -e 'const m={"Asia/Calcutta":"Asia/Kolkata","Asia/Katmandu":"Asia/Kathmandu","Asia/Saigon":"Asia/Ho_Chi_Minh","Asia/Rangoon":"Asia/Yangon"};const r=Intl.DateTimeFormat().resolvedOptions().timeZone;const z=m[r]||r;try{new Intl.DateTimeFormat("en-US",{timeZone:z});process.stdout.write(z||"")}catch{}' 2>/dev/null)" || out=""
+  # A full Area/Location name or UTC/GMT only: an abbreviation (CET, IST) means another zone to Postgres.
+  [[ "$out" =~ ^(UTC|GMT|[A-Za-z]+(/[A-Za-z0-9_+-]+)+)$ ]] || return 0
+  printf '%s' "$out"
+}
+
 # env_default KEY -> the value install.sh writes for KEY (in REPLY).
 env_default() {
   case "$1" in
@@ -580,6 +593,8 @@ ensure_env_file() {
 
   WP_ENV_TMP="$WP_ENV_FILE.tmp.$$"
   if [ ! -f "$WP_ENV_FILE" ]; then
+    local zone
+    zone="$(machine_zone)"
     (
       umask 077
       {
@@ -587,6 +602,10 @@ ensure_env_file() {
         printf '# OPS_ENCRYPTION_KEY unlocks the tokens you save in the console; without it they cannot be read again.\n'
         printf '# Every setting is explained in app/.env.example and docs/configuration.md.\n'
         for k in "${WP_ENV_KEYS[@]}"; do printf '%s=%s\n' "$k" "${fill[$k]}"; done
+        if [ -n "$zone" ]; then
+          printf "# Times, the daily job (03:00) and the digest (07:00) follow this zone: this computer's when the file was made.\n"
+          printf 'WATCHBELL_TIMEZONE=%s\n' "$zone"
+        fi
       } >"$WP_ENV_TMP"
     ) || fail "could not write $WP_ENV_FILE"
     chmod 600 "$WP_ENV_TMP" && mv -f -- "$WP_ENV_TMP" "$WP_ENV_FILE" || fail "could not write $WP_ENV_FILE"

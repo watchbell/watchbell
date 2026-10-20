@@ -28,11 +28,16 @@ const SHIMS = {
     '@echo off',
     'if /i "%~1"=="-v" goto version',
     'if /i "%~1"=="--version" goto version',
+    'if /i "%~1"=="-e" goto zone',
     '>>"%WATCHBELL_STUB_LOG%" echo node %* ^| cwd=%CD%',
     'echo stub node started: %* ^| cwd=%CD%',
     'exit /b 0',
     ':version',
     'echo %WATCHBELL_STUB_NODE_VERSION%',
+    'exit /b 0',
+    ':zone',
+    'if not defined WATCHBELL_STUB_TZ exit /b 1',
+    'echo %WATCHBELL_STUB_TZ%',
     'exit /b 0',
   ]),
   'npm.cmd': crlf([
@@ -715,4 +720,42 @@ describe('install.ps1 (Windows)', { skip: !IS_WINDOWS && 'Windows only', concurr
     assert.ok(u.stdout.includes('uninstall'))
     assert.deepEqual(box.calls(), [])
   })
+  test('a new app\.env gets this computer\'s time zone as WATCHBELL_TIMEZONE; an existing one never does', async () => {
+    const box = makeBox()
+    const port = await freePort()
+    const r = await ps(box, 'install.ps1', ['--yes', '--no-service', '--port', String(port)], { env: { WATCHBELL_STUB_TZ: 'Europe/Berlin' } })
+    assert.equal(r.code, 0, r.out)
+    const text = fs.readFileSync(box.envFile, 'utf8')
+    assert.equal(parseEnv(text).WATCHBELL_TIMEZONE, 'Europe/Berlin')
+    assert.equal(text.split(/\r?\n/).filter((l) => l.startsWith('WATCHBELL_TIMEZONE=')).length, 1)
+    // A re-run changes nothing, even when the computer's zone has changed since.
+    const again = await ps(box, 'install.ps1', ['--yes', '--no-service'], { env: { WATCHBELL_STUB_TZ: 'America/New_York' } })
+    assert.equal(again.code, 0, again.out)
+    assert.equal(fs.readFileSync(box.envFile, 'utf8'), text)
+
+    const old = makeBox()
+    fs.writeFileSync(old.envFile, `WATCHBELL_MODE=selfhost\r\nPORT=${await freePort()}\r\n`)
+    const kept = await ps(old, 'install.ps1', ['--yes', '--no-service'], { env: { WATCHBELL_STUB_TZ: 'Europe/Berlin' } })
+    assert.equal(kept.code, 0, kept.out)
+    assert.equal(parseEnv(fs.readFileSync(old.envFile, 'utf8')).WATCHBELL_TIMEZONE, undefined)
+  })
+
+  test('a time zone Node.js can\'t name is left out of the new app\.env', async () => {
+    for (const env of [{}, ...['not a zone', 'CET', 'IST', 'BST', 'AET', 'ECT', 'EST', 'EST5EDT', 'GB'].map((z) => ({ WATCHBELL_STUB_TZ: z }))]) {
+      const box = makeBox()
+      const r = await ps(box, 'install.ps1', ['--yes', '--no-service', '--port', String(await freePort())], { env })
+      assert.equal(r.code, 0, r.out)
+      assert.ok(!fs.readFileSync(box.envFile, 'utf8').includes('WATCHBELL_TIMEZONE'), JSON.stringify(env))
+    }
+  })
+
+  test('UTC, GMT and full Area/Location names are written as they are (the same rule as the app)', async () => {
+    for (const zone of ['UTC', 'GMT', 'Etc/UTC', 'Etc/GMT-7', 'Etc/GMT+5', 'US/Pacific', 'America/Argentina/Buenos_Aires']) {
+      const box = makeBox()
+      const r = await ps(box, 'install.ps1', ['--yes', '--no-service', '--port', String(await freePort())], { env: { WATCHBELL_STUB_TZ: zone } })
+      assert.equal(r.code, 0, r.out)
+      assert.equal(parseEnv(fs.readFileSync(box.envFile, 'utf8')).WATCHBELL_TIMEZONE, zone)
+    }
+  })
 })
+

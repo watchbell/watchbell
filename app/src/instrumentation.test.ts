@@ -248,9 +248,9 @@ describe("register", () => {
       vi.stubEnv("WATCHBELL_MODE", "selfhost");
       vi.stubEnv("NEXT_MANUAL_SIG_HANDLE", "true");
       await register();
-      // SIGHUP (a closed terminal) only when this process has a terminal; shutdown.test.ts covers both cases.
-      const tty = Boolean(process.stdin.isTTY || process.stdout.isTTY);
-      expect(Object.keys(handlers).sort()).toEqual(tty ? ["SIGHUP", "SIGINT", "SIGTERM"] : ["SIGINT", "SIGTERM"]);
+      // SIGHUP is always handled: a clean stop with a terminal, ignored without one (nohup, services); shutdown.test.ts
+      // covers both cases.
+      expect(Object.keys(handlers).sort()).toEqual(["SIGHUP", "SIGINT", "SIGTERM"]);
       handlers.SIGTERM();
       handlers.SIGINT();
       await flush();

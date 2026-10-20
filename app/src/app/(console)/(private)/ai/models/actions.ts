@@ -5,6 +5,7 @@ import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import { isUuid } from "@/lib/ids";
+import { zoneName } from "@/lib/time";
 import { LIMITS, minutesText } from "@/lib/rate-limit";
 import { limit } from "@/lib/rate-limit-db";
 import { SCAN_BUDGET_MS, testModels } from "@/private/ai/providers/model-test";
@@ -139,7 +140,7 @@ export async function setAdvisorNotesAction(enabled: boolean, model: string | nu
     await saveAdvisorSettings({ enabled, model });
     await audit(`AI advisor notes ${enabled ? "on" : "off"}${model ? ` · ${model}` : ""}`, member.userId);
     refresh();
-    return { ok: true, message: enabled ? `Advisor notes are on (${model ?? "default model"}), at 07:00 and 19:00 WIB.` : "Advisor notes are off." };
+    return { ok: true, message: enabled ? `Advisor notes are on (${model ?? "default model"}), at 07:00 and 19:00 ${zoneName()}.` : "Advisor notes are off." };
   }, { requireActionMember });
 }
 

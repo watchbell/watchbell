@@ -2,7 +2,7 @@
 // need escaping), Discord gets plain markdown with mentions off. Both stay inside their limits (4,096 / 2,000).
 import type { Severity } from "@/db/schema";
 import type { NotifyLang } from "@/lib/notify/lang";
-import { clock } from "@/lib/time";
+import { clock, zoneLabel } from "@/lib/time";
 import type { Pending } from "./lifecycle";
 import { translateAlertText } from "./translate-id";
 
@@ -86,10 +86,10 @@ export function composeMessage(list: Notice[], now: Date, siteUrl: string, lang:
   const extra = (n: Notice) => [n.causedBy ? `${tx.causedBy} ${n.causedBy}` : "", n.provider ? `${n.provider} ${tx.incident}` : ""].filter(Boolean).join(" · ");
   const more = (k: number) => `\n+${k} ${tx.more}`;
   const telegram = build(list, 4096,
-    (n) => `\n<b>${head(n)}${esc(n.ruleKey)} · ${esc(n.title)}</b>\n${esc(message(n))}${extra(n) ? `\n<i>${esc(extra(n))}</i>` : ""}${step(n) ? `\n👉 ${esc(step(n)!)}` : ""}\n${tx.since} ${clock(n.startedAt)} WIB`,
-    `<b>Watchbell</b>: ${summary(list, lang)} · ${clock(now)} WIB`, `\n<a href="${esc(url)}">${tx.open}</a>`, more);
+    (n) => `\n<b>${head(n)}${esc(n.ruleKey)} · ${esc(n.title)}</b>\n${esc(message(n))}${extra(n) ? `\n<i>${esc(extra(n))}</i>` : ""}${step(n) ? `\n👉 ${esc(step(n)!)}` : ""}\n${tx.since} ${clock(n.startedAt)} ${zoneLabel(n.startedAt)}`,
+    `<b>Watchbell</b>: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n<a href="${esc(url)}">${tx.open}</a>`, more);
   const discord = build(list, 2000,
     (n) => `\n**${head(n)}${n.ruleKey} · ${n.title.replace(/[*_`~|\[\]<>]/g, "")}**\n${message(n).replace(/[*_`~|\[\]<>]/g, "")}${extra(n) ? `\n_${extra(n)}_` : ""}${step(n) ? `\n👉 ${step(n)}` : ""}`,
-    `**Watchbell**: ${summary(list, lang)} · ${clock(now)} WIB`, `\n${url}`, more);
+    `**Watchbell**: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n${url}`, more);
   return { telegram, discord };
 }

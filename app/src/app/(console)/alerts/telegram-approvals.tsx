@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/kit";
+import { clock } from "@/lib/time";
 import { type ApprovalsView, approvalsStatus, disableApprovals, enableApprovals, telegramLinkCode } from "./telegram-approvals-actions";
 
 // Stage 9 slice 7: the approval buttons under the Telegram channel (Owners only; the page renders it for nobody else and
@@ -53,7 +54,7 @@ export function TelegramApprovals() {
   }
 
   const state = !v ? (failed ?? "Checking…") : !v.on ? "Off" : v.linked ? "On · linked to your Telegram account" : "On · not linked yet";
-  const until = code ? new Date(code.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+  const until = code ? clock(new Date(code.expiresAt)) : "";
 
   return (
     <div className="mt-1 basis-full rounded-md border border-line px-3 py-2 text-[13px]">

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import type { Finding, SecurityRow } from "@/lib/security/types";
 import { checkNowText, cveTag, securityBanners, securityNote } from "./security";
 
@@ -63,5 +64,17 @@ describe("checkNowText", () => {
     expect(checkNowText("x", row({ version: "16.4.0" }))).toBe("No known vulnerabilities for Next.js 16.4.0.");
     expect(checkNowText("x", row({ status: "unknown", version: null, reason: "version not exposed" }))).toBe("Couldn't read the Next.js version: version not exposed.");
     expect(checkNowText("x", row({ status: "error", reason: "OSV.dev answered HTTP 503" }))).toBe("The check failed: OSV.dev answered HTTP 503.");
+  });
+});
+
+describe("securityNote in the configured zone (1.1)", () => {
+  afterEach(() => {
+    resetTimeZoneForTests();
+    vi.unstubAllEnvs();
+  });
+  it("names the zone of the daily job (self-host)", () => {
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    resetTimeZoneForTests("Europe/Berlin");
+    expect(securityNote(null)?.text).toBe("Not checked yet. The daily job checks at 03:00 Europe/Berlin.");
   });
 });

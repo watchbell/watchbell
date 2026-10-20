@@ -1,11 +1,13 @@
 import { cookies } from "next/headers";
 import { Shell } from "@/components/shell/shell";
+import { TimeZoneSync } from "@/components/time-zone-sync";
 import { requirePageMember } from "@/lib/auth";
 import { extensions } from "@/lib/extensions";
 import { lastCollectorRunAt } from "@/lib/collector/run";
 import { openAlertCount } from "@/lib/data/alerts-db";
 import { aliasBook } from "@/lib/data/cached";
 import { isDemo, mode } from "@/lib/mode";
+import { timeZone } from "@/lib/time";
 import { EMPTY_BOOK, SHOT_COOKIE } from "@/lib/view/display-name";
 
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
@@ -23,5 +25,11 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   const ext = member.role === "owner" ? { nav: extensions.nav, palette: extensions.palette, office: extensions.office } : { nav: [], palette: [] };
   // Self-host accounts have a password of their own to change (/account/password); cloud sign-in is by email link.
   const user = mode() === "selfhost" ? { email: member.email, role: member.role, hasPassword: true } : { email: member.email, role: member.role };
-  return <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext}>{children}</Shell>;
+  // Client components format times too: they get the server's zone first (lib/time.ts, WATCHBELL_TIMEZONE).
+  return (
+    <>
+      <TimeZoneSync zone={timeZone()} />
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext}>{children}</Shell>
+    </>
+  );
 }

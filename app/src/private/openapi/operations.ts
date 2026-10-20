@@ -1,4 +1,5 @@
 import { OPENAPI_COPY } from "@/lib/copy/edition";
+import { vercelCronText } from "@/lib/time";
 import type { Scope } from "@/private/auth/api-key";
 
 // The ONE hand-written description of every endpoint (R9, R10). The OpenAPI 3.1 document (spec.ts) and the API explorer
@@ -257,7 +258,12 @@ export const OPS: ApiOp[] = [
   },
   {
     id: "daily", operationId: "runDaily", tag: "Scheduler", method: "get", path: "/api/daily", access: "secret", scope: null, scopeLabel: "cron secret",
-    summary: "Daily job", description: "Vercel Cron at 03:00 WIB with Authorization: Bearer <CRON_SECRET>. Docs only.",
+    summary: "Daily job",
+    // Vercel Cron runs at 20:00 UTC (03:00 WIB), shown in the configured zone (1.1, D6). A getter, so the zone is read when
+    // the page renders: the browser loads this module before the console layout has handed it the server's zone.
+    get description() {
+      return `Vercel Cron at ${vercelCronText()} with Authorization: Bearer <CRON_SECRET>. Docs only.`;
+    },
     docsOnly: true, bearerEnv: "CRON_SECRET", params: [],
     response: { status: 200, contentType: "application/json", description: "The job's summary.", example: pretty({ ok: true, errors: [] }) },
   },

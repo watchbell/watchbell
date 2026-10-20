@@ -6,6 +6,7 @@ import { UptimeBars } from "@/components/charts";
 import { StateIcon, Status } from "@/components/status";
 import { publicView } from "@/lib/data/public-status-db";
 import { parseSlug } from "@/lib/public-status";
+import { zoneName } from "@/lib/time";
 
 // U6: the console's only page without sign-in. Rendered on first visit, then served from the cache and regenerated at
 // most once a minute (ISR), so a crawler costs at most one database read a minute. No cookies(), headers() or
@@ -53,13 +54,13 @@ export default async function PublicStatusPage({ params }: Props) {
         <span className="grid size-7 shrink-0 place-items-center rounded-[7px] bg-brand font-mono text-xs font-semibold text-on-brand" aria-hidden>WB</span>
         <div className="min-w-0">
           <h1 className="text-[20px]">{v.title}</h1>
-          <p className="mt-0.5 text-ink-soft">Updated every minute · times in WIB</p>
+          <p className="mt-0.5 text-ink-soft">Updated every minute · times in {zoneName()}</p>
         </div>
       </header>
       {v.announcement && <Notice state="info" title={v.announcement} />}
       {v.maintenance.map((m, i) => (
         <Notice key={i} state="maint" title={m.active ? "Maintenance now" : "Scheduled maintenance"}>
-          {`${m.from}–${m.to} WIB.`}{m.note && ` ${m.note}`}
+          {`${m.from}–${m.to} ${zoneName()}.`}{m.note && ` ${m.note}`}
         </Notice>
       ))}
       <section className="min-w-0 rounded-lg border border-line bg-surface">

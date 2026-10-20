@@ -31,17 +31,21 @@ const SERVICE = "watchbell.service";
 const TASK = "Watchbell";
 const UNIT_MARKER = "# Written by the watchbell CLI";
 const LAUNCHD_LABEL = "watchbell";
+const LAUNCHD_THROTTLE_S = 60;
+const PLIST_MARKER = "<!-- Written by the watchbell CLI";
 const READY_TIMEOUT_MS = 120_000;
 
 // [usage, description]: --help prints them all (a test checks that every command is listed).
 export const COMMANDS = [
   ["watchbell [start] [--no-open]", "Start Watchbell (the default). First run creates ~/.watchbell, prints the setup code and opens /setup."],
   ["watchbell start --new-key", "Start with a new OPS_ENCRYPTION_KEY when it was lost (tokens saved with the old key can't be read)."],
+  ["watchbell start --host <addr> --port <n>", "Listen on this address and port for this run (also with run). 0.0.0.0 opens it to your network."],
   ["watchbell run", "Start in the foreground for a service manager (never opens a browser)."],
   ["watchbell stop [--timeout <seconds>]", "Ask the running Watchbell to stop cleanly (default wait 30 s)."],
   ["watchbell status", "Show whether Watchbell runs, its address and folders (exit 0 running, 3 not running)."],
-  ["watchbell service install [--yes]", "Start Watchbell when you log in: a systemd user service (Linux) or a Scheduled Task (Windows)."],
+  ["watchbell service install [--yes]", "Start Watchbell when you log in: a systemd user service (Linux), a Scheduled Task (Windows) or a launchd agent (macOS)."],
   ["watchbell service uninstall [--yes]", "Remove that service or task. Your settings and data stay."],
+  ["watchbell update", "Update to the latest version with the npm next to this Node.js (an installed service is stopped and started again)."],
   ["watchbell reset-login <email>", "Give an account a new temporary password and remove its authenticator (Watchbell stopped)."],
   ["watchbell --version", "Print the version."],
   ["watchbell --help", "Print this help."],
@@ -60,16 +64,28 @@ export function helpText(version) {
     "(a HOST or PORT your shell exports is ignored); WATCHBELL_HOST, WATCHBELL_PORT and WATCHBELL_SITE_URL in the",
     "environment override them. Other variables set in the environment win over the file, except DATABASE_URL, which",
     "is read from the file only.",
+    "",
+    "watchbell start and watchbell status ask registry.npmjs.org at most once a day whether a newer version exists (a",
+    "plain GET of the version number, nothing about you). WATCHBELL_NO_UPDATE_CHECK=1 turns that off.",
   ].join("\n");
 }
 
 // ---------------------------------------------------------------------------------------------------- arguments
 
-const COMMAND_NAMES = ["start", "run", "stop", "status", "service", "reset-login"];
-const OPTION_OWNER = { "--no-open": "start", "--new-key": "start", "--timeout": "stop", "--yes": "service" };
+const COMMAND_NAMES = ["start", "run", "stop", "status", "service", "reset-login", "update"];
+const OPTION_OWNER = { "--no-open": "start", "--new-key": "start", "--timeout": "stop", "--yes": "service", "--host": ["start", "run"], "--port": ["start", "run"] };
+// An IPv4 or IPv6 address (brackets allowed) or a host name; never something that looks like an option.
+const HOST_ARG = /^(?:\[[0-9A-Fa-f:.]+\]|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)$/;
+// Brackets off, IPv6 in lower case, every spelling of the all-zero IPv6 address as "::" (the health check knows that one).
+const normalizeHostArg = (v) => {
+  const h = v.replace(/^\[(.*)\]$/, "$1");
+  if (!h.includes(":")) return h;
+  return /^[0:]+$/.test(h) ? "::" : h.toLowerCase();
+};
+const isPortArg = (v) => /^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535;
 
 export function parseArgs(argv) {
-  const opts = { command: null, args: [], open: true, newKey: false, yes: false, timeout: null, help: false, version: false };
+  const opts = { command: null, args: [], open: true, newKey: false, yes: false, timeout: null, help: false, version: false, host: null, port: null };
   const errors = [];
   const used = [];
   for (let i = 0; i < argv.length; i++) {
@@ -92,6 +108,18 @@ export function parseArgs(argv) {
         i++;
       } else errors.push("--timeout needs a number of seconds (1-9999)");
       used.push("--timeout");
+    } else if (/^--(host|port)(=|$)/.test(a)) {
+      // --host <addr> / --port <n>, or --host=<addr> / --port=<n>. A value that is no option is taken even when wrong.
+      const name = a.slice(2, 6);
+      const inline = a.length > 6 ? a.slice(7) : undefined;
+      const v = inline ?? argv[i + 1];
+      if (inline === undefined && v !== undefined && !v.startsWith("-")) i++;
+      if (name === "host") {
+        if (v !== undefined && HOST_ARG.test(v)) opts.host = normalizeHostArg(v);
+        else errors.push("--host needs an address, such as 0.0.0.0 or 192.168.1.20");
+      } else if (v !== undefined && isPortArg(v)) opts.port = String(Number(v));
+      else errors.push("--port needs a port number (1-65535)");
+      used.push(`--${name}`);
     } else if (a.startsWith("-")) errors.push(`unknown option ${a}`);
     else if (opts.command === null) opts.command = a;
     else opts.args.push(a);
@@ -99,8 +127,8 @@ export function parseArgs(argv) {
   opts.command ??= "start";
   if (!COMMAND_NAMES.includes(opts.command)) errors.push(`unknown command ${opts.command}`);
   for (const o of used) {
-    const owner = OPTION_OWNER[o];
-    if (opts.command !== owner) errors.push(`${o} only goes with watchbell ${owner}`);
+    const owners = [OPTION_OWNER[o]].flat();
+    if (!owners.includes(opts.command)) errors.push(`${o} only goes with ${owners.map((c) => `watchbell ${c}`).join(" or ")}`);
   }
   if (opts.command === "service") {
     if (opts.args.length !== 1 || !["install", "uninstall"].includes(opts.args[0])) errors.push("use watchbell service install or watchbell service uninstall");
@@ -203,6 +231,12 @@ const isSet = (v) => typeof v === "string" && v.trim() !== "";
 // "~/wb" quoted in a dotfile reaches us unexpanded; without this it would be a folder named "~" in the current one.
 const expandTilde = (p, homedir) => (/^~(?=$|[\\/])/.test(p) ? path.join(homedir, p.slice(1)) : p);
 
+const defaultSiteUrl = (host, port) => {
+  const h = unbracket(host);
+  if (isLoopbackHost(h) || ANY_ADDRESS.has(h)) return `http://localhost:${port}`;
+  return h.includes(":") ? `http://[${h}]:${port}` : `http://${h}:${port}`;
+};
+
 export function resolveContext(d) {
   const home = isSet(d.env.WATCHBELL_HOME) ? path.resolve(expandTilde(d.env.WATCHBELL_HOME.trim(), d.homedir)) : path.join(d.homedir, ".watchbell");
   const envFile = path.join(home, ".env");
@@ -217,6 +251,7 @@ export function resolveContext(d) {
   // Nor the address: tcsh exports HOST=<machine name> (which would bind to the LAN) and many developer shells export
   // PORT. HOST, PORT and SITE_URL come from the file; only WATCHBELL_HOST / WATCHBELL_PORT / WATCHBELL_SITE_URL override.
   const address = (key) => {
+    if (isSet(d.cliAddress?.[key])) return d.cliAddress[key]; // --host / --port, for this run only
     const own = d.env[`WATCHBELL_${key}`];
     if (isSet(own)) return own.trim();
     return isSet(fromFile[key]) ? fromFile[key].trim() : null;
@@ -228,7 +263,9 @@ export function resolveContext(d) {
   // and opened is where the server listens. A SITE_URL of the user's own (a proxy, a name) is kept as it is.
   const filePort = isSet(fromFile.PORT) ? fromFile.PORT.trim() : "3100";
   let siteUrl = address("SITE_URL")?.replace(/\/+$/, "") ?? null;
-  if (siteUrl === null || (!isSet(d.env.WATCHBELL_SITE_URL) && siteUrl === `http://localhost:${filePort}`)) siteUrl = `http://localhost:${port}`;
+  // A host that is one address of another network (not this machine, not all of them) answers only there, so the CLI's
+  // own SITE_URL names that address: localhost would not answer.
+  if (siteUrl === null || (!isSet(d.env.WATCHBELL_SITE_URL) && siteUrl === `http://localhost:${filePort}`)) siteUrl = defaultSiteUrl(host, port);
   const serverDir = path.join(d.pkgRoot, "server");
   return { home, envFile, merged, dataDir, host, port, siteUrl, serverDir, lockFile: lockFileOf(dataDir), healthUrl: healthUrlOf(host, port) };
 }
@@ -269,6 +306,28 @@ const ENV_HEADER = [
 ];
 
 class HomeError extends Error {}
+
+/**
+ * This computer's IANA time zone (Europe/Berlin), written as WATCHBELL_TIMEZONE into a NEW .env only: an install
+ * from before 1.1 keeps Asia/Jakarta, the app's default. Null when Intl can't name a usable zone (then nothing is
+ * written and the default applies). `d.timeZone` replaces Intl in tests. The few old names ICU still prefers are
+ * written by their current name (Asia/Calcutta → Asia/Kolkata). Only a full Area/Location name or UTC/GMT is written:
+ * an abbreviation (CET, IST) means another zone to Postgres. Both keep in step with lib/time.ts (ZONE_NAME,
+ * LEGACY_ZONES; src/lib/time.test.ts compares the copies).
+ */
+const ZONE_NAME = /^(?:UTC|GMT|[A-Za-z]+(?:\/[A-Za-z0-9_+\-]+)+)$/i;
+const LEGACY_ZONES = { "Asia/Calcutta": "Asia/Kolkata", "Asia/Katmandu": "Asia/Kathmandu", "Asia/Saigon": "Asia/Ho_Chi_Minh", "Asia/Rangoon": "Asia/Yangon" };
+export function machineTimeZone(d) {
+  try {
+    const found = (d.timeZone ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone))();
+    const zone = typeof found === "string" ? (LEGACY_ZONES[found] ?? found) : found;
+    if (typeof zone !== "string" || !ZONE_NAME.test(zone)) return null;
+    new Intl.DateTimeFormat("en-US", { timeZone: zone }); // throws on a name Intl doesn't know
+    return zone;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Creates <home>, <home>/data and <home>/.env on first run. Later runs only fill keys that are missing or empty; a
@@ -315,7 +374,9 @@ export function ensureHome(ctx, d, { newKey = false } = {}) {
   }
   if (!exists) {
     const nl = d.platform === "win32" ? "\r\n" : "\n";
-    const lines = [...ENV_HEADER, ...[...fill].map(([k, v]) => `${k}=${v}`)];
+    const zone = machineTimeZone(d);
+    const zoneLines = zone ? ["# Times, the daily job (03:00) and the digest (07:00) follow this zone: this computer's when the file was made.", `WATCHBELL_TIMEZONE=${zone}`] : [];
+    const lines = [...ENV_HEADER, ...[...fill].map(([k, v]) => `${k}=${v}`), ...zoneLines];
     fs.writeFileSync(ctx.envFile, lines.join(nl) + nl, { mode: 0o600, flag: "wx" });
     protectEnvFile(ctx.envFile, d, userSid);
     return { created: true, filled: [...fill.keys()] };
@@ -424,12 +485,12 @@ function noteIgnoredShellAddress(ctx, d) {
   for (const [key, used] of [["HOST", ctx.host], ["PORT", ctx.port]]) {
     const shell = d.env[key];
     if (!isSet(shell) || shell.trim() === used) continue;
-    const from = isSet(d.env[`WATCHBELL_${key}`]) ? `WATCHBELL_${key}` : ctx.envFile;
+    const from = isSet(d.cliAddress?.[key]) ? `--${key.toLowerCase()}` : isSet(d.env[`WATCHBELL_${key}`]) ? `WATCHBELL_${key}` : ctx.envFile;
     d.err(`note: ${key}=${shell.trim()} from your shell is ignored: Watchbell uses ${key}=${used} from ${from}. Set WATCHBELL_${key} to override it.`);
   }
 }
 
-async function cmdStart(first, d, { open, foreground, newKey }) {
+async function cmdStart(first, d, { open, foreground, newKey, track }) {
   let ctx = first;
   const serverJs = path.join(ctx.serverDir, "server.js");
   if (!fs.existsSync(serverJs)) {
@@ -474,7 +535,10 @@ async function cmdStart(first, d, { open, foreground, newKey }) {
   warnPortMismatch(ctx, d);
   noteIgnoredShellAddress(ctx, d);
   d.out(`Starting on ${ctx.siteUrl} ...`);
+  // Asked while the server starts, so it never delays the start; said once the server is ready (start only, not run).
+  const update = foreground ? null : checkForUpdate(ctx, d, { background: true });
 
+  if (track) track.spawned = true;
   const child = d.spawn(d.execPath, [serverJs], { cwd: ctx.serverDir, env: serverEnv(ctx), stdio: "inherit" });
   const unsupervise = superviseChild(child, { platform: d.platform, proc: d.proc });
   let exited = false;
@@ -493,6 +557,8 @@ async function cmdStart(first, d, { open, foreground, newKey }) {
     const probe = await probeHealth(ctx.healthUrl, d.fetch);
     if (probe?.status === 200) {
       announce(ctx, d, { open, foreground });
+      announceNetwork(ctx, d);
+      await sayUpdate(update, d);
       break;
     }
     if (d.now() >= deadline) {
@@ -555,6 +621,8 @@ async function cmdStatus(ctx, d) {
   d.out(`  Version:  ${packageVersion(d.pkgRoot)}`);
   d.out(`  Settings: ${ctx.envFile}${fs.existsSync(ctx.envFile) ? "" : " (created on the first start)"}`);
   d.out(`  Data:     ${ctx.dataDir}`);
+  warnServiceNode(ctx, d);
+  await sayUpdate(checkForUpdate(ctx, d), d);
   return running ? 0 : 3;
 }
 
@@ -839,16 +907,20 @@ export function launchdPlist(ctx, d) {
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    `${PLIST_MARKER} (npm package watchbell). Remove it with: watchbell service uninstall -->`,
     '<plist version="1.0">',
     "<dict>",
     `  <key>Label</key><string>${LAUNCHD_LABEL}</string>`,
     "  <key>ProgramArguments</key>",
     `  <array><string>${xml(d.execPath)}</string><string>${xml(d.cliPath)}</string><string>run</string></array>`,
     "  <key>EnvironmentVariables</key>",
-    `  <dict><key>WATCHBELL_HOME</key><string>${xml(ctx.home)}</string></dict>`,
+    `  <dict><key>WATCHBELL_HOME</key><string>${xml(ctx.home)}</string><key>WATCHBELL_SERVICE</key><string>launchd</string></dict>`,
     `  <key>WorkingDirectory</key><string>${xml(ctx.home)}</string>`,
     "  <key>RunAtLoad</key><true/>",
     "  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>",
+    // launchd has no start limit like systemd's StartLimitBurst: at most one start a minute, and `run` gives up with a
+    // clean exit (never restarted) on a failure that won't clear or after LAUNCHD_MAX_FAILURES (runUnderLaunchd).
+    `  <key>ThrottleInterval</key><integer>${LAUNCHD_THROTTLE_S}</integer>`,
     `  <key>StandardOutPath</key><string>${xml(log)}</string>`,
     `  <key>StandardErrorPath</key><string>${xml(log)}</string>`,
     "</dict>",
@@ -856,28 +928,522 @@ export function launchdPlist(ctx, d) {
   ].join("\n");
 }
 
-function macService(action, ctx, d) {
-  const plist = `~/Library/LaunchAgents/${LAUNCHD_LABEL}.plist`;
-  if (action === "uninstall") {
-    d.out("watchbell service changes nothing on macOS. If you set up the launchd agent, remove it with:");
-    d.out(`  launchctl bootout gui/$(id -u)/${LAUNCHD_LABEL} && rm ${plist}`);
+// macOS: a per-user launchd agent in ~/Library/LaunchAgents, loaded into the user's GUI domain (no admin rights).
+const LAUNCHCTL = "/bin/launchctl";
+const plistFileOf = (d) => path.join(d.homedir, "Library", "LaunchAgents", `${LAUNCHD_LABEL}.plist`);
+const guiDomain = (d) => `gui/${d.uid ?? process.getuid?.() ?? os.userInfo().uid}`;
+/** Whether the agent is loaded, and whether its process runs now (launchctl print: "state = running"). */
+function agentState(d) {
+  const r = d.runSync(LAUNCHCTL, ["print", `${guiDomain(d)}/${LAUNCHD_LABEL}`]);
+  return { loaded: r.status === 0, running: r.status === 0 && /^\s*state = running\s*$/m.test(r.stdout ?? "") };
+}
+const agentLoaded = (d) => agentState(d).loaded;
+const BOOTOUT_POLLS = 120; // x 250 ms: up to 30 s for the server to close its database
+const BOOTOUT_IN_PROGRESS = 36; // "Boot-out failed: 36: Operation now in progress"
+
+/**
+ * bootout sends SIGTERM and can return (0, or 36 "in progress") while the job still closes its database; a bootstrap
+ * right then fails with 5 or 37. Waits until launchctl print says the job is gone.
+ */
+async function bootoutAndWait(d) {
+  const target = `${guiDomain(d)}/${LAUNCHD_LABEL}`;
+  const r = d.runSync(LAUNCHCTL, ["bootout", target]);
+  if (r.status !== 0 && r.status !== BOOTOUT_IN_PROGRESS) {
+    d.err(`launchctl bootout ${target} did not work${r.stderr.trim() ? `: ${r.stderr.trim().split(/\r?\n/)[0]}` : ""}`);
+    return false;
+  }
+  for (let i = 0; i < BOOTOUT_POLLS; i++) {
+    if (!agentLoaded(d)) return true;
+    await d.sleep(250);
+  }
+  d.err(`The launchd agent ${LAUNCHD_LABEL} did not stop within 30 s. Wait a moment, then run watchbell service install again.`);
+  return false;
+}
+
+function launchctl(d, ...args) {
+  const r = d.runSync(LAUNCHCTL, args);
+  if (r.status !== 0) d.err(`launchctl ${args.join(" ")} did not work${r.stderr.trim() ? `: ${r.stderr.trim().split(/\r?\n/)[0]}` : ""}`);
+  return r.status === 0;
+}
+
+async function macInstall(ctx, d, yes) {
+  const plistFile = plistFileOf(d);
+  const old = fs.existsSync(plistFile) ? fs.readFileSync(plistFile, "utf8") : null;
+  const foreign = old !== null && !old.includes(PLIST_MARKER);
+  if (foreign) d.out(`${plistFile} already exists and was not written by the watchbell CLI.`);
+  const question = foreign
+    ? `Replace it with an agent for the npm package (settings and data in ${ctx.home})? [y/N] `
+    : `Install the launchd agent ${LAUNCHD_LABEL}, which starts Watchbell when you log in? [y/N] `;
+  if (!(await consent(d, yes, question))) return 1;
+  const { loaded, running } = agentState(d);
+  // A Watchbell in a terminal holds the database; an agent started next to it would fail at every start.
+  if (!running && runningPid(ctx, d) !== null) {
+    d.err('Watchbell is running in a terminal now. Stop it first ("watchbell stop"), then run watchbell service install again.');
+    return 1;
+  }
+  if (!prepareHome(ctx, d)) return 1;
+  fs.mkdirSync(path.dirname(plistFile), { recursive: true });
+  fs.writeFileSync(plistFile, `${launchdPlist(ctx, d)}\n`);
+  d.out(`Wrote ${plistFile}`);
+  // A loaded agent keeps its old definition until it is booted out (bootout stops it with SIGTERM: a clean stop).
+  if (loaded && !(await bootoutAndWait(d))) return 1;
+  if (!launchctl(d, "bootstrap", guiDomain(d), plistFile)) {
+    d.err("Run watchbell service install again in a moment; if it keeps failing, log out and in, then try once more.");
+    return 1;
+  }
+  d.out("");
+  d.out("Watchbell runs as a launchd agent and starts when you log in.");
+  d.out("  Status:  watchbell status");
+  d.out(`  Log:     ${path.join(ctx.home, "watchbell.log")} (it grows; delete it now and then while Watchbell is stopped)`);
+  d.out("  Stop:    watchbell stop (launchd restarts it only after a crash)");
+  d.out("  Remove:  watchbell service uninstall");
+  d.out(`  Address: ${ctx.siteUrl}`);
+  d.out(`  Node.js: ${d.execPath}. After changing or removing this Node.js (nvm, fnm, volta, Homebrew), run watchbell service install again.`);
+  return 0;
+}
+
+async function macUninstall(ctx, d, yes) {
+  const plistFile = plistFileOf(d);
+  if (!fs.existsSync(plistFile)) {
+    d.out(`No launchd agent is installed (${plistFile} does not exist).`);
     return 0;
   }
-  d.out(`watchbell service installs nothing on macOS. To start Watchbell at login with launchd, save this as ${plist}:`);
-  d.out("");
-  d.out(launchdPlist(ctx, d));
-  d.out("");
-  d.out(`then run: launchctl bootstrap gui/$(id -u) ${plist}`);
-  d.out('Stop it cleanly with "watchbell stop" (KeepAlive restarts it only after a crash).');
+  if (!(await consent(d, yes, `Remove the launchd agent ${LAUNCHD_LABEL}? Your settings and data in ${ctx.home} stay. [y/N] `))) return 1;
+  // bootout stops it with SIGTERM: the server closes its database cleanly.
+  if (agentLoaded(d) && !(await bootoutAndWait(d))) return 1;
+  fs.rmSync(plistFile, { force: true });
+  d.out(`Removed ${plistFile}. Your settings and data stay in ${ctx.home}.`);
   return 0;
+}
+
+// launchd restarts a job after every failed exit, with no limit (ThrottleInterval only spaces the starts). Under the
+// agent, `run` therefore ends with a clean exit 0, which KeepAlive does not restart, when the start can't succeed
+// (port taken, database locked, key missing: nothing was started) and after LAUNCHD_MAX_FAILURES failed exits within
+// LAUNCHD_WINDOW_MS (systemd: 5 starts in 2 min, the Scheduled Task: 3 restarts). The count is kept in the home folder.
+const LAUNCHD_MAX_FAILURES = 5;
+const LAUNCHD_WINDOW_MS = 10 * 60 * 1000;
+const LAUNCHD_FAILURES = "launchd-failures.json";
+
+const underLaunchd = (d) => d.env.WATCHBELL_SERVICE === "launchd" || (d.platform === "darwin" && d.env.XPC_SERVICE_NAME === LAUNCHD_LABEL);
+
+function recentFailures(file, now) {
+  try {
+    const list = JSON.parse(fs.readFileSync(file, "utf8"));
+    return Array.isArray(list) ? list.filter((t) => Number.isFinite(t) && t <= now && now - t < LAUNCHD_WINDOW_MS) : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function runUnderLaunchd(ctx, d) {
+  const track = { spawned: false };
+  const code = await cmdStart(ctx, d, { open: false, foreground: true, newKey: false, track });
+  const kick = `launchctl kickstart ${guiDomain(d)}/${LAUNCHD_LABEL}`;
+  const file = path.join(ctx.home, LAUNCHD_FAILURES);
+  if (code === 0) return 0;
+  if (!track.spawned) {
+    d.err(`watchbell: launchd will not start Watchbell again until you fix the problem above. Then run: ${kick} (or log out and in).`);
+    return 0;
+  }
+  const now = d.now();
+  const failures = [...recentFailures(file, now), now];
+  if (failures.length >= LAUNCHD_MAX_FAILURES) {
+    d.err(`watchbell: the server stopped with an error ${failures.length} times in 10 minutes; launchd will not restart it again. See the messages above, then run: ${kick}`);
+    fs.rmSync(file, { force: true });
+    return 0;
+  }
+  try {
+    fs.writeFileSync(file, `${JSON.stringify(failures)}\n`);
+  } catch {
+    // a read-only home: ThrottleInterval still spaces the restarts
+  }
+  return code;
+}
+
+// ---------------------------------------------------------------------------------------------------- service Node.js
+
+// The Node.js path out of what the CLI wrote: the unit's first ExecStart word, the task's command line, the plist's
+// first ProgramArguments string.
+const PS_TASK_ACTION = [
+  "$t = Get-ScheduledTask -TaskName $env:WB_TASK -ErrorAction SilentlyContinue",
+  "if ($null -eq $t) { '{}' } else {",
+  "  $a = @($t.Actions) | Select-Object -First 1",
+  "  [pscustomobject]@{ dir = [string]$a.WorkingDirectory; args = [string]$a.Arguments } | ConvertTo-Json -Compress",
+  "}",
+].join("\n");
+
+const unitUnquote = (s) => s.replace(/\\(.)/g, "$1").replaceAll("%%", "%").replaceAll("$$", "$");
+const xmlText = (s) => s.replaceAll("&quot;", '"').replaceAll("&gt;", ">").replaceAll("&lt;", "<").replaceAll("&amp;", "&");
+
+/** The Node.js the installed service of this package runs, or null (no service, someone else's, or unreadable). */
+export function serviceNodePath(ctx, d) {
+  try {
+    if (d.platform === "linux") {
+      const unit = fs.readFileSync(unitFileOf(d), "utf8");
+      if (!unit.includes(UNIT_MARKER)) return null;
+      const m = /^ExecStart="((?:[^"\\]|\\.)*)"/m.exec(unit);
+      return m ? unitUnquote(m[1]) : null;
+    }
+    if (d.platform === "darwin") {
+      const plist = fs.readFileSync(plistFileOf(d), "utf8");
+      const m = /<key>ProgramArguments<\/key>\s*<array>\s*<string>([^<]*)<\/string>/.exec(plist);
+      return m ? xmlText(m[1]) : null;
+    }
+    if (d.platform === "win32") {
+      const r = powershell(d, PS_TASK_ACTION, { WB_TASK: TASK });
+      if (r.status !== 0) return null;
+      const info = JSON.parse(r.stdout.trim().split(/\r?\n/).filter(Boolean).pop() ?? "{}");
+      if (typeof info.args !== "string" || !sameFolder(info.dir || "", ctx.home)) return null;
+      return /&& "([^"]+)" "/.exec(info.args)?.[1] ?? null;
+    }
+  } catch {
+    // no service file, or one that can't be read: nothing to say
+  }
+  return null;
+}
+
+/** After a Node.js change (nvm, fnm, volta, an upgrade) the service would fail at every login; say how to fix it. */
+function warnServiceNode(ctx, d) {
+  const node = serviceNodePath(ctx, d);
+  if (node && !fs.existsSync(node)) d.err(`The service runs ${node}, which no longer exists. Run: watchbell service install`);
 }
 
 async function cmdService(action, ctx, d, yes) {
   if (d.platform === "linux") return action === "install" ? linuxInstall(ctx, d, yes) : linuxUninstall(ctx, d, yes);
   if (d.platform === "win32") return action === "install" ? windowsInstall(ctx, d, yes) : windowsUninstall(ctx, d, yes);
-  if (d.platform === "darwin") return macService(action, ctx, d);
+  if (d.platform === "darwin") return action === "install" ? macInstall(ctx, d, yes) : macUninstall(ctx, d, yes);
   d.err(`watchbell service is not available on ${d.platform}. Have your service manager run: "${d.execPath}" "${d.cliPath}" run`);
   return 1;
+}
+
+// ---------------------------------------------------------------------------------------------------- update notice
+
+// D8: the only request Watchbell's CLI makes on its own. A plain GET of the public version document, no ids or cookies.
+const REGISTRY_LATEST = "https://registry.npmjs.org/watchbell/latest";
+const UPDATE_CACHE = "update-check.json";
+const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
+const UPDATE_TIMEOUT_MS = 3000;
+const SEMVER = /^(\d{1,9})\.(\d{1,9})\.(\d{1,9})(?:-([0-9A-Za-z.-]{1,64}))?(?:\+[0-9A-Za-z.-]{1,64})?$/;
+
+/** Like a sort compare (<0, 0, >0); a release is newer than its own pre-releases. Null when either is no version. */
+export function compareVersions(a, b) {
+  const x = SEMVER.exec(String(a));
+  const y = SEMVER.exec(String(b));
+  if (!x || !y) return null;
+  for (let i = 1; i <= 3; i++) if (Number(x[i]) !== Number(y[i])) return Number(x[i]) - Number(y[i]);
+  if (!x[4] || !y[4]) return (x[4] ? -1 : 0) - (y[4] ? -1 : 0);
+  const p = x[4].split(".");
+  const q = y[4].split(".");
+  const num = (s) => /^\d+$/.test(s);
+  for (let i = 0; i < Math.max(p.length, q.length); i++) {
+    if (p[i] === undefined) return -1;
+    if (q[i] === undefined) return 1;
+    if (p[i] === q[i]) continue;
+    if (num(p[i]) && num(q[i])) return Number(p[i]) - Number(q[i]);
+    if (num(p[i]) || num(q[i])) return num(p[i]) ? -1 : 1;
+    return p[i] < q[i] ? -1 : 1;
+  }
+  return 0;
+}
+
+const switchedOn = (v) => isSet(v) && !/^(0|false|no|off)$/i.test(v.trim());
+/** WATCHBELL_NO_UPDATE_CHECK, NO_UPDATE_NOTIFIER (the usual opt-out of npm tools) or CI turn the check off. */
+export const updateCheckOff = (env) => ["WATCHBELL_NO_UPDATE_CHECK", "NO_UPDATE_NOTIFIER", "CI"].some((k) => switchedOn(env[k]));
+
+function readUpdateCache(file) {
+  try {
+    const c = JSON.parse(fs.readFileSync(file, "utf8"));
+    const at = Date.parse(c?.checkedAt);
+    return Number.isFinite(at) && typeof c.latest === "string" && SEMVER.test(c.latest) ? { at, latest: c.latest } : null;
+  } catch {
+    return null; // none yet, or not ours to trust: ask again
+  }
+}
+
+/** The registry's latest version; null when offline, slower than 3 s, refused, or answered with something else. */
+async function registryLatest(d, { background = false } = {}) {
+  const ac = new AbortController();
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = (d.setTimer ?? setTimeout)(() => {
+      ac.abort();
+      resolve(null);
+    }, d.updateTimeoutMs ?? UPDATE_TIMEOUT_MS);
+    // start does not wait for the answer when the server fails early: the timer must not keep the CLI alive then.
+    if (background) timer?.unref?.();
+  });
+  const ask = (async () => {
+    const res = await d.fetch(REGISTRY_LATEST, { method: "GET", headers: { accept: "application/json" }, signal: ac.signal });
+    if (!res?.ok) return null;
+    const v = (await res.json())?.version;
+    return typeof v === "string" && SEMVER.test(v.trim()) ? v.trim() : null;
+  })().catch(() => null);
+  try {
+    return await Promise.race([ask, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * This package's version and the registry's latest: from <home>/update-check.json when it is less than 24 h old, else
+ * asked (and the answer saved). A failed ask is saved too, with the last known answer, so an offline machine is not
+ * asked on every start. `force` (watchbell update) always asks and returns only the registry's own answer.
+ */
+async function lookupLatest(ctx, d, { force = false, background = false } = {}) {
+  const current = packageVersion(d.pkgRoot);
+  const file = path.join(ctx.home, UPDATE_CACHE);
+  const cached = readUpdateCache(file);
+  const now = d.now();
+  if (!force && cached && now >= cached.at && now - cached.at < UPDATE_EVERY_MS) return { current, latest: cached.latest };
+  const latest = await registryLatest(d, { background });
+  const keep = latest ?? cached?.latest ?? (SEMVER.test(current) ? current : null);
+  if (keep && fs.existsSync(ctx.home)) {
+    try {
+      fs.writeFileSync(file, `${JSON.stringify({ checkedAt: new Date(now).toISOString(), latest: keep })}\n`);
+    } catch {
+      // a read-only home: the next start asks again
+    }
+  }
+  return { current, latest: force ? latest : (latest ?? cached?.latest ?? null) };
+}
+
+/** D8. Never throws; null unless the registry has a newer version than this package. */
+export async function checkForUpdate(ctx, d, { background = false } = {}) {
+  try {
+    // ~/.watchbell/.env as well as the environment (which wins), like every other setting.
+    if (updateCheckOff(ctx.merged ?? d.env)) return null;
+    const { current, latest } = await lookupLatest(ctx, d, { background });
+    return latest && compareVersions(latest, current) > 0 ? { current, latest } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function sayUpdate(check, d) {
+  const found = check ? await check : null;
+  if (found) d.out(`A newer Watchbell is available: ${found.latest} (this is ${found.current}). Update with: watchbell update`);
+}
+
+// ---------------------------------------------------------------------------------------------------- network (D10)
+
+const unbracket = (h) => h.replace(/^\[(.*)\]$/, "$1");
+export const isLoopbackHost = (host) => {
+  const h = unbracket(String(host)).toLowerCase();
+  return h === "localhost" || h === "::1" || /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+};
+const ANY_ADDRESS = new Set(["0.0.0.0", "::", "0:0:0:0:0:0:0:0"]);
+
+/** The http addresses other computers can use: every network address of this machine for 0.0.0.0 / ::, else the host. */
+export function networkUrls(host, port, interfaces) {
+  const h = unbracket(host);
+  const at = (a) => (a.includes(":") ? `http://[${a}]:${port}` : `http://${a}:${port}`);
+  if (!ANY_ADDRESS.has(h)) return [at(h)];
+  const out = [];
+  for (const list of Object.values(interfaces ?? {})) {
+    for (const i of list ?? []) {
+      if (i.internal) continue;
+      if (i.family === "IPv4" || i.family === 4) out.push(at(i.address));
+      else if (h !== "0.0.0.0" && !/^fe80:/i.test(i.address)) out.push(at(i.address)); // :: also takes IPv6
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** A host other than this machine: where others can open it, what that means, and SITE_URL when it names localhost. */
+function announceNetwork(ctx, d) {
+  if (isLoopbackHost(ctx.host)) return;
+  let urls = [];
+  try {
+    urls = networkUrls(ctx.host, ctx.port, (d.networkInterfaces ?? os.networkInterfaces)());
+  } catch {
+    // no list of addresses: the warning still applies
+  }
+  d.out("");
+  d.out(urls.length ? `Watchbell listens on ${ctx.host}, so other computers can open it at:` : `Watchbell listens on ${ctx.host} (no network address of this machine was found).`);
+  for (const u of urls) d.out(`  ${u}`);
+  d.err("warning: everyone who can reach these addresses gets the Watchbell sign-in page, and plain http sends passwords");
+  d.err("readable on the network. Finish /setup (the owner account) before you share the address, and put HTTPS in front");
+  d.err("(a reverse proxy) before you open it to the internet. Safer for one person: keep HOST=127.0.0.1 and use an SSH");
+  d.err('tunnel (see "Open it from another computer" in the install guide).');
+  let site = null;
+  try {
+    site = new URL(ctx.siteUrl);
+  } catch {
+    // an unreadable SITE_URL is the server's own error
+  }
+  if (site && isLoopbackHost(site.hostname)) {
+    const example = urls[0] ?? `http://<this computer's address>:${ctx.port}`;
+    d.err(
+      `note: SITE_URL is ${ctx.siteUrl}, so links in alerts and messages lead to localhost. Signing in from another computer ` +
+        `works anyway; for links that work there, set SITE_URL=${example} in ${ctx.envFile} (or WATCHBELL_SITE_URL for one run).`,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- update (D9)
+
+const NPM_UPDATE_ARGS = ["install", "-g", "watchbell@latest"];
+const NPM_UPDATE = `npm ${NPM_UPDATE_ARGS.join(" ")}`;
+const PS_START = "Start-ScheduledTask -TaskName $env:WB_TASK";
+
+/** The npm next to the running Node.js (npm.cmd on Windows, run through System32's cmd.exe); null if cmd can't take it. */
+export function npmCommand(d) {
+  const p = d.platform === "win32" ? path.win32 : path.posix;
+  const npm = p.join(p.dirname(d.execPath), d.platform === "win32" ? "npm.cmd" : "npm");
+  if (d.platform !== "win32") return { npm, cmd: npm, args: NPM_UPDATE_ARGS, opts: {} };
+  if (/["%\r\n]/.test(npm)) return null; // cmd expands % even inside quotes
+  return { npm, cmd: system32Tool(d, "cmd.exe"), args: ["/d", "/s", "/c", `""${npm}" ${NPM_UPDATE_ARGS.join(" ")}"`], opts: { windowsVerbatimArguments: true } };
+}
+
+const writableDir = (dir) => {
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The service of the npm package that runs now, with how to stop it cleanly and start it again; else null. */
+async function runningService(ctx, d) {
+  if (d.platform === "linux") {
+    let unit = null;
+    try {
+      unit = fs.readFileSync(unitFileOf(d), "utf8");
+    } catch {
+      return null;
+    }
+    if (!unit.includes(UNIT_MARKER)) return null; // an installer's unit runs a source checkout, not this package
+    if (d.runSync("systemctl", ["--user", "is-active", "--quiet", SERVICE]).status !== 0) return null;
+    return {
+      name: `the systemd user service ${SERVICE}`,
+      stopHint: `systemctl --user stop ${SERVICE}`,
+      startHint: `systemctl --user start ${SERVICE}`,
+      stop: async () => systemctl(d, "stop", SERVICE),
+      start: async () => systemctl(d, "start", SERVICE),
+    };
+  }
+  if (d.platform === "win32") {
+    const info = taskInfo(d);
+    if (!info || info.state !== "Running" || !sameFolder(info.dir || "", ctx.home)) return null;
+    return {
+      name: `the Scheduled Task "${TASK}"`,
+      stopHint: "watchbell stop",
+      startHint: `Start-ScheduledTask ${TASK}, or sign out and in`,
+      stop: async () => (await stopServer(ctx, d)) === 0, // the clean stop; the task ends with the server
+      start: async () => {
+        const r = powershell(d, PS_START, { WB_TASK: TASK });
+        if (r.status !== 0) d.err(`Could not start the Scheduled Task "${TASK}" again (exit ${r.status}). Sign out and in, or run: watchbell`);
+        return r.status === 0;
+      },
+    };
+  }
+  if (d.platform === "darwin") {
+    // Only an agent whose process runs now: after "watchbell stop" it stays loaded but idle, and a Watchbell started in
+    // a terminal then is not the service's to restart.
+    if (!fs.existsSync(plistFileOf(d)) || !agentState(d).running || runningPid(ctx, d) === null) return null;
+    return {
+      name: `the launchd agent ${LAUNCHD_LABEL}`,
+      stopHint: "watchbell stop",
+      startHint: `launchctl kickstart ${guiDomain(d)}/${LAUNCHD_LABEL}`,
+      stop: async () => (await stopServer(ctx, d)) === 0, // a clean exit: KeepAlive restarts it only after a crash
+      start: async () => launchctl(d, "kickstart", `${guiDomain(d)}/${LAUNCHD_LABEL}`),
+    };
+  }
+  return null;
+}
+
+/** What to do by hand: stop Watchbell (its service, when one runs), run `cmd`, start it again. */
+function byHand(service, cmd) {
+  if (!service) return `Stop Watchbell ("watchbell stop"), then run: ${cmd}`;
+  return `Stop ${service.name} (${service.stopHint}), run ${cmd}, then start it again (${service.startHint}).`;
+}
+
+function packageName(pkgRoot) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(pkgRoot, "package.json"), "utf8")).name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * D9: `npm install -g watchbell@latest` with the npm next to this Node.js, only while Watchbell is stopped. A running
+ * service of the package is stopped cleanly first and started again after (also when npm failed: the old version
+ * then runs on). 0: updated or already the latest; 1: running, npm failed, or the service did not stop.
+ */
+export async function cmdUpdate({ ctx }, d) {
+  // `sudo watchbell update` reads root's home: it would not see the user's Watchbell or stop its service.
+  if ((d.uid ?? process.getuid?.()) === 0 && isSet(d.env.SUDO_USER)) {
+    d.err(`Run watchbell update as ${d.env.SUDO_USER.trim()}, without sudo: as root it looks at ${ctx.home} and can't see or stop your Watchbell.`);
+    d.err("When npm needs root, watchbell update says so and names the sudo command to run.");
+    return 1;
+  }
+  if (packageName(d.pkgRoot) !== "watchbell") {
+    d.err(`This Watchbell (${d.pkgRoot}) is not the npm package. Update a source checkout with git, or with its installer's --upgrade.`);
+    return 1;
+  }
+  const { current, latest } = await lookupLatest(ctx, d, { force: true });
+  const newer = latest ? compareVersions(latest, current) : null;
+  if (newer !== null && newer <= 0) {
+    d.out(`Watchbell ${current} is the latest version.`);
+    return 0;
+  }
+  if (latest === null) d.out("Could not ask registry.npmjs.org for the latest version; npm will try.");
+  const npm = npmCommand(d);
+  if (!npm) {
+    d.err(`The folder of this Node.js can't go on a cmd command line. Stop Watchbell and run: ${NPM_UPDATE}`);
+    return 1;
+  }
+  const service = await runningService(ctx, d);
+  // A system Node.js (/usr/lib/node_modules) is owned by root: say so before anything is stopped.
+  const npmFolder = path.dirname(d.pkgRoot);
+  if (d.platform !== "win32" && !writableDir(npmFolder)) {
+    d.err(`npm can't write to ${npmFolder} as your user, so watchbell update can't update it.`);
+    d.err(byHand(service, `sudo ${NPM_UPDATE}`));
+    return 1;
+  }
+  if (service) {
+    d.out(`Stopping ${service.name} for the update ...`);
+    if (!(await service.stop())) {
+      d.err(`Could not stop ${service.name}; nothing was updated.`);
+      return 1;
+    }
+  } else {
+    const pid = runningPid(ctx, d);
+    if (pid !== null) {
+      d.err(`Watchbell is running (process ${pid}). Stop it first with "watchbell stop", then run watchbell update again.`);
+      return 1;
+    }
+  }
+  d.out(`Updating Watchbell ${current}${latest ? ` to ${latest}` : ""}: ${npm.npm} ${NPM_UPDATE_ARGS.join(" ")}`);
+  // POSIX: npm starts with "#!/usr/bin/env node", so this Node.js goes first on PATH, else npm runs (and installs for)
+  // whichever node PATH finds first. A large maxBuffer: a verbose .npmrc must not get npm killed mid-install.
+  const env = d.platform === "win32" ? d.env : { ...d.env, PATH: [path.posix.dirname(d.execPath), d.env.PATH].filter(isSet).join(":") };
+  const r = d.runSync(npm.cmd, npm.args, { ...npm.opts, env, stdio: ["inherit", "inherit", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+  const said = (r.stderr ?? "").trim();
+  if (said) d.err(said); // npm's warnings too, not only its errors
+  let code = 0;
+  if (r.status !== 0) {
+    code = 1;
+    d.err(r.error ? `Could not run ${npm.npm}: ${r.error.code ?? r.error.message}.` : `npm could not update Watchbell (exit ${r.status}).`);
+    d.err(service ? byHand(service, NPM_UPDATE) : `Run it yourself: ${NPM_UPDATE}`);
+    if (d.platform !== "win32" && /\bEACCES\b|\bEPERM\b|permission denied/i.test(said)) {
+      d.err(`npm's global folder is not writable by your user. ${byHand(service, `sudo ${NPM_UPDATE}`)}`);
+    }
+  } else {
+    const now = packageVersion(d.pkgRoot);
+    if (now === current && newer !== null && newer > 0) {
+      code = 1;
+      d.err(`npm finished, but ${d.pkgRoot} still holds Watchbell ${now}: this npm installs somewhere else (see npm prefix -g).`);
+    } else d.out(now === current ? `Watchbell ${now} is up to date.` : `Updated Watchbell ${current} to ${now}.`);
+  }
+  if (service) {
+    d.out(`Starting ${service.name} again ...`);
+    if (!(await service.start())) code = 1;
+  }
+  return code;
 }
 
 // ---------------------------------------------------------------------------------------------------- main
@@ -904,6 +1470,7 @@ export async function main(argv, overrides = {}) {
     d.err(`Watchbell needs Node.js 24 or newer; this is Node.js ${d.nodeVersion}.`);
     return 1;
   }
+  if (opts.host !== null || opts.port !== null) d.cliAddress = { HOST: opts.host, PORT: opts.port };
   let ctx;
   try {
     ctx = resolveContext(d);
@@ -915,6 +1482,7 @@ export async function main(argv, overrides = {}) {
     case "start":
       return cmdStart(ctx, d, { open: opts.open, foreground: false, newKey: opts.newKey });
     case "run":
+      if (underLaunchd(d)) return runUnderLaunchd(ctx, d);
       return cmdStart(ctx, d, { open: false, foreground: true, newKey: false });
     case "stop":
       return stopServer(ctx, d, opts.timeout);
@@ -924,6 +1492,8 @@ export async function main(argv, overrides = {}) {
       return cmdService(opts.args[0], ctx, d, opts.yes);
     case "reset-login":
       return cmdResetLogin(ctx, d, opts.args[0].trim());
+    case "update":
+      return cmdUpdate({ ctx }, d);
     default:
       return 2;
   }

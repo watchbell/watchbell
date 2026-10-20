@@ -1,5 +1,5 @@
 import { USAGE_COPY } from "@/lib/copy/edition";
-import { wibDayStart } from "./usage-analytics";
+import { localDayStart } from "./usage-analytics";
 
 // AI › Quota "Provider usage" (pure; owner 14 Oct): per connected provider, today (WIB) and the last 7 days of model
 // work through Watchbell — requests, tokens (new input / cached / output incl. thinking) and failed calls — from
@@ -31,7 +31,7 @@ function add(t: UsageTotals, r: ProviderUsageRow) {
 export function providerUsage(
   rows: ProviderUsageRow[], providers: { id: string; name: string; kind: string; enabled: boolean }[], now: Date,
 ): ProviderUsage[] {
-  const today = wibDayStart(now.getTime());
+  const today = localDayStart(now.getTime());
   const weekStart = now.getTime() - 7 * DAY;
   const list: ProviderUsage[] = providers.map((p) => ({ ...p, today: empty(), week: empty() }));
   const byId = new Map(list.map((p) => [p.id, p]));

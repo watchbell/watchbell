@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { agoShort, durationText, wibTime } from "./time-text";
+import { agoShort, durationText, localTime } from "./time-text";
 
 const NOW = new Date("2026-10-13T09:00:00.000Z"); // 16:00 WIB
 
 describe("time-text", () => {
   it("wibTime: the WIB clock, with the date when it isn't today", () => {
-    expect(wibTime(new Date("2026-10-13T02:05:00Z"), NOW)).toBe("09:05 WIB");
-    expect(wibTime(new Date("2026-10-14T03:00:00Z"), NOW)).toBe("14 Oct 10:00 WIB");
+    expect(localTime(new Date("2026-10-13T02:05:00Z"), NOW)).toBe("09:05 WIB");
+    expect(localTime(new Date("2026-10-14T03:00:00Z"), NOW)).toBe("14 Oct 10:00 WIB");
   });
   it("agoShort: just now, minutes, hours (under 48), then days", () => {
     expect(agoShort(new Date(NOW.getTime() - 20_000), NOW)).toBe("just now");

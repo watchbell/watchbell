@@ -11,12 +11,16 @@ import { useHoldRefresh } from "@/components/live";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { cantRemove, type CreateRequestView, PROVIDER_NAME, TYPE_LABEL } from "@/lib/create/types";
 import { splitRequests } from "@/lib/create/split";
+import { calendarDate, clock } from "@/lib/time";
 import { cn } from "@/lib/utils";
 
 // Stage 6 create requests: the "Waiting for approval" list (each create page and Overview). The Owner approves by typing
 // the new resource's name; the server checks aal2, re-checks the free tier live and makes one create call. A Supabase
 // project's database password comes back once, is shown here with a copy button, and is gone when the dialog closes.
 // Everything named is masked in screenshot mode.
+
+// "21 Oct 2026, 14:30" in the configured zone (lib/time.ts), the same on the server and in the browser.
+const expiresText = (d: Date): string => { const c = calendarDate(d); return `${c.day} ${c.month} ${c.year}, ${clock(d)}`; };
 
 const STATUS: Record<CreateRequestView["status"], string> = {
   requested: "Waiting for approval", approved: "Approved", running: "Creating…", done: "Created", failed: "Failed", rejected: "Rejected", expired: "Expired",
@@ -55,7 +59,7 @@ function RequestRows({ items, owner, focus, quiet }: { items: CreateRequestView[
               <span className={cn("text-[12.5px]", i.status === "failed" ? "text-err" : "text-ink-soft")}>{STATUS[i.status]}</span>
             </div>
             <p className="font-mono text-[12.5px] text-ink-soft [overflow-wrap:anywhere]">{mask("text", i.summary)}</p>
-            {i.status === "requested" && <p className="text-[12px] text-ink-faint">{i.mine ? "You asked" : "Another member asked"} · expires {new Date(i.expiresAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}</p>}
+            {i.status === "requested" && <p className="text-[12px] text-ink-faint">{i.mine ? "You asked" : "Another member asked"} · expires {expiresText(new Date(i.expiresAt))}</p>}
             {i.error && i.status !== "requested" && <p className="text-[12.5px] text-err">{mask("text", i.error)}</p>}
             {i.result?.id && i.status === "done" && <p className="text-[12px] text-ink-faint">Created: <span className="font-mono">{mask("text", i.result.id)}</span>{i.result.note === "firebase-pending" ? " · Firebase still needs adding in the Firebase console" : ""}</p>}
           </div>

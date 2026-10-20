@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { resetTimeZoneForTests } from "@/lib/time";
 import { filterLines, levelBucket, readText, toWire, vercelLogsUrl, type WireLine } from "./logs";
 
 const line = (o: Partial<WireLine>): WireLine => ({ id: "r", time: "19:41:07", level: "error", app: "acme-shop", text: "GET /x 500 boom", ...o });
@@ -11,6 +12,25 @@ describe("toWire", () => {
   it("leaves out what the line doesn't have", () => {
     const w = toWire({ id: "r2", at: new Date("2026-10-13T12:41:07Z"), level: "warning", app: "a", method: null, path: null, status: null, message: "slow query" });
     expect(w.text).toBe("slow query");
+  });
+});
+
+describe("toWire in other zones (1.1)", () => {
+  afterEach(() => resetTimeZoneForTests());
+  const line = (iso: string) => toWire({ id: "r", at: new Date(iso), level: "info", app: "a", method: null, path: null, status: null, message: "m" });
+
+  it("Asia/Kolkata and Asia/Kathmandu keep the seconds and move the minutes", () => {
+    resetTimeZoneForTests("Asia/Kolkata");
+    expect(line("2026-10-13T12:41:07Z").time).toBe("18:11:07");
+    expect(line("2026-10-13T18:29:59Z").time).toBe("23:59:59");
+    resetTimeZoneForTests("Asia/Kathmandu");
+    expect(line("2026-10-13T12:41:07Z").time).toBe("18:26:07");
+  });
+
+  it("Europe/Berlin follows summer and winter time", () => {
+    resetTimeZoneForTests("Europe/Berlin");
+    expect(line("2026-10-13T12:41:07Z").time).toBe("14:41:07");
+    expect(line("2026-12-13T12:41:07Z").time).toBe("13:41:07");
   });
 });
 

@@ -3,7 +3,8 @@ import { TASKS, type TaskName } from "@/lib/collector/schedule";
 import { NEON_FREE } from "@/lib/databases/neon";
 import { FREE_SLOTS } from "@/lib/databases/supabase";
 import { BUDGET_DEFAULTS, type BudgetLimits } from "@/lib/settings/budget";
-import { clock, dayMonth } from "@/lib/time";
+import { mode } from "@/lib/mode";
+import { clock, dailyRunText, dayMonth, timeZone, zoneLabel, zoneProblem } from "@/lib/time";
 
 // Settings → Collector, Free tier budget and Retention. Pure helpers: the pages pass in what the console already reads.
 
@@ -163,4 +164,29 @@ export function retentionRows(d: Record<keyof typeof RETENTION_DAYS, number> = R
   ];
 }
 
-export const RETENTION_SCHEDULE = "Cleaned daily at 03:00 WIB";
+// The daily job: 03:00 local time in self-host, Vercel Cron's 20:00 UTC in cloud (lib/time.ts dailyRunText).
+export const retentionSchedule = (): string => `Cleaned daily at ${dailyRunText()}`;
+
+const isCloud = (): boolean => {
+  try {
+    return mode() === "cloud";
+  } catch {
+    return false;
+  }
+};
+
+// Settings › Collector: the zone every time is shown in, read-only (it comes from the environment, 1.1 D1). In cloud
+// the daily job keeps Vercel Cron's UTC schedule (D6) and the variable is set on Vercel. A refused setting is named.
+export function zoneSetting(cloud: boolean = isCloud()): { zone: string; label: string; text: string; follows: string } {
+  const zone = timeZone();
+  const label = zoneLabel();
+  const where = cloud ? "as a Vercel environment variable and redeploy" : "in .env";
+  const problem = zoneProblem();
+  const text = problem
+    ? `${problem} isn't a time zone; using ${zone} (${label}). Set an IANA name such as Europe/Berlin ${where}.`
+    : `Time zone: ${zone} (${label}). To change it, set WATCHBELL_TIMEZONE ${where}.`;
+  const follows = cloud
+    ? `Times and the digest (07:00) follow it. The daily job is Vercel Cron at 20:00 UTC (${dailyRunText()}).`
+    : "Times, the daily job (03:00) and the digest (07:00) follow it.";
+  return { zone, label, text, follows };
+}

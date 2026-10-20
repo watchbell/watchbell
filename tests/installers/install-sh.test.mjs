@@ -54,6 +54,11 @@ if [ "\${1:-}" = "--version" ] || [ "\${1:-}" = "-v" ]; then
   if [ -z "\${FAKE_NODE_VERSION:-}" ]; then echo "node: not found" >&2; exit 127; fi
   echo "v$FAKE_NODE_VERSION"; exit 0
 fi
+# FAKE_TZ stands in for this computer's time zone (Git Bash doesn't pass TZ on to a Windows node).
+if [ -n "\${FAKE_TZ+x}" ] && [ "\${1:-}" = "-e" ] && [[ "\${2:-}" == *resolvedOptions* ]]; then
+  log -e timeZone
+  printf '%s' "$FAKE_TZ"; exit 0
+fi
 log "$1"
 exec "$REAL_NODE" "$@"`,
   npm: `
@@ -997,6 +1002,65 @@ test('declining the replacement while watchbell.service also runs this folder wa
     assert.equal(r.code, 0, r.out)
     assert.ok(r.out.includes('watchbell.service already exists for this folder too') && r.out.includes('may compete for it'), r.out)
     assert.ok(fs.existsSync(oldFile))
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('a new app/.env gets this computer\'s time zone as WATCHBELL_TIMEZONE; a re-run never changes it', { skip: SKIP }, () => {
+  const s = scratch()
+  try {
+    const r = s.run('install.sh', ['--yes', '--no-service'], { env: { FAKE_TZ: 'Europe/Berlin' } })
+    assert.equal(r.code, 0, r.out)
+    assert.equal(readEnv(s.envFile).WATCHBELL_TIMEZONE, 'Europe/Berlin')
+    assert.equal(keyLines(s.envFile, 'WATCHBELL_TIMEZONE').length, 1)
+    const before = fs.readFileSync(s.envFile, 'utf8')
+    assert.equal(s.run('install.sh', ['--yes', '--no-service'], { env: { FAKE_TZ: 'America/New_York' } }).code, 0)
+    assert.equal(fs.readFileSync(s.envFile, 'utf8'), before)
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('an existing app/.env never gets WATCHBELL_TIMEZONE (it keeps the default, Asia/Jakarta)', { skip: SKIP }, () => {
+  const s = scratch()
+  try {
+    fs.writeFileSync(s.envFile, ['WATCHBELL_MODE=selfhost', 'PORT=3360', ''].join('\n'))
+    const r = s.run('install.sh', ['--yes', '--no-service'], { env: { FAKE_TZ: 'Europe/Berlin' } })
+    assert.equal(r.code, 0, r.out)
+    assert.equal(readEnv(s.envFile).WATCHBELL_TIMEZONE, undefined)
+    assert.ok(!r.out.includes('WATCHBELL_TIMEZONE'), r.out)
+  } finally {
+    s.cleanup()
+  }
+})
+
+test('UTC, GMT and full Area/Location names are written as they are (the same rule as the app)', { skip: SKIP }, () => {
+  for (const zone of ['UTC', 'GMT', 'Etc/UTC', 'Etc/GMT-7', 'Etc/GMT+5', 'US/Pacific', 'America/Argentina/Buenos_Aires']) {
+    const s = scratch()
+    try {
+      assert.equal(s.run('install.sh', ['--yes', '--no-service'], { env: { FAKE_TZ: zone } }).code, 0)
+      assert.equal(readEnv(s.envFile).WATCHBELL_TIMEZONE, zone)
+    } finally {
+      s.cleanup()
+    }
+  }
+})
+
+test('a time zone Node.js can\'t name is left out; without the stub it is Node\'s own zone', { skip: SKIP }, () => {
+  for (const zone of ['', 'Europe/Berlin; rm -rf ~', 'CET', 'IST', 'BST', 'AET', 'ECT', 'EST', 'EST5EDT', 'GB']) {
+    const s = scratch()
+    try {
+      assert.equal(s.run('install.sh', ['--yes', '--no-service'], { env: { FAKE_TZ: zone } }).code, 0)
+      assert.ok(!fs.readFileSync(s.envFile, 'utf8').includes('WATCHBELL_TIMEZONE'), zone)
+    } finally {
+      s.cleanup()
+    }
+  }
+  const s = scratch()
+  try {
+    assert.equal(s.run('install.sh', ['--yes', '--no-service']).code, 0)
+    assert.equal(readEnv(s.envFile).WATCHBELL_TIMEZONE, Intl.DateTimeFormat().resolvedOptions().timeZone)
   } finally {
     s.cleanup()
   }

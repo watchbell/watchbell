@@ -7,6 +7,7 @@ Watchbell reads its settings from `app/.env`. The installer creates the file wit
 - [Core settings](#core-settings)
 - [Optional settings](#optional-settings)
 - [Cloud-only settings](#cloud-only-settings)
+- [Time zone](#time-zone)
 - [Change the port](#change-the-port)
 - [LAN access](#lan-access)
 - [Behind a reverse proxy](#behind-a-reverse-proxy)
@@ -65,6 +66,7 @@ can be changed at any time.
 | `DAILY_HEARTBEAT_TOKEN` | The token of a heartbeat you add on Uptime (period 1 day, grace 6 hours). The daily job then pings it, so a daily job that never runs raises an alert like any missed job. |
 | `WATCHBELL_TRUSTED_PROXY_HOPS` | How many reverse proxies in front of Watchbell add a trusted `X-Forwarded-For` entry. Leave unset without a proxy. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 | `WATCHBELL_MIGRATIONS_DIR` | Folder with the database migrations, only needed if you start the server from outside `app/` (default `drizzle-selfhost`). |
+| `WATCHBELL_TIMEZONE` | The time zone of every time shown and sent, the daily job and the digest, as an IANA name such as `Europe/Berlin`. Unset means `Asia/Jakarta` (WIB). See [Time zone](#time-zone). |
 | `WATCHBELL_ALLOW_REMOTE_DB` | Set to `1` to allow a remote Postgres in `DATABASE_URL` that Watchbell would otherwise refuse (a hosted Supabase database, or an address it can't check). |
 
 Each notification setting is independent: a missing one only turns its channel off, with a note on Alerts ›
@@ -75,6 +77,34 @@ Notifications.
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `OWNER_EMAIL`,
 `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `QSTASH_CURRENT_SIGNING_KEY` and `QSTASH_NEXT_SIGNING_KEY` belong to the hosted
 `cloud` mode. Leave them empty on a self-hosted install. Watchbell checks them only if you set them.
+
+## Time zone
+
+Watchbell shows and sends every time in one time zone, whatever the computer it runs on is set to, and runs its own
+schedule by that zone's clock: the daily job at 03:00 and the email digest at 07:00.
+
+- Set it with `WATCHBELL_TIMEZONE` in `app/.env` (or `~/.watchbell/.env` for the npm package), as an IANA name:
+  `Europe/Berlin`, `America/New_York`, `Asia/Kolkata`, `UTC`. Restart Watchbell after a change. Settings ›
+  Collector shows the zone in use.
+- The installers and the npm CLI write this computer's zone into a **new** `.env`. They never add it to an existing
+  one, so an install from before 1.1 stays on the default. A `.env` made by hand from `app/.env.example` has it
+  commented out, so it is on the default until you set it.
+- Unset, it is `Asia/Jakarta`, shown as WIB. A name Watchbell doesn't know (a typo such as `Asia/Jakata`) or an
+  offset (`+07:00`; use an IANA name, or `Etc/GMT-7` for a fixed UTC+7) or an abbreviation (`CET`, `IST`, `BST`:
+  write `Europe/Berlin`, `Asia/Kolkata`, `Europe/London`) also means `Asia/Jakarta`, with one
+  warning in the log when Watchbell starts and a note on Settings › Collector.
+- A time is labelled `WIB` for `Asia/Jakarta`, otherwise with the zone's short name (`CET`/`CEST`, `EDT`,
+  `GMT+5:30`). Text about times in general names the zone itself ("Times in Europe/Berlin", "Cleaned daily at
+  03:00 Europe/Berlin").
+- Daylight saving is followed: the daily job and the digest run at 03:00 and 07:00 on the local clock, also on the
+  days the clocks change, and a weekly maintenance window keeps its local time (10:00 stays 10:00).
+- Days are local days: the uptime bars, "today" counts and monthly backups start at local midnight. If you change the
+  zone later, days already rolled up keep the boundaries they were counted with; only new days follow the new zone.
+  The daily job and the digest don't run twice that day, even when the new zone's date is behind the old one's.
+  In a zone with a half-hour offset (`Asia/Kolkata`), an hour of rolled-up checks counts on the day it starts in.
+- The hosted `cloud` mode schedules its daily job with Vercel Cron, which always runs in UTC (`0 20 * * *`,
+  03:00 WIB). There the zone changes what is shown and sent, not when the daily job runs; the console shows the
+  daily job at 20:00 UTC in your zone (for example "21:00 CET"). Set the variable on Vercel and redeploy.
 
 ## Change the port
 

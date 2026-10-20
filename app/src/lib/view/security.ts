@@ -1,6 +1,7 @@
 import { fixedInAll, isSevere, vulnerabilities, worstSeverity } from "@/lib/security/rules";
 import type { SecurityRow, Severity } from "@/lib/security/types";
 import type { State } from "@/lib/status";
+import { dailyRunText } from "@/lib/time";
 import type { ProblemBanner } from "./labels";
 
 // How the Next.js security check reads on the App page, Overview and the Applications list (mockup: Security card,
@@ -39,7 +40,7 @@ export function cveTag(s: SecurityRow | null): { label: "CVE"; severe: boolean; 
 
 // App page → Security card: the line under Next.js / Checked. Null when the findings table says it all.
 export function securityNote(s: SecurityRow | null): { state: State; text: string } | null {
-  if (!s) return { state: "unknown", text: "Not checked yet. The daily job checks at 03:00 WIB." };
+  if (!s) return { state: "unknown", text: `Not checked yet. The daily job checks at ${dailyRunText()}.` };
   if (s.status === "ok") return { state: "ok", text: `No known vulnerabilities for Next.js ${s.version}.` };
   // unknown and error keep the previous version and findings; say so when there are some.
   const before = s.version !== null || s.findings.length > 0 ? " Showing the result from before." : "";

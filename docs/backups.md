@@ -87,7 +87,7 @@ backups**:
 | Summary sheet (Google Sheets) | Tabs: Overview (uptime, incidents and deployments for the month), Applications (uptime %, p95 response, 5xx count, deploys per app), Incidents (every alert with start, end and duration), Databases (status changes, size, CU-hours, Firestore reads), Domains (certificate and registrar expiry at month end) |
 | Raw data `.csv.gz` | That month's hourly rollups and events |
 
-- It runs by itself on the 1st of each month with the daily job (about 03:00 WIB) and covers the month before. A run
+- It runs by itself on the 1st of each month with the daily job (about 03:00 in your time zone) and covers the month before. A run
   that failed is retried by the next daily run. **Back up now** writes the current month so far.
 - Backups older than 3 months are moved to Drive trash, and Drive deletes them for good 30 days later.
 - Databases appear by their alias (db-a, db-b) and emails are hidden, as everywhere in the console.

@@ -1,20 +1,20 @@
 // The daily email digest (spec §10): what is still firing, what opened and resolved in the last 24 hours, uptime and
-// stored errors per application, and the providers that aren't fine. Sent once a WIB day after 07:00; the subject, the
+// stored errors per application, and the providers that aren't fine. Sent once a local day (lib/time.ts) after 07:00; the subject, the
 // text and the HTML are built here from plain data so the builder stays testable.
 import type { Severity } from "@/db/schema";
 import { esc, SEVERITY_WORD } from "@/lib/alerts/compose";
 import { translateAlertText } from "@/lib/alerts/translate-id";
 import type { NotifyLang } from "@/lib/notify/lang";
-import { TZ, wibDate } from "@/lib/time";
+import { calendarDate, dayKey, newDaySince, zonedParts } from "@/lib/time";
 import { pct } from "@/lib/view/format";
-import { wibDay } from "@/lib/view/uptime";
 import { hideEmails } from "@/lib/view/display-name";
 
-export const DIGEST_HOUR_WIB = 7;
+// 07:00 on the local clock, also on a daylight-saving day.
+export const DIGEST_HOUR = 7;
 
+// Like the daily job (scheduler.ts dailyDue): only a later local day, so a change of zone never sends it twice.
 export function digestDue(now: Date, lastSentDay: string | null): boolean {
-  const hour = Number(new Intl.DateTimeFormat("en-GB", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" }).format(now));
-  return wibDay(now) !== lastSentDay && hour >= DIGEST_HOUR_WIB;
+  return newDaySince(now, lastSentDay) && zonedParts(now).hour >= DIGEST_HOUR;
 }
 
 export type DigestInput = {
@@ -52,7 +52,7 @@ const TEXT = {
 // lib/time.ts writes English month abbreviations; these four differ in Indonesian.
 const MONTH_ID: Record<string, string> = { May: "Mei", Aug: "Agu", Oct: "Okt", Dec: "Des" };
 const dayOf = (d: Date, lang: NotifyLang) => {
-  const { day, month } = wibDate(d);
+  const { day, month } = calendarDate(d);
   return `${day} ${lang === "id" ? MONTH_ID[month] ?? month : month}`;
 };
 
@@ -104,11 +104,11 @@ export function buildDigest(d: DigestInput, lang: NotifyLang = "en"): { subject:
   return { subject: hideEmails(subject), html: hideEmails(html), text: hideEmails(text) };
 }
 
-// I4: the digest is built ONCE a WIB day (from the data at the first attempt) and stored with its attempt count; every
+// I4: the digest is built ONCE a local day (from the data at the first attempt) and stored with its attempt count; every
 // retry sends that stored content, so the same Idempotency-Key always goes with the same body (Resend answers 409 when
 // the body changes) and a lost response can't turn into a loop. Attempts are bounded: at most MAX_ATTEMPTS a day with
 // growing gaps. A config/4xx error (an unverified From address, a bad key) stops the day at once. Either way one event
-// says it wasn't sent, and the next WIB day starts fresh.
+// says it wasn't sent, and the next local day starts fresh.
 export const DIGEST_MAX_ATTEMPTS = 5;
 export const DIGEST_GAPS_MIN = [5, 15, 30, 60]; // the wait after the 1st, 2nd, 3rd and 4th failed attempt
 
@@ -133,7 +133,7 @@ export type DigestStep = {
 export async function stepDigest(now: Date, io: DigestIo): Promise<DigestStep> {
   const idle: DigestStep = { acted: false, state: io.state, sentDay: null, event: null, result: null };
   if (!digestDue(now, io.lastSentDay)) return idle;
-  const day = wibDay(now);
+  const day = dayKey(now);
   let st = io.state && io.state.day === day ? io.state : null;
   if (st?.stopped) return { ...idle, state: st };
   if (st && st.attempts > 0) {

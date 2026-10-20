@@ -16,6 +16,7 @@ import { appOptions, listMonitors, type MonitorRow } from "@/lib/data/monitors-d
 import { publicMonitorIds } from "@/lib/data/public-status-db";
 import { durationLabel } from "@/lib/heartbeat";
 import { activeFor, windowText } from "@/lib/maintenance";
+import { zoneSentence } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { pct } from "@/lib/view/format";
 import { canAct, MONITOR_STATE_OPTIONS, monitorStatus } from "@/lib/view/labels";
@@ -129,7 +130,7 @@ export default async function UptimePage() {
           : <ListFilter placeholder="Filter by name" states={MONITOR_STATE_OPTIONS} head={HEAD} rows={rows} />}
       </Card>
       <Card title="Maintenance windows" flush>
-        <p className="mx-[18px] mb-2.5 text-[12.5px] text-ink-soft">Checks keep running inside a window, but they are left out of uptime % and open no alerts. Times are WIB.</p>
+        <p className="mx-[18px] mb-2.5 text-[12.5px] text-ink-soft">Checks keep running inside a window, but they are left out of uptime % and open no alerts. {zoneSentence()}</p>
         {maintRows.length
           ? <PlainTable head={MAINT_HEAD} rows={maintRows} />
           : <p className="mx-[18px] mb-4 text-[13px] text-ink-faint">No maintenance windows.{act ? " Add one before planned work, so it doesn't count as downtime." : ""}</p>}

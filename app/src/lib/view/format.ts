@@ -1,4 +1,4 @@
-import { clock, dayMonth, sameDay, wibDate } from "@/lib/time";
+import { calendarDate, clock, dayMonth, sameDay } from "@/lib/time";
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -88,7 +88,7 @@ export function hostPath(url: string): string {
 
 // App detail → Created: "14 Mar 2026".
 export function longDate(d: Date): string {
-  const { day, month, year } = wibDate(d);
+  const { day, month, year } = calendarDate(d);
   return `${day} ${month} ${year}`;
 }
 

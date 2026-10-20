@@ -1,4 +1,5 @@
 import { gzipSync } from "node:zlib";
+import { dailyRunText, dayStart, zonedParts, zoneName } from "@/lib/time";
 import { type AliasBook, dbAlias, hideAlert, hideEmails, hideNames } from "@/lib/view/display-name";
 import type { Cell, Tab } from "./drive";
 
@@ -20,21 +21,20 @@ export const folderLabel = (stored: { name: string | null } | null): string =>
 export const TABS = ["Overview", "Applications", "Incidents", "Databases", "Domains"] as const;
 export const KEEP_MONTHS = 3;
 
-const WIB_MS = 7 * 3_600_000; // Asia/Jakarta has no daylight saving
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export const isMonth = (v: string): boolean => /^\d{4}-(0[1-9]|1[0-2])$/.test(v);
 
-// The WIB calendar month a moment falls in ("2026-10"). The 03:00 WIB daily run on 1 Nov is 20:00 UTC on 31 Oct, and
-// belongs to November.
+// The local calendar month a moment falls in ("2026-10"), in the configured zone (lib/time.ts). In WIB the 03:00 daily
+// run on 1 Nov is 20:00 UTC on 31 Oct, and belongs to November.
 export function monthOf(d: Date): string {
-  const w = new Date(d.getTime() + WIB_MS);
-  return `${w.getUTCFullYear()}-${String(w.getUTCMonth() + 1).padStart(2, "0")}`;
+  const p = zonedParts(d);
+  return `${p.year}-${String(p.month).padStart(2, "0")}`;
 }
 
+// From local midnight on the 1st to local midnight on the 1st of the next month.
 export function monthRange(month: string): { start: Date; end: Date } {
-  const [y, m] = month.split("-").map(Number);
-  return { start: new Date(Date.UTC(y, m - 1, 1) - WIB_MS), end: new Date(Date.UTC(y, m, 1) - WIB_MS) };
+  return { start: dayStart(`${month}-01`), end: dayStart(`${nextMonth(month)}-01`) };
 }
 
 export function previousMonth(month: string): string {
@@ -55,12 +55,12 @@ export function monthLabel(month: string): string {
 export const sheetTitle = (month: string) => `Watchbell · ${month}`;
 export const csvName = (month: string) => `watchbell-${month}-raw.csv.gz`;
 
-// "2026-10-01 03:00" in WIB: sortable, and what the owner reads everywhere else in the console.
-export function wibStamp(d: Date | null): string {
+// "2026-10-01 03:00" in the configured zone: sortable, and what the owner reads everywhere else in the console.
+export function localStamp(d: Date | null): string {
   if (!d) return "";
-  const w = new Date(d.getTime() + WIB_MS);
+  const z = zonedParts(d);
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${w.getUTCFullYear()}-${p(w.getUTCMonth() + 1)}-${p(w.getUTCDate())} ${p(w.getUTCHours())}:${p(w.getUTCMinutes())}`;
+  return `${z.year}-${p(z.month)}-${p(z.day)} ${p(z.hour)}:${p(z.minute)}`;
 }
 
 export type RollupRow = {
@@ -123,9 +123,9 @@ export function buildTabs(i: BackupInput): Tab[] {
 
   const overview: Cell[][] = [
     ["Watchbell backup", i.month],
-    ["Covers", `${wibStamp(start)} to ${wibStamp(until)} WIB${i.partial ? " (month so far)" : ""}`],
+    ["Covers", `${localStamp(start)} to ${localStamp(until)} ${zoneName()}${i.partial ? " (month so far)" : ""}`],
     ["Kind", i.partial ? "Partial: Back up now" : "Full month"],
-    ["Generated", `${wibStamp(i.generatedAt)} WIB`],
+    ["Generated", `${localStamp(i.generatedAt)} ${zoneName()}`],
     [],
     ["Applications watched", i.apps.length],
     ["Uptime, all monitors (%)", pct(checks, failures)],
@@ -149,10 +149,10 @@ export function buildTabs(i: BackupInput): Tab[] {
     ]);
   }
 
-  const incidents: Cell[][] = [["Rule", "Severity", "Subject", "Started (WIB)", "Resolved (WIB)", "Duration", "Message"]];
+  const incidents: Cell[][] = [["Rule", "Severity", "Subject", `Started (${zoneName()})`, `Resolved (${zoneName()})`, "Duration", "Message"]];
   for (const a of [...i.alerts].sort((x, y) => x.startedAt.getTime() - y.startedAt.getTime())) {
     const shown = hideAlert({ title: a.title, message: a.message, causedBy: null, resourceId: a.resourceId }, i.book);
-    incidents.push([a.ruleKey, a.severity, shown.title, wibStamp(a.startedAt), wibStamp(a.resolvedAt), duration(a.startedAt, a.resolvedAt, until), shown.message]);
+    incidents.push([a.ruleKey, a.severity, shown.title, localStamp(a.startedAt), localStamp(a.resolvedAt), duration(a.startedAt, a.resolvedAt, until), shown.message]);
   }
 
   const databases: Cell[][] = [["Database", "Provider", "Account", "State at backup", "Status changes this month", "Size (MB)", "Neon CU-hours this period", "Firestore reads (last reading)"]];
@@ -226,9 +226,13 @@ export function retentionPlan<R extends { month: string; status: string; trashed
   return rows.filter((r) => !r.trashedAt && r.month < oldestKept && (r.sheetFileId || r.csvFileId));
 }
 
-// "Next backup": the 1st of the month after the newest complete month, at the daily run (~03:00 WIB).
-export function nextBackupMonth(rows: { month: string; status: string }[], now: Date): { runsOn: string; covers: string } {
+// "Next backup": the 1st of the month after the newest complete month, at the daily run (~03:00 local time). `date` is
+// that 1st, or null when the next daily run writes it; `at` is the daily run's time ("~03:00 WIB"). `runsOn` says both.
+export function nextBackupMonth(rows: { month: string; status: string }[], now: Date): { runsOn: string; covers: string; date: string | null; at: string } {
   const due = dueMonth(rows, now);
   const current = monthOf(now);
-  return due ? { runsOn: "the next daily run (~03:00 WIB)", covers: monthLabel(due) } : { runsOn: `1 ${monthLabel(nextMonth(current))}, ~03:00 WIB`, covers: monthLabel(current) };
+  const at = `~${dailyRunText(now)}`;
+  if (due) return { runsOn: `the next daily run (${at})`, covers: monthLabel(due), date: null, at };
+  const date = `1 ${monthLabel(nextMonth(current))}`;
+  return { runsOn: `${date}, ${at}`, covers: monthLabel(current), date, at };
 }

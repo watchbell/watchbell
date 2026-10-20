@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button, Field, fieldClass } from "@/components/kit";
 import { useHoldRefresh } from "@/components/live";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { durationText, DURATIONS_MIN, ENDED, hasEnded, NOTE_MAX, parseWindowForm, splitTarget, targetValue, type Window, wibInput } from "@/lib/maintenance";
+import { durationText, DURATIONS_MIN, ENDED, hasEnded, NOTE_MAX, parseWindowForm, splitTarget, targetValue, type Window } from "@/lib/maintenance";
+import { toLocalInput, zoneSentence } from "@/lib/time";
 import { addWindow, editWindow } from "../maintenance-actions";
 
 export type TargetOptions = { apps: { id: string; name: string }[]; monitors: { id: string; label: string }[] };
@@ -23,10 +24,10 @@ const HOUR = 3_600_000;
 function initial(props: Props): FormState {
   if (props.mode === "edit") {
     const w = props.win;
-    return { target: targetValue(w), weekly: w.weekly, start: wibInput(w.startsAt), durationMin: String(w.durationMin), note: w.note ?? "" };
+    return { target: targetValue(w), weekly: w.weekly, start: toLocalInput(w.startsAt), durationMin: String(w.durationMin), note: w.note ?? "" };
   }
   // The next whole hour, in WIB, for an hour and a half (the mockup's default length).
-  return { target: "all", weekly: false, start: wibInput(new Date(Math.ceil(Date.now() / HOUR) * HOUR)), durationMin: "90", note: "" };
+  return { target: "all", weekly: false, start: toLocalInput(new Date(Math.ceil(Date.now() / HOUR) * HOUR)), durationMin: "90", note: "" };
 }
 
 const toForm = (f: FormState) => ({ ...splitTarget(f.target), start: f.start, durationMin: f.durationMin, weekly: f.weekly, note: f.note });
@@ -88,7 +89,7 @@ export function MaintenanceDialog(props: Props) {
           <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sunken text-ink-soft"><IconTool size={19} /></span>
           <div>
             <DialogTitle className="text-base">{props.mode === "add" ? "Add maintenance window" : "Edit maintenance window"}</DialogTitle>
-            <DialogDescription className="mt-0.5 text-[13px] text-ink-soft">Checks keep running, but they are left out of uptime % and open no alerts. Times are WIB.</DialogDescription>
+            <DialogDescription className="mt-0.5 text-[13px] text-ink-soft">Checks keep running, but they are left out of uptime % and open no alerts. {zoneSentence()}</DialogDescription>
           </div>
         </div>
         <form onSubmit={(e) => { e.preventDefault(); submit(); }}>

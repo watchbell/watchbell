@@ -1,22 +1,20 @@
 import { logCause } from "@/lib/collector/safe-error";
+import { dayKey, newDaySince, zonedParts } from "@/lib/time";
 
 // Selfhost has no cron-job.org / QStash / Vercel cron, so the app runs its own clock: the collector every minute and the
-// daily job once a day at 03:00 WIB. A missed day (laptop asleep) runs once on wake-up, never twice.
+// daily job once a day at 03:00 local time (lib/time.ts: WATCHBELL_TIMEZONE, default WIB). A missed day (laptop asleep)
+// runs once on wake-up, never twice. Local wall-clock time: on a daylight-saving day it is still 03:00 on the clock.
 
-const WIB_OFFSET_MS = 7 * 3_600_000;
-const DAILY_HOUR_WIB = 3;
+export const DAILY_HOUR = 3;
 const FIRST_TICK_MS = 5_000;
-const LAST_DAILY_KEY = "scheduler.lastDaily"; // ops.settings: { day: "YYYY-MM-DD" in WIB }
+const LAST_DAILY_KEY = "scheduler.lastDaily"; // ops.settings: { day: "YYYY-MM-DD" in the configured zone }
 
-const wibParts = (now: Date) => {
-  const iso = new Date(now.getTime() + WIB_OFFSET_MS).toISOString();
-  return { day: iso.slice(0, 10), hour: Number(iso.slice(11, 13)) };
-};
-
-// True when the WIB date of `now` is not `lastDay` and it is already 03:00 WIB or later on that date.
+// True when the local date of `now` is after `lastDay` and it is already 03:00 or later on that date. "After", not "not
+// equal": when the zone is changed to one behind the old one, today's date can be the day before the stored one, and
+// the job must not run a second time (ISO dates compare as strings). A stored day more than one day ahead (a clock that
+// was once wrong) is not trusted: lib/time.ts newDaySince.
 export function dailyDue(now: Date, lastDay: string | null): boolean {
-  const { day, hour } = wibParts(now);
-  return day !== lastDay && hour >= DAILY_HOUR_WIB;
+  return newDaySince(now, lastDay) && zonedParts(now).hour >= DAILY_HOUR;
 }
 
 export type SchedulerDeps = {
@@ -93,7 +91,7 @@ export function startScheduler(deps: SchedulerDeps = {}): { stop(): void } {
       const at = now();
       if (!dailyDue(at, await readLastDay())) return;
       await daily();
-      await writeLastDay(wibParts(at).day);
+      await writeLastDay(dayKey(at));
     } catch (e) {
       console.warn(`scheduler: daily run failed, will retry on the next tick: ${logCause(e)}`);
     } finally {

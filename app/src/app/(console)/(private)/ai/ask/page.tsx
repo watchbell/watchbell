@@ -5,7 +5,7 @@ import { AutoRefresh } from "@/components/live";
 import { NoAccess } from "@/components/no-access";
 import { pageGate } from "@/lib/auth";
 import { aliasBook } from "@/lib/data/cached";
-import { ago } from "@/lib/time";
+import { ago, zoneLabel } from "@/lib/time";
 import { EMPTY_BOOK } from "@/lib/view/display-name";
 import { AG_PUBLIC_PREFIX, enabledModels, isFresh, readAgSettings } from "@/private/ai/extras";
 import { scheduleModelRefresh } from "@/private/ai/providers/refresh";
@@ -76,10 +76,10 @@ async function askModels(now: Date): Promise<{ list: { id: string; label: string
   return { list, defaultLabel: provider ? provider.model : "no provider" };
 }
 
-// "3 min ago", then the WIB clock ("today 09:00 WIB", "12 Oct 21:14 WIB").
+// "3 min ago", then the local clock with its zone ("today 09:00 WIB", "12 Oct 21:14 WIB").
 function when(d: Date, now: Date): string {
   const s = ago(d, now);
-  return /\d:\d\d$/.test(s) ? `${s} WIB` : s;
+  return /\d:\d\d$/.test(s) ? `${s} ${zoneLabel(d)}` : s;
 }
 
 const chip = "inline-block max-w-[280px] truncate rounded border border-line bg-surface-2 px-1.5 text-[12px] text-ink-soft";

@@ -205,9 +205,9 @@ const scanModule = path.join(root, "..", "scripts", "export", "scan.mjs");
 const privateTree = fs.existsSync(denylistFile) && fs.existsSync(scanModule);
 
 test("no owner identifier or secret in the docs", { skip: privateTree ? false : "the deny-list exists only in the private tree" }, async () => {
-  const { loadDenylist, scanExport } = await import(pathToFileURL(scanModule).href);
+  const { loadAllow, loadDenylist, scanExport } = await import(pathToFileURL(scanModule).href);
   const mine = new Set([...docFiles(), "tests/docs.test.mjs"]);
-  const findings = scanExport(root, { denylist: loadDenylist(denylistFile), allow: [] })
+  const findings = scanExport(root, { denylist: loadDenylist(denylistFile), allow: loadAllow(path.join(root, ".gitleaks-allow.json")) })
     .filter((f) => mine.has(f.path))
     .map((f) => `${f.path}:${f.line} ${f.rule}`);
   assert.deepEqual(findings, []);

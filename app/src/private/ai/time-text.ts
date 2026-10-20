@@ -1,12 +1,12 @@
 // Short time texts the AI pages share (moved out of antigravity.ts in open source plan 5, so the pages that ship in both
 // editions don't import Antigravity). Pure; no "server-only", client code may import it.
+import { dayKey, zonedFormat, zoneLabel } from "@/lib/time";
 
-// "HH:MM WIB" (with the date when it isn't today in Jakarta).
-export function wibTime(d: Date, now: Date): string {
-  const f = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Jakarta", ...o }).format(d);
-  const day = (x: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta" }).format(x);
+// "HH:MM WIB" in the configured zone (lib/time.ts), with the date when it isn't today there.
+export function localTime(d: Date, now: Date): string {
+  const f = (o: Intl.DateTimeFormatOptions) => zonedFormat("en-GB", o).format(d);
   const time = f({ hour: "2-digit", minute: "2-digit", hour12: false });
-  return day(d) === day(now) ? `${time} WIB` : `${f({ day: "numeric", month: "short" })} ${time} WIB`;
+  return dayKey(d) === dayKey(now) ? `${time} ${zoneLabel(d)}` : `${f({ day: "numeric", month: "short" })} ${time} ${zoneLabel(d)}`;
 }
 
 export function agoShort(d: Date, now: Date): string {

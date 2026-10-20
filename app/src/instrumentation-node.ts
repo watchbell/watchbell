@@ -22,6 +22,9 @@ async function startDemo(): Promise<void> {
 }
 
 export async function registerNode(): Promise<void> {
+  // Resolve the time zone at start, so a WATCHBELL_TIMEZONE typo is reported once now (it falls back to Asia/Jakarta).
+  const { timeZone, zoneName } = await import("@/lib/time");
+  timeZone();
   const { mode, remoteDbRisk } = await import("@/lib/mode");
   if (mode() === "demo") return startDemo();
   if (mode() !== "selfhost") return;
@@ -49,7 +52,8 @@ export async function registerNode(): Promise<void> {
   const scheduler = startScheduler();
   const { startTelegramPoller } = await import("@/lib/notify/telegram-poll");
   const poller = startTelegramPoller();
-  console.log("Watchbell scheduler started (collector every 60 s, daily at 03:00 WIB)");
+  // "daily at 03:00 WIB" as before 1.1; another zone is named ("daily at 03:00 Europe/Berlin").
+  console.log(`Watchbell scheduler started (collector every 60 s, daily at 03:00 ${zoneName()})`);
   // The same once-only clean stop for SIGTERM/SIGINT (when Next leaves them to the app) and, on every platform, for the
   // stop-request file that `npm run stop:selfhost` writes (Windows has no graceful signal for a hidden server).
   const { installSignalHandlers, stopRequestFile } = await import("@/lib/shutdown");

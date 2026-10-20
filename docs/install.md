@@ -60,15 +60,57 @@ watchbell
 The first start creates `~/.watchbell/` (on Windows `%USERPROFILE%\.watchbell\`) with `.env` (your settings, with
 fresh secrets, readable by your user only) and `data/` (the database), prints a one-time setup code and opens
 http://localhost:3100/setup. Set `WATCHBELL_HOME` to use another folder. `watchbell --help` lists every command:
-`stop`, `status`, `service install|uninstall` (start at login, no admin rights), `reset-login <email>`.
+`stop`, `status`, `update`, `service install|uninstall` (start at login with a systemd user service, a Scheduled Task
+or a launchd agent on macOS; no admin rights), `reset-login <email>`. After you change Node.js (nvm, fnm, volta,
+Homebrew), run `watchbell service install` again; `watchbell status` warns when the service's Node.js is gone.
 
 The address comes from `~/.watchbell/.env` (`HOST`, `PORT`, `SITE_URL`). A `HOST` or `PORT` your shell exports is
 ignored, so a shell that sets them for other programs can't move Watchbell onto your network or another port; set
-`WATCHBELL_HOST` or `WATCHBELL_PORT` to override the file on purpose.
+`WATCHBELL_HOST` or `WATCHBELL_PORT` to override the file on purpose, or `--host` and `--port` for one run (see
+[Open it from another computer](#open-it-from-another-computer)).
 
-Update with `watchbell stop` then `npm install -g watchbell@latest`. Remove it with `watchbell service uninstall` (if
-you installed the service) and `npm uninstall -g watchbell`; delete `~/.watchbell/` only if you no longer want the
-data.
+Update with `watchbell update`. It runs `npm install -g watchbell@latest` with the npm next to your Node.js; a service
+you installed with `watchbell service install` is stopped first and started again after, and a Watchbell you started
+in a terminal must be stopped first (`watchbell stop`). If npm's global folder belongs to root (a Node.js from your
+distribution's packages), stop Watchbell and run `sudo npm install -g watchbell@latest` instead. `watchbell` and
+`watchbell status` tell you when a newer version is out: they ask registry.npmjs.org at most once a day (a plain
+request for the version number, nothing about you); `WATCHBELL_NO_UPDATE_CHECK=1`, in `~/.watchbell/.env` or in the
+environment, turns that off.
+
+From 1.0.x, update once by hand, because 1.0 has no `watchbell update`: `watchbell stop` (or stop the service you set
+up), then `npm install -g watchbell@latest`, then start it again. From 1.1 on, `watchbell update` does it.
+
+The first start writes your computer's time zone into the new `~/.watchbell/.env` as `WATCHBELL_TIMEZONE`. A `.env`
+from 1.0 stays on Western Indonesian Time (WIB) until you add it, for example `WATCHBELL_TIMEZONE=Europe/Berlin`,
+and restart. See [Time zone](configuration.md#time-zone).
+
+Remove it with `watchbell service uninstall` (if you installed the service) and `npm uninstall -g watchbell`; delete
+`~/.watchbell/` only if you no longer want the data.
+
+### Open it from another computer
+
+Watchbell listens on this machine only (`127.0.0.1`). From another computer, the safest way in is an SSH tunnel:
+nothing on the Watchbell machine changes, and the connection is encrypted. On the computer you sit at, run
+
+```bash
+ssh -N -L 3100:127.0.0.1:3100 you@the-watchbell-machine
+```
+
+and open http://localhost:3100 there. The tunnel lasts as long as that command runs.
+
+To open it to your network instead, give it an address for one run (`0.0.0.0` means every network of this machine):
+
+```bash
+watchbell --host 0.0.0.0 --port 3100
+```
+
+It prints the addresses other computers can use, such as `http://192.168.1.20:3100`, and a warning: everyone who can
+reach them gets the sign-in page, and plain http sends passwords readable on the network. So finish `/setup` (the
+owner account) before you share the address, keep it to networks you trust, and never open it to the internet without
+HTTPS in front (see [Behind a reverse proxy](configuration.md#behind-a-reverse-proxy)). Signing in works from any of
+those addresses. Links in alerts and messages use `SITE_URL`, so set `SITE_URL=http://192.168.1.20:3100` (your
+address) in `~/.watchbell/.env` when they should work on the other computers too. To keep the address, set `HOST`
+(and `PORT`) in that file instead of the options; the service reads the file.
 
 The rest of this guide covers the installers, which build Watchbell from this repository.
 
@@ -179,11 +221,14 @@ There is no installer for macOS. The manual steps below work on macOS, Linux and
    OPS_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64'))")
    COLLECTOR_SECRET=$(node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))")
    CRON_SECRET=$(node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))")
+   WATCHBELL_TIMEZONE=$(node -p "Intl.DateTimeFormat().resolvedOptions().timeZone")
    EOF
    chmod 600 .env
    ```
 
    Run this only once. Generating a new `OPS_ENCRYPTION_KEY` later makes every saved token unreadable.
+   `WATCHBELL_TIMEZONE` is your computer's time zone as Node.js names it; check that the file has a full name such
+   as `Europe/Berlin` (not `CET`), or see [Time zone](configuration.md#time-zone).
    [`app/.env.example`](../app/.env.example) lists the optional settings.
 
 3. Install and build:

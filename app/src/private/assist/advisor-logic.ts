@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dayKey, zonedParts } from "@/lib/time";
 import type { ConsoleSnapshot } from "@/private/console/types";
 import { ALWAYS_APP } from "./advisor-config";
 import { type ChatMessage, guard, SYSTEM_PROMPT } from "./prompts";
@@ -25,14 +26,12 @@ export function parseAdvisorSettings(v: unknown): AdvisorSettings {
   return { enabled: o.enabled !== false, model };
 }
 
-// The run window: [07:00, 07:15) or [19:00, 19:15) WIB (UTC+7, no daylight saving), as "YYYY-MM-DDTHH" in WIB;
-// null outside both.
+// The run window: [07:00, 07:15) or [19:00, 19:15) on the local clock (lib/time.ts; WIB by default), as
+// "YYYY-MM-DDTHH" in local time; null outside both.
 export function advisorWindow(now: Date): string | null {
-  const wib = new Date(now.getTime() + 7 * 3_600_000);
-  const h = wib.getUTCHours();
-  const m = wib.getUTCMinutes();
+  const { hour: h, minute: m } = zonedParts(now);
   if ((h !== 7 && h !== 19) || m >= WINDOW_MINUTES) return null;
-  return `${wib.toISOString().slice(0, 10)}T${String(h).padStart(2, "0")}`;
+  return `${dayKey(now)}T${String(h).padStart(2, "0")}`;
 }
 
 type Alert = { app?: unknown; severity?: unknown; title?: unknown; message?: unknown };

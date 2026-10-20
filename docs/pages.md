@@ -5,8 +5,9 @@ see them in the menu (see [roles](first-run.md#add-more-people)). Press Ctrl+K (
 page by name.
 
 Watchbell reads your providers on a schedule of its own: a collector run every minute (each task only when its own
-interval has passed) and a daily job at 03:00 WIB (UTC+7). Nothing runs while the machine is asleep or Watchbell is
-stopped; a missed daily job runs once when it is back. Times on these pages and in messages are in WIB.
+interval has passed) and a daily job at 03:00 in your [time zone](configuration.md#time-zone). Nothing runs while the
+machine is asleep or Watchbell is stopped; a missed daily job runs once when it is back. Times on these pages and in
+messages are in that zone.
 
 - [Home](#home)
 - [Workloads](#workloads)

@@ -1,9 +1,8 @@
-import { clock } from "@/lib/time";
+import { clock, dayKey } from "@/lib/time";
 import { shortSha } from "./format";
-import { wibDay } from "./uptime";
 
 // A1: production deploys on the app's charts, so "did the deploy cause it?" is answered at a glance. Ticks sit on the
-// 24 h response chart (48 half-hour points); day marks sit on the 90-day bars (WIB days). Deployments are kept
+// 24 h response chart (48 half-hour points); day marks sit on the 90-day bars (local days). Deployments are kept
 // 30 days (plus the current and previous production ones), so older bars have no marks.
 export type DeployMark = { at: Date; sha: string | null; state: string };
 
@@ -22,7 +21,7 @@ export function deployTicks(deps: DeployMark[], first: number, sizeMs: number, n
 export function deployDays(deps: DeployMark[]): Map<string, string> {
   const out = new Map<string, string[]>();
   for (const d of [...deps].sort((a, b) => a.at.getTime() - b.at.getTime())) {
-    const k = wibDay(d.at);
+    const k = dayKey(d.at);
     const label = `${shortSha(d.sha)}${d.state === "error" ? " (failed)" : ""}`;
     out.set(k, [...(out.get(k) ?? []), label]);
   }

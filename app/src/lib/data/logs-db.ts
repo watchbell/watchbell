@@ -8,7 +8,7 @@ import { recordEvents } from "@/lib/data/events-write";
 import { serverEnv } from "@/lib/env";
 import { clip, pathOnly, scrubLog } from "@/lib/logs/scrub";
 import { readRequestLogs, type RuntimeLogLine } from "@/lib/providers/vercel-request-logs";
-import { wibDay, wibDayStart } from "@/lib/view/uptime";
+import { dayKey, dayStart } from "@/lib/time";
 
 export const STORE_LEVELS = ["warning", "error", "fatal"] as const;
 export const DAILY_CAP = 1000;
@@ -61,9 +61,9 @@ export async function taskLogs(now: Date, deadline: number, errors: string[]): P
   if (off?.value === true) return;
   const list = await targets(null);
   if (!list.length) return;
-  const dayStart = wibDayStart(wibDay(now));
+  const today = dayStart(dayKey(now));
   const counts = new Map((await db().select({ id: storedLogs.resourceId, n: sql<number>`count(*)::int` }).from(storedLogs)
-    .where(and(inArray(storedLogs.resourceId, list.map((t) => t.appId)), gte(storedLogs.at, dayStart))).groupBy(storedLogs.resourceId)).map((r) => [r.id, r.n]));
+    .where(and(inArray(storedLogs.resourceId, list.map((t) => t.appId)), gte(storedLogs.at, today))).groupBy(storedLogs.resourceId)).map((r) => [r.id, r.n]));
   const newest = new Map((await db().select({ id: storedLogs.resourceId, at: max(storedLogs.at) }).from(storedLogs)
     .where(inArray(storedLogs.resourceId, list.map((t) => t.appId))).groupBy(storedLogs.resourceId)).map((r) => [r.id, r.at]));
   const [cursorRow] = await db().select().from(settings).where(eq(settings.key, CURSOR_KEY)).limit(1);

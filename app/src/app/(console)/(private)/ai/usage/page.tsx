@@ -13,7 +13,7 @@ import {
 } from "@/private/ai/agent-usage-db";
 import { enabledModels, isFresh, readAgSettings, readRouterQuota } from "@/private/ai/extras";
 import { RouterQuotaCard } from "@/private/ai/extras-ui";
-import { durationText, wibTime } from "@/private/ai/time-text";
+import { durationText, localTime } from "@/private/ai/time-text";
 import {
   activityLine, API_KINDS, buildGraph, MODEL_KINDS, parseRange, RANGES, rangeWindow, recentRow, usageSeries, usageStats,
 } from "@/private/ai/usage-analytics";
@@ -156,7 +156,7 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
                   <div className="mt-1 text-[12px] text-ink-faint">
                     {b.limit === null ? "No limit entered · " : ""}
                     {b.runs} runs in {b.window}
-                    {b.resetsAt ? ` · resets as the oldest run leaves the window (~${wibTime(b.resetsAt, now)})` : ""}
+                    {b.resetsAt ? ` · resets as the oldest run leaves the window (~${localTime(b.resetsAt, now)})` : ""}
                   </div>
                 </li>
               ))}

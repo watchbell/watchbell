@@ -1,7 +1,7 @@
 // R3 (Red Hat Insights Advisor, Backstage scorecards): daily hygiene items with a why, a fix and a link. Separate from
 // alerts, never notified. Keys are stable, so a dismissal (30 days) follows the item, and a changed situation (another
 // status code, another expiry date) is a new item.
-import { dayMonth, TZ, wibDate } from "@/lib/time";
+import { calendarDate, dayKey, dayMonth } from "@/lib/time";
 
 export type Rec = { key: string; severity: "warning" | "info"; appId: string | null; subject: string; title: string; why: string; fix: string; href: string };
 export type AdvisorFacts = {
@@ -19,9 +19,9 @@ export type AdvisorFacts = {
 export const COMEBACK_MS = 30 * 86_400_000;
 export const MAX_RECS = 50;
 const DAY = 86_400_000;
-const longDay = (d: Date) => { const w = wibDate(d); return `${w.day} ${w.month} ${w.year}`; };
-// The calendar day in WIB (YYYY-MM-DD), the same calendar the title uses.
-const isoDay = (d: Date) => d.toLocaleDateString("en-CA", { timeZone: TZ });
+const longDay = (d: Date) => { const w = calendarDate(d); return `${w.day} ${w.month} ${w.year}`; };
+// The local calendar day (YYYY-MM-DD, lib/time.ts), the same calendar the title uses.
+const isoDay = dayKey;
 
 export function recommendations(f: AdvisorFacts): Rec[] {
   const out: Rec[] = [];

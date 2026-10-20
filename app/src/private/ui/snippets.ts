@@ -3,6 +3,7 @@
 // KEY_PLACEHOLDER (or the env var $WATCHBELL_API_KEY) stands in. Gemini models only (owner ruling, 13 Oct).
 
 import { SNIPPETS_COPY } from "@/lib/copy/edition";
+import { timeZone } from "@/lib/time";
 
 export const KEY_PLACEHOLDER = "wb_YOUR_KEY";
 export const DEFAULT_MODEL = "gemini/gemini-3.8-flash";
@@ -165,7 +166,7 @@ Nothing in Watchbell can be changed through this key (a key with write:notes may
 
 // The Antigravity Automation that watches the apps once a day (owner 13 Oct).
 export function automationPrompt(origin: string): string {
-  return `Schedule: every day at 08:00 (Asia/Jakarta).
+  return `Schedule: every day at 08:00 (${timeZone()}).
 Use the MCP server "watchbell" (${mcpUrl(origin)}). Steps:
 1. Call list_apps.
 2. For every app whose state isn't "running", call get_app with its id.

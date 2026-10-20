@@ -1,19 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { summaryCounts, dayKeys, dayTone, firstBucket, lastDays, mergeDays, series, uptimeBars, uptimePct, wibDay, wibDayStart } from "./uptime";
+import { summaryCounts, dayKeys, dayTone, firstBucket, lastDays, mergeDays, series, uptimeBars, uptimePct } from "./uptime";
+import { dayKey, dayStart } from "@/lib/time";
 
 const H = 3_600_000;
 
 describe("WIB days", () => {
   it("puts 00:30 WIB on the new day, though it is still the day before in UTC", () => {
-    expect(wibDay(new Date("2026-10-12T17:30:00Z"))).toBe("2026-10-13");
-    expect(wibDay(new Date("2026-10-12T16:59:00Z"))).toBe("2026-10-12");
+    expect(dayKey(new Date("2026-10-12T17:30:00Z"))).toBe("2026-10-13");
+    expect(dayKey(new Date("2026-10-12T16:59:00Z"))).toBe("2026-10-12");
   });
   it("lists the last n days oldest first, ending with today in WIB, across month ends", () => {
     expect(dayKeys(new Date("2026-10-12T17:30:00Z"), 3)).toEqual(["2026-10-11", "2026-10-12", "2026-10-13"]);
     expect(dayKeys(new Date("2026-03-01T03:00:00Z"), 2)).toEqual(["2026-02-28", "2026-03-01"]);
   });
   it("starts a WIB day at 17:00 UTC the day before", () => {
-    expect(wibDayStart("2026-10-13").toISOString()).toBe("2026-10-12T17:00:00.000Z");
+    expect(dayStart("2026-10-13").toISOString()).toBe("2026-10-12T17:00:00.000Z");
   });
 });
 
