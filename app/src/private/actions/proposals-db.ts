@@ -1,0 +1,543 @@
+import "server-only";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { db } from "@/db/client";
+import { ACTIONS_COPY } from "@/lib/copy/edition";
+import { deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
+import { readAliasBook } from "@/lib/data/aliases-db";
+import { listFiring } from "@/lib/data/alerts-db";
+import { fixableApps } from "@/lib/data/deps-db";
+import { tokenFromSetting } from "@/lib/heartbeat";
+import { tokenHash } from "@/lib/heartbeat-token";
+import { neonData, readData, supabaseData } from "@/lib/databases/snapshot-data";
+import { type AliasBook, EMPTY_BOOK } from "@/lib/view/display-name";
+import { actionProposals } from "@/private/db/schema";
+import {
+  autoRuns, factNeeds, type ProposalAlert, type ProposalDraft, type ProposalFacts, proposalsFor, type ProposalRow, resultSentence,
+  RUN_STUCK_MS, type SuspendedNeon, toProposal, wakeableEndpoint,
+} from "./proposals";
+import {
+  BASELINE_MS, COOLDOWN_MS, DB_ERROR_SQL, DB_ERRORS_MIN, ERRORS_MIN, freshLogDrafts, type LogApp, LOG_RULES, logProposalsFor, type LogRow, logsDue,
+  NO_DEPLOY_MS, RECENT_MS, SPIKE_MIN, SPIKE_WINDOW_MS, staleLogIds,
+} from "./log-proposals";
+import { AUTO_ROLLBACK_GAP_MS, AUTO_ROLLBACK_RULES, autoRollbackDecision, autoRollbackReason, deployRef, type RollbackCheck } from "./auto-rollback";
+import { notifyAutoRollback, notifyNewProposals, notifyProposalResult } from "./proposals-notify";
+import { type Runner, runProposalAction, type RunTarget } from "./proposals-run";
+import { autoBumpReady } from "@/lib/data/deps-pr";
+import { type AutoRollback, readAutoRollback, readAutoRun, readAutoSecurity } from "./proposals-settings";
+import type { Proposal } from "./proposals-types";
+
+// Stage 9 slice 1: the proposals table (0030 ops.action_proposals). Status moves only forward, each step a
+// compare-and-set on the status it expects: pending → approved | rejected | expired; approved → running (the claim:
+// one process only) → done | failed. A proposal is made at most once per alert and action (a rejected or expired one is
+// not proposed again while that alert fires; the partial unique index also stops two open ones racing in).
+
+const KEEP_MS = 30 * 86_400_000; // daily retention
+const LIST_WINDOW_MS = 7 * 86_400_000;
+
+const ROW = {
+  id: actionProposals.id, room: actionProposals.room, action: actionProposals.action, risk: actionProposals.risk, title: actionProposals.title,
+  reason: actionProposals.reason, resourceName: actionProposals.resourceName, proposedBy: actionProposals.proposedBy, status: actionProposals.status,
+  auto: actionProposals.auto, result: actionProposals.result, createdAt: actionProposals.createdAt, decidedAt: actionProposals.decidedAt,
+  expiresAt: actionProposals.expiresAt,
+};
+const RUN_ROW = { ...ROW, resourceId: actionProposals.resourceId, targetRef: actionProposals.targetRef, ruleKey: actionProposals.ruleKey };
+type RunRow = ProposalRow & { resourceId: string | null; targetRef: string | null; ruleKey?: string };
+
+// ---- facts for the firing alerts (only what they need; nothing read when no alert needs it) ----
+export async function readProposalFacts(alerts: ProposalAlert[], now: Date, rollbackWindowMs?: number): Promise<ProposalFacts> {
+  const need = factNeeds(alerts, now);
+  const [mons, deps, refs, neon, fixable, dailyHb] = await Promise.all([
+    need.monitorIds.length ? db().select({ id: monitors.id, kind: monitors.kind }).from(monitors).where(inArray(monitors.id, need.monitorIds)) : [],
+    need.deployApps.length
+      ? db().select({ app: deployments.resourceId, id: deployments.externalId, isCurrent: deployments.isCurrent, isPrevious: deployments.isPreviousProduction, readyAt: deployments.readyAt, createdAt: deployments.createdAtProvider })
+        .from(deployments).where(and(inArray(deployments.resourceId, need.deployApps), or(eq(deployments.isCurrent, true), eq(deployments.isPreviousProduction, true))))
+      : [],
+    need.supabaseIds.length
+      ? db().select({ id: resources.id, ref: resources.externalId }).from(resources)
+        .where(and(inArray(resources.id, need.supabaseIds), eq(resources.kind, "supabase_project"), sql`${resources.goneAt} is null`))
+      : [],
+    need.monitorApps.length ? suspendedNeon(need.monitorApps) : new Map<string, SuspendedNeon>(),
+    need.depApps.length ? fixableApps(need.depApps).catch(() => new Map<string, string>()) : new Map<string, string>(),
+    need.monitorIds.length ? dailyHeartbeatId(need.monitorIds) : null,
+  ]);
+  const deploys = new Map<string, { currentId: string | null; previousId: string | null; liveAt: Date | null }>();
+  for (const d of deps) {
+    const cur = deploys.get(d.app) ?? { currentId: null, previousId: null, liveAt: null };
+    if (d.isCurrent) { cur.currentId = d.id; cur.liveAt = d.readyAt ?? d.createdAt ?? null; }
+    else if (d.isPrevious) cur.previousId = d.id;
+    deploys.set(d.app, cur);
+  }
+  return {
+    monitorKinds: new Map(mons.map((m) => [m.id, String(m.kind)])),
+    deploys,
+    ...(rollbackWindowMs !== undefined ? { rollbackWindowMs } : {}),
+    supabaseRefs: new Map(refs.map((r) => [r.id, r.ref])),
+    neonSuspended: neon,
+    fixableRepos: fixable,
+    dailyHeartbeatId: dailyHb,
+  };
+}
+
+// Owner 19 Oct: which of these monitors is the console's own daily-job heartbeat: the one whose stored hash is the hash
+// of DAILY_HEARTBEAT_TOKEN, found the way recordPing finds it. Null when the setting is missing, unreadable or matches none.
+async function dailyHeartbeatId(monitorIds: string[]): Promise<string | null> {
+  const token = tokenFromSetting(process.env.DAILY_HEARTBEAT_TOKEN);
+  if (!token) return null;
+  const [m] = await db().select({ id: monitors.id }).from(monitors)
+    .where(and(inArray(monitors.id, monitorIds), eq(monitors.kind, "heartbeat"), eq(monitors.tokenHash, tokenHash(token)))).limit(1)
+    .catch(() => []);
+  return m?.id ?? null;
+}
+
+// The apps' linked (uses_db) Neon databases whose compute the last snapshot shows suspended.
+async function suspendedNeon(appIds: string[]): Promise<Map<string, SuspendedNeon>> {
+  const rows = await db().select({ app: links.fromResourceId, id: resources.id, kind: resources.kind, externalId: resources.externalId, parentId: resources.parentId })
+    .from(links).innerJoin(resources, eq(resources.id, links.toResourceId))
+    .where(and(inArray(links.fromResourceId, appIds), eq(links.kind, "uses_db"), inArray(resources.kind, ["neon_project", "neon_branch"]), sql`${resources.goneAt} is null`));
+  const out = new Map<string, SuspendedNeon>();
+  if (!rows.length) return out;
+  const projectOf = (r: (typeof rows)[number]) => (r.kind === "neon_branch" ? r.parentId : r.id);
+  const projectIds = [...new Set(rows.map(projectOf).filter((x): x is string => !!x))];
+  if (!projectIds.length) return out;
+  const snaps = await db().select({ id: snapshots.resourceId, data: snapshots.data }).from(snapshots).where(inArray(snapshots.resourceId, projectIds));
+  const byProject = new Map(snaps.map((s) => [s.id, readData(neonData, s.data)]));
+  for (const r of rows) {
+    const p = projectOf(r);
+    const d = p ? byProject.get(p) : undefined;
+    const ep = d ? wakeableEndpoint(d.endpoints, d.branches, r.kind === "neon_branch" ? r.externalId : null) : null;
+    if (ep) out.set(r.app, { resourceId: r.id, resourceKind: r.kind as SuspendedNeon["resourceKind"], endpointId: ep });
+  }
+  return out;
+}
+
+// ---- create (dedupe) ----
+// Inserts the drafts whose (alert, action) has never been proposed; returns the new rows.
+export async function createProposals(drafts: ProposalDraft[]): Promise<RunRow[]> {
+  if (!drafts.length) return [];
+  const seen = await db().select({ alertId: actionProposals.alertId, action: actionProposals.action }).from(actionProposals)
+    .where(inArray(actionProposals.alertId, [...new Set(drafts.map((d) => d.alertId))]));
+  const had = new Set(seen.map((s) => `${s.alertId}:${s.action}`));
+  const fresh = drafts.filter((d) => !had.has(`${d.alertId}:${d.action}`));
+  if (!fresh.length) return [];
+  return db().insert(actionProposals).values(fresh.map((d) => ({ ...d, status: "pending" as const }))).onConflictDoNothing().returning(RUN_ROW);
+}
+
+// ---- list ----
+// Pending first, then newest; the last 7 days; at most `limit`.
+export async function listProposals(now: Date, limit: number): Promise<Proposal[]> {
+  const rows = await db().select(ROW).from(actionProposals)
+    .where(sql`${actionProposals.createdAt} >= ${new Date(now.getTime() - LIST_WINDOW_MS).toISOString()}::timestamptz`)
+    .orderBy(sql`case when ${actionProposals.status} = 'pending' then 0 else 1 end`, desc(actionProposals.createdAt), desc(actionProposals.id))
+    .limit(limit);
+  return rows.map(toProposal);
+}
+
+// ---- read one ----
+// One proposal by id, whatever its age or status (the Auto-actions page's ?proposal= link from a Telegram notice).
+export async function readProposal(id: string): Promise<Proposal | null> {
+  const [row] = await db().select(ROW).from(actionProposals).where(eq(actionProposals.id, id)).limit(1);
+  return row ? toProposal(row) : null;
+}
+
+// ---- decide ----
+export type DecideOutcome = { status: "ok"; proposal: Proposal } | { status: "missing" } | { status: "conflict"; proposal: Proposal };
+
+export async function decideProposal(id: string, decision: "approve" | "reject", memberId: string, now: Date): Promise<DecideOutcome & { row?: RunRow }> {
+  const [row] = await db().update(actionProposals)
+    .set({ status: decision === "approve" ? "approved" : "rejected", decidedBy: memberId, decidedAt: now })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "pending"), sql`${actionProposals.expiresAt} > ${now.toISOString()}::timestamptz`))
+    .returning(RUN_ROW);
+  if (row) return { status: "ok", proposal: toProposal(row), row };
+  const [cur] = await db().select(ROW).from(actionProposals).where(eq(actionProposals.id, id)).limit(1);
+  return cur ? { status: "conflict", proposal: toProposal(cur) } : { status: "missing" };
+}
+
+// ---- run: claim (approved → running, once), run, finish (running → done | failed) ----
+export async function claimProposal(id: string, now: Date): Promise<RunRow | null> {
+  const [row] = await db().update(actionProposals).set({ status: "running", claimedAt: now })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "approved"))).returning(RUN_ROW);
+  return row ?? null;
+}
+
+export async function finishProposal(id: string, ok: boolean, result: string, now: Date): Promise<RunRow | null> {
+  const [row] = await db().update(actionProposals).set({ status: ok ? "done" : "failed", result, finishedAt: now })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "running"))).returning(RUN_ROW);
+  return row ?? null;
+}
+
+export type ExecDeps = { run: (t: RunTarget, who: Runner["member"]) => Promise<{ ok: true; message?: string } | { ok: false; error: string }>; book: () => Promise<AliasBook> };
+const EXEC: ExecDeps = { run: (t, who) => runProposalAction(t, who), book: () => readAliasBook() };
+
+// Claims an approved proposal and runs it. Null when another process has it (or it isn't approved).
+export async function executeProposal(id: string, who: Runner["member"], now: Date, deps: ExecDeps = EXEC): Promise<Proposal | null> {
+  const row = await claimProposal(id, now);
+  if (!row) return null;
+  const r = await deps.run({ action: row.action, resourceId: row.resourceId, targetRef: row.targetRef, proposalId: row.id }, who);
+  const book = await deps.book().catch(() => EMPTY_BOOK);
+  const done = await finishProposal(id, r.ok, resultSentence(r, book), new Date());
+  return done ? toProposal(done) : null;
+}
+
+// ---- expire ----
+// Pending ones past their time or whose alert stopped firing → expired; a run that never finished → failed.
+export async function expireProposals(firingIds: string[], now: Date): Promise<number> {
+  const stale = await db().update(actionProposals).set({ status: "expired", result: "Expired: nobody decided in time, or the alert stopped firing." })
+    .where(and(eq(actionProposals.status, "pending"), or(
+      lt(actionProposals.expiresAt, new Date(now.getTime() + 1)),
+      and(isNotNull(actionProposals.alertId), firingIds.length ? notInArray(actionProposals.alertId, firingIds) : sql`true`),
+    ))).returning({ id: actionProposals.id });
+  await db().update(actionProposals).set({ status: "failed", result: "The run was interrupted. Check the console page before trying again.", finishedAt: now })
+    .where(and(eq(actionProposals.status, "running"), lt(actionProposals.claimedAt, new Date(now.getTime() - RUN_STUCK_MS))));
+  return stale.length;
+}
+
+// Daily retention: proposals older than 30 days that are no longer open.
+export async function pruneProposals(now: Date): Promise<void> {
+  await db().delete(actionProposals).where(and(lt(actionProposals.createdAt, new Date(now.getTime() - KEEP_MS)),
+    notInArray(actionProposals.status, ["pending", "approved", "running"])));
+}
+
+// ---- log proposals (log-proposals.ts): one aggregate read of ops.stored_logs' last 26 h, then, only for the few apps
+// whose counts cross a threshold, their context in three small reads (in parallel) ----
+const isErr = sql`(${storedLogs.level} in ('error', 'fatal') or coalesce(${storedLogs.statusCode}, 0) >= 500)`;
+const liveAtSql = sql`coalesce(${deployments.readyAt}, ${deployments.createdAtProvider})`;
+
+export async function readLogApps(now: Date): Promise<LogApp[]> {
+  const since = new Date(now.getTime() - SPIKE_WINDOW_MS - BASELINE_MS);
+  const recent = sql`${storedLogs.at} >= ${new Date(now.getTime() - RECENT_MS).toISOString()}::timestamptz`;
+  const dbLine = sql`${storedLogs.message} ~* ${DB_ERROR_SQL}`;
+  const msg = sql`left(${storedLogs.message}, 200)`;
+  const rows = await db().select({
+    appId: storedLogs.resourceId,
+    appName: sql<string>`max(${resources.name})`,
+    liveAt: sql<Date | null>`max(${liveAtSql})`.mapWith(deployments.readyAt),
+    currentId: sql<string | null>`max(${deployments.externalId})`,
+    errorsSinceLive: sql<number>`count(*) filter (where ${isErr} and ${storedLogs.at} >= ${liveAtSql})`.mapWith(Number),
+    baselineErrors: sql<number>`count(*) filter (where ${isErr} and ${storedLogs.at} >= ${liveAtSql} - interval '24 hours' and ${storedLogs.at} < ${liveAtSql})`.mapWith(Number),
+    topSinceLive: sql<string | null>`mode() within group (order by ${msg}) filter (where ${isErr} and ${storedLogs.at} >= ${liveAtSql})`,
+    errors30: sql<number>`count(*) filter (where ${isErr} and ${recent})`.mapWith(Number),
+    top30: sql<string | null>`mode() within group (order by ${msg}) filter (where ${isErr} and ${recent})`,
+    dbErrors30: sql<number>`count(*) filter (where ${recent} and ${dbLine})`.mapWith(Number),
+    topDb: sql<string | null>`mode() within group (order by ${msg}) filter (where ${recent} and ${dbLine})`,
+  }).from(storedLogs)
+    .innerJoin(resources, eq(resources.id, storedLogs.resourceId))
+    .leftJoin(deployments, and(eq(deployments.resourceId, storedLogs.resourceId), eq(deployments.isCurrent, true)))
+    .where(and(gte(storedLogs.at, since), eq(resources.kind, "app"), isNull(resources.goneAt)))
+    .groupBy(storedLogs.resourceId);
+  const hot = rows.filter((r) => r.errorsSinceLive >= SPIKE_MIN || r.errors30 >= ERRORS_MIN || r.dbErrors30 >= DB_ERRORS_MIN);
+  if (!hot.length) return [];
+  const ids = hot.map((r) => r.appId);
+  const [deps, mons, dbs] = await Promise.all([
+    db().select({
+      app: deployments.resourceId,
+      previousId: sql<string | null>`max(${deployments.externalId}) filter (where ${deployments.isPreviousProduction})`,
+      lastDeployAt: sql<Date | null>`max(${deployments.createdAtProvider}) filter (where ${deployments.target} = 'production')`.mapWith(deployments.createdAtProvider),
+    }).from(deployments)
+      .where(and(inArray(deployments.resourceId, ids), or(eq(deployments.isPreviousProduction, true), gte(deployments.createdAtProvider, new Date(now.getTime() - NO_DEPLOY_MS)))))
+      .groupBy(deployments.resourceId),
+    db().select({ app: monitors.resourceId, id: monitors.id }).from(monitors)
+      .where(and(inArray(monitors.resourceId, ids), eq(monitors.kind, "http"), eq(monitors.paused, false), eq(monitors.ownerPaused, false)))
+      .orderBy(monitors.createdAt),
+    linkedDbs(ids),
+  ]);
+  const depBy = new Map(deps.map((d) => [d.app, d]));
+  const monBy = new Map<string, string>();
+  for (const m of mons) if (!monBy.has(m.app)) monBy.set(m.app, m.id);
+  return hot.map((r) => ({
+    ...r, appName: r.appName ?? "", previousId: depBy.get(r.appId)?.previousId ?? null, lastDeployAt: depBy.get(r.appId)?.lastDeployAt ?? null,
+    httpMonitorId: monBy.get(r.appId) ?? null, db: dbs.get(r.appId) ?? null,
+  }));
+}
+
+// Each app's linked database (uses_db, at most one): a Neon compute that can be woken, or a paused Supabase project.
+async function linkedDbs(appIds: string[]): Promise<Map<string, NonNullable<LogApp["db"]>>> {
+  const rows = await db().select({ app: links.fromResourceId, id: resources.id, kind: resources.kind, externalId: resources.externalId, parentId: resources.parentId })
+    .from(links).innerJoin(resources, eq(resources.id, links.toResourceId))
+    .where(and(inArray(links.fromResourceId, appIds), eq(links.kind, "uses_db"), inArray(resources.kind, ["neon_project", "neon_branch", "supabase_project"]), isNull(resources.goneAt)));
+  const out = new Map<string, NonNullable<LogApp["db"]>>();
+  if (!rows.length) return out;
+  const snapOf = (r: (typeof rows)[number]) => (r.kind === "neon_branch" ? r.parentId : r.id);
+  const snapIds = [...new Set(rows.map(snapOf).filter((x): x is string => !!x))];
+  const snaps = snapIds.length ? await db().select({ id: snapshots.resourceId, data: snapshots.data }).from(snapshots).where(inArray(snapshots.resourceId, snapIds)) : [];
+  const dataBy = new Map(snaps.map((s) => [s.id, s.data]));
+  for (const r of rows) {
+    const raw = dataBy.get(snapOf(r) ?? "");
+    if (r.kind === "supabase_project") {
+      const d = readData(supabaseData, raw);
+      out.set(r.app, { resourceId: r.id, kind: r.kind, wakeEndpoint: null, supabaseRef: r.externalId, supabasePaused: d.status === "INACTIVE" });
+    } else {
+      const d = readData(neonData, raw);
+      out.set(r.app, { resourceId: r.id, kind: r.kind, wakeEndpoint: wakeableEndpoint(d.endpoints, d.branches, r.kind === "neon_branch" ? r.externalId : null), supabaseRef: null, supabasePaused: false });
+    }
+  }
+  return out;
+}
+
+// The log proposals open now or closed within the cooldown (for the dedupe and the condition expiry).
+export async function recentLogRows(now: Date): Promise<LogRow[]> {
+  const closedAt = sql<Date | null>`coalesce(${actionProposals.finishedAt}, ${actionProposals.decidedAt}, ${actionProposals.expiresAt})`;
+  return db().select({
+    id: actionProposals.id, ruleKey: actionProposals.ruleKey, resourceId: actionProposals.resourceId, action: actionProposals.action, status: actionProposals.status,
+    closedAt: closedAt.mapWith(actionProposals.finishedAt),
+  }).from(actionProposals)
+    .where(and(isNull(actionProposals.alertId), inArray(actionProposals.ruleKey, [...LOG_RULES]),
+      or(inArray(actionProposals.status, ["pending", "approved", "running"]), sql`${closedAt} > ${new Date(now.getTime() - COOLDOWN_MS).toISOString()}::timestamptz`)));
+}
+
+export type LogStepDeps = { apps: typeof readLogApps; rows: typeof recentLogRows };
+const LOG_DEPS: LogStepDeps = { apps: readLogApps, rows: recentLogRows };
+
+// One log evaluation: drafts from the counts; pending ones whose condition stopped → expired; fresh ones inserted.
+export async function runLogProposals(now: Date, book: AliasBook, deps: LogStepDeps = LOG_DEPS): Promise<{ created: RunRow[]; expired: number }> {
+  const [apps, existing] = await Promise.all([deps.apps(now), deps.rows(now)]);
+  const drafts = apps.flatMap((a) => logProposalsFor(a, book, now));
+  const stale = staleLogIds(existing, drafts);
+  let expired = 0;
+  if (stale.length) {
+    const rows = await db().update(actionProposals).set({ status: "expired", result: "Expired: the logs no longer show it.", finishedAt: now })
+      .where(and(inArray(actionProposals.id, stale), eq(actionProposals.status, "pending"))).returning({ id: actionProposals.id });
+    expired = rows.length;
+  }
+  const fresh = freshLogDrafts(drafts, existing, now);
+  if (!fresh.length) return { created: [], expired };
+  const created = await db().insert(actionProposals).values(fresh.map((d) => ({ ...d, status: "pending" as const }))).onConflictDoNothing().returning(RUN_ROW);
+  return { created, expired };
+}
+
+// The minute step reads the logs at most once per 5 minutes (logsDue): a per-instance memo plus the clock's 5-minute
+// slot, so the throttle itself costs no read.
+let lastLogRead: number | null = null;
+export function resetLogThrottle(): void {
+  lastLogRead = null;
+}
+async function logsIfDue(now: Date, book: () => Promise<AliasBook>): Promise<{ created: RunRow[]; expired: number }> {
+  if (!logsDue(now, lastLogRead)) return { created: [], expired: 0 };
+  lastLogRead = now.getTime();
+  return runLogProposals(now, await book());
+}
+
+// ---- the minute step ----
+export type StepDeps = {
+  firing: () => Promise<ProposalAlert[]>; book: () => Promise<AliasBook>; facts: typeof readProposalFacts; create: typeof createProposals;
+  expire: typeof expireProposals; autoRun: typeof readAutoRun; approveAuto: (id: string, now: Date) => Promise<boolean>;
+  execute: (id: string, now: Date) => Promise<Proposal | null>; notifyNew: typeof notifyNewProposals; notifyResult: typeof notifyProposalResult;
+  logs: (now: Date, book: () => Promise<AliasBook>) => Promise<{ created: RunRow[]; expired: number }>;
+  // Optional: an edition without a Dev officer leaves it out; spike proposals are still created and notified.
+  queueDev?: (list: { proposalId: string; appId: string }[], now: Date) => Promise<Set<string>>;
+  autoRollback?: () => Promise<AutoRollback>;
+  rollbackContext?: typeof readRollbackContext;
+  approveAutoRollback?: (id: string, reason: string, now: Date) => Promise<boolean>;
+  notifyRollback?: typeof notifyAutoRollback;
+  autoSecurity?: typeof readAutoSecurity;
+  bumpReady?: typeof autoBumpReady;
+  approveAutoBump?: (id: string, now: Date) => Promise<boolean>;
+};
+
+async function approveAuto(id: string, now: Date): Promise<boolean> {
+  const rows = await db().update(actionProposals).set({ status: "approved", auto: true, decidedAt: now })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "pending"), eq(actionProposals.risk, "safe"))).returning({ id: actionProposals.id });
+  return rows.length > 0;
+}
+
+// ---- auto-rollback after a bad production deploy (auto-rollback.ts) ----
+// What the guards need for these apps, in four small reads: the live and previous production deployments, the newest
+// ready production deployment's time, recent console rollbacks / promotes (Events), and the auto-rollbacks of the last
+// 30 days.
+type RollbackApp = Omit<RollbackCheck, "setting" | "ruleKey" | "targetRef" | "inFlight">;
+
+export async function readRollbackContext(appIds: string[], now: Date): Promise<{ apps: Map<string, RollbackApp>; inFlight: boolean }> {
+  const since2h = new Date(now.getTime() - AUTO_ROLLBACK_GAP_MS);
+  const [deps, newest, evs, autos] = await Promise.all([
+    db().select({
+      app: deployments.resourceId, id: deployments.externalId, sha: deployments.commitSha, state: deployments.state, isCurrent: deployments.isCurrent,
+      isPrevious: deployments.isPreviousProduction, readyAt: deployments.readyAt, createdAt: deployments.createdAtProvider,
+    }).from(deployments).where(and(inArray(deployments.resourceId, appIds), or(eq(deployments.isCurrent, true), eq(deployments.isPreviousProduction, true)))),
+    db().select({ app: deployments.resourceId, at: sql<Date | null>`max(${deployments.createdAtProvider})`.mapWith(deployments.createdAtProvider) })
+      .from(deployments).where(and(inArray(deployments.resourceId, appIds), eq(deployments.target, "production"), eq(deployments.state, "ready")))
+      .groupBy(deployments.resourceId),
+    db().select({ app: events.resourceId }).from(events)
+      .where(and(eq(events.type, "action"), inArray(events.resourceId, appIds), gte(events.at, since2h), sql`${events.message} ~ ${ROLLED_OR_PROMOTED}`)),
+    db().select({ app: actionProposals.resourceId, targetRef: actionProposals.targetRef, status: actionProposals.status, decidedAt: actionProposals.decidedAt })
+      .from(actionProposals)
+      .where(and(eq(actionProposals.action, "vercel_rollback"), eq(actionProposals.auto, true), gte(actionProposals.createdAt, new Date(now.getTime() - 31 * 86_400_000)))),
+  ]);
+  const apps = new Map<string, RollbackApp>();
+  for (const app of appIds) {
+    const cur = deps.find((d) => d.app === app && d.isCurrent);
+    const prev = deps.find((d) => d.app === app && d.isPrevious && !d.isCurrent);
+    const mine = autos.filter((a) => a.app === app);
+    apps.set(app, {
+      deploy: cur ? {
+        currentId: cur.id, currentSha: cur.sha, liveAt: cur.readyAt ?? cur.createdAt, currentCreatedAt: cur.createdAt,
+        newestProdCreatedAt: newest.find((n) => n.app === app)?.at ?? null,
+        previousId: prev?.id ?? null, previousState: prev?.state ?? null, previousCreatedAt: prev?.createdAt ?? null,
+      } : null,
+      rolledOrPromotedLately: evs.some((e) => e.app === app),
+      autoLately: mine.some((a) => a.decidedAt !== null && a.decidedAt.getTime() >= since2h.getTime()),
+      sameDeployBefore: !!prev && mine.some((a) => a.targetRef === prev.id),
+    });
+  }
+  return { apps, inFlight: autos.some((a) => a.status === "approved" || a.status === "running") };
+}
+
+// The console's own audit messages for a rollback or a promote (vercel-action.ts / vercel-actions.ts), also when the
+// office auto-run did it ("Office auto-run: Rolled back · …").
+const ROLLED_OR_PROMOTED = "(Rolled back|Promoted|Preview promoted) ·";
+
+// pending → approved (auto) for one vercel_rollback, only while no other auto-rollback is approved or running (the
+// in-flight guard, in the same statement). Needs migration 0046 (the auto check allows vercel_rollback).
+async function approveAutoRollback(id: string, reason: string, now: Date): Promise<boolean> {
+  const rows = await db().update(actionProposals).set({ status: "approved", auto: true, decidedAt: now, reason })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "pending"), eq(actionProposals.action, "vercel_rollback"),
+      sql`not exists (select 1 from ops.action_proposals x where x.action = 'vercel_rollback' and x.auto and x.status in ('approved', 'running'))`))
+    .returning({ id: actionProposals.id });
+  return rows.length > 0;
+}
+
+// Runs the new rollback proposals that pass every guard, one at a time; each run is reported on Telegram. Never throws.
+async function autoRollbacks(created: RunRow[], now: Date, left: () => number, deps: StepDeps): Promise<Proposal[]> {
+  const rows = created.filter((r) => r.action === "vercel_rollback" && r.ruleKey && AUTO_ROLLBACK_RULES.has(r.ruleKey) && r.resourceId);
+  if (!rows.length || !deps.autoRollback || !deps.rollbackContext || !deps.approveAutoRollback) return [];
+  const setting = await deps.autoRollback().catch(() => null);
+  if (!setting?.enabled || left() < 15_000) return [];
+  const ran: Proposal[] = [];
+  try {
+    const ctx = await deps.rollbackContext([...new Set(rows.map((r) => r.resourceId!))], now);
+    let inFlight = ctx.inFlight;
+    for (const row of rows) {
+      const app = ctx.apps.get(row.resourceId!);
+      if (!app || left() < 12_000) continue;
+      const decision = autoRollbackDecision({ setting, ruleKey: row.ruleKey ?? null, targetRef: row.targetRef, inFlight, ...app }, now);
+      if (!decision.ok) {
+        console.log(`${ACTIONS_COPY.logTag}/auto-rollback: skipped (${decision.why})`);
+        continue;
+      }
+      const newRef = deployRef(app.deploy!);
+      if (!(await deps.approveAutoRollback(row.id, autoRollbackReason(newRef, setting.windowMin, row.reason), new Date()))) continue;
+      inFlight = true;
+      const p = await deps.execute(row.id, new Date());
+      if (!p) continue;
+      ran.push(p);
+      await (deps.notifyRollback ?? notifyAutoRollback)(p, { reason: row.reason, newRef }).catch(() => undefined);
+      // Never more than one per run: the next one waits for the next minute (and the 2 h rule per app).
+      break;
+    }
+  } catch (e) {
+    console.warn(`${ACTIONS_COPY.logTag}/auto-rollback failed:`, e instanceof Error ? e.name : "error");
+  }
+  return ran;
+}
+
+// Automatic security fixes (owner 16 Oct): pending → approved (auto) for one update-PR proposal. Needs 0047.
+async function approveAutoBump(id: string, now: Date): Promise<boolean> {
+  const rows = await db().update(actionProposals).set({ status: "approved", auto: true, decidedAt: now })
+    .where(and(eq(actionProposals.id, id), eq(actionProposals.status, "pending"), eq(actionProposals.action, "github_bump_pr"))).returning({ id: actionProposals.id });
+  return rows.length > 0;
+}
+
+// The new update-PR proposals that "Automatic security fixes" may open without asking (autoBumpReady); the rest wait.
+async function autoBumps(created: RunRow[], left: () => number, deps: StepDeps): Promise<Proposal[]> {
+  const rows = created.filter((r) => r.action === "github_bump_pr" && r.targetRef);
+  if (!rows.length || !deps.autoSecurity || !deps.bumpReady || !deps.approveAutoBump) return [];
+  const setting = await deps.autoSecurity().catch(() => null);
+  if (!setting?.enabled || !setting.severities.length) return [];
+  const ran: Proposal[] = [];
+  for (const row of rows) {
+    if (left() < 15_000) break;
+    try {
+      const ready = await deps.bumpReady(row.targetRef!, setting.severities);
+      if (!ready.ok) {
+        console.log(`${ACTIONS_COPY.logTag}/auto-security: waits for the owner (${ready.why})`);
+        continue;
+      }
+      if (!(await deps.approveAutoBump(row.id, new Date()))) continue;
+      const p = await deps.execute(row.id, new Date());
+      if (p) ran.push(p);
+    } catch (e) {
+      console.warn(`${ACTIONS_COPY.logTag}/auto-security failed:`, e instanceof Error ? e.name : "error");
+    }
+  }
+  return ran;
+}
+
+const STEP: StepDeps = {
+  firing: () => listFiring(), book: () => readAliasBook(), facts: readProposalFacts, create: createProposals, expire: expireProposals,
+  autoRun: readAutoRun, approveAuto, execute: (id, now) => executeProposal(id, "auto", now), notifyNew: notifyNewProposals, notifyResult: notifyProposalResult,
+  logs: logsIfDue,
+  autoRollback: () => readAutoRollback(), rollbackContext: readRollbackContext, approveAutoRollback, notifyRollback: notifyAutoRollback,
+  autoSecurity: () => readAutoSecurity(), bumpReady: autoBumpReady, approveAutoBump,
+};
+
+// Every minute (minuteSteps): proposals for the firing alerts, expiry, and the auto-run of the safe kinds the owner
+// switched on. Cheap when nothing fires (one read of the firing alerts, one expiry update). Bounded by ctx.deadline: no
+// run starts with under 8 s left. Never throws. Returns what happened, for the log line and the tests.
+export async function runProposalsStep(now: Date, ctx: { deadline?: number } = {}, deps: StepDeps = STEP): Promise<{ created: number; expired: number; autoRan: number }> {
+  const out = { created: 0, expired: 0, autoRan: 0 };
+  const left = () => (ctx.deadline ?? Number.POSITIVE_INFINITY) - Date.now();
+  const alerts = await deps.firing();
+  out.expired = await deps.expire(alerts.map((a) => a.id), now);
+  let bookP: Promise<AliasBook> | null = null;
+  const book = () => (bookP ??= deps.book().catch(() => EMPTY_BOOK));
+  const created: RunRow[] = [];
+  // Only the alert kinds that can get a proposal read anything more.
+  const needs = factNeeds(alerts, now);
+  if (Object.values(needs).some((x) => x.length > 0)) {
+    // The auto-rollback window also decides which down / slow apps get a rollback proposal.
+    const rollback = needs.deployApps.length && deps.autoRollback ? await deps.autoRollback().catch(() => null) : null;
+    const facts = await deps.facts(alerts, now, rollback ? rollback.windowMin * 60_000 : undefined);
+    const b = await book();
+    created.push(...(await deps.create(alerts.flatMap((a) => proposalsFor(a, facts, b, now)))));
+  }
+  // The officers' log check (log-proposals.ts): at most every 5 minutes, only with time left; a failure stays here.
+  if (left() > 10_000) {
+    try {
+      const logs = await deps.logs(now, book);
+      created.push(...logs.created);
+      out.expired += logs.expired;
+    } catch (e) {
+      console.warn(`${ACTIONS_COPY.logTag}/proposals logs failed:`, e instanceof Error ? e.name : "error");
+    }
+  }
+  out.created = created.length;
+  if (!created.length) return out;
+  const autoRun = await deps.autoRun().catch(() => null);
+  // Auto-rollback first (owner 16 Oct): a broken new deploy goes back before anything else runs.
+  const rolled = await autoRollbacks(created, now, left, deps);
+  out.autoRan += rolled.length;
+  const bumped = await autoBumps(created.filter((r) => !rolled.some((p) => p.id === r.id)), left, deps);
+  const rolledIds = new Set(rolled.map((p) => p.id));
+  const ran: Proposal[] = [...bumped];
+  out.autoRan += bumped.length;
+  for (const p of bumped) rolledIds.add(p.id);
+  for (const row of created) {
+    if (rolledIds.has(row.id)) continue;
+    if (!autoRun || !autoRuns(row.action, autoRun) || left() < 8_000) continue;
+    if (!(await deps.approveAuto(row.id, new Date()))) continue;
+    const p = await deps.execute(row.id, new Date());
+    if (p) {
+      ran.push(p);
+      out.autoRan++;
+    }
+  }
+  const ranIds = new Set([...ran.map((p) => p.id), ...rolledIds]);
+  // Slice 3: an error spike after a deploy also asks the Dev officer to read the code (queued; devMinuteStep runs it).
+  const spikes = created.filter((r) => r.ruleKey === "LogErrorSpike" && r.resourceId).map((r) => ({ proposalId: r.id, appId: r.resourceId! }));
+  const devQueued = spikes.length && deps.queueDev ? await deps.queueDev(spikes, now).catch(() => new Set<string>()) : new Set<string>();
+  await deps.notifyNew(created.filter((r) => !ranIds.has(r.id)).map(toProposal), {}, { devQueued }).catch(() => undefined);
+  for (const p of ran) await deps.notifyResult(p).catch(() => undefined);
+  return out;
+}
+
+export function makeProposalsMinuteStep(hooks: { queueDev?: StepDeps["queueDev"] }): (now: Date, ctx?: { deadline?: number }) => Promise<void> {
+  const deps: StepDeps = { ...STEP, queueDev: hooks.queueDev };
+  return async (now, ctx) => {
+    try {
+      const r = await runProposalsStep(now, ctx ?? {}, deps);
+      if (r.created || r.expired || r.autoRan) console.log(`${ACTIONS_COPY.logTag}/proposals: ${r.created} new, ${r.expired} expired, ${r.autoRan} auto-ran`);
+    } catch (e) {
+      console.warn(`${ACTIONS_COPY.logTag}/proposals failed:`, e instanceof Error ? e.name : "error");
+    }
+  };
+}
+
+export const proposalsMinuteStep = makeProposalsMinuteStep({});

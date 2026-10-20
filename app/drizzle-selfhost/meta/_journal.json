@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1792332140537,
+      "tag": "0000_legal_molten_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1792333561008,
+      "tag": "0001_cloud_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792382298789,
+      "tag": "0002_daily_rerun_action",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792389383111,
+      "tag": "0003_local_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792389384111,
+      "tag": "0004_watchbell_key_prefix",
+      "breakpoints": true
+    }
+  ]
+}

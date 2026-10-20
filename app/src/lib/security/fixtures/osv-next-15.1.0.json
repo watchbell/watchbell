@@ -1,0 +1,116 @@
+{
+  "vulns": [
+    {
+      "id": "GHSA-f82v-jwr5-mffw",
+      "summary": "Authorization Bypass in Next.js Middleware",
+      "details": "It is possible to bypass authorization checks within a Next.js application, if the authorization check occurs in middleware.",
+      "aliases": ["CVE-2025-29927"],
+      "modified": "2025-09-10T21:33:45.123Z",
+      "published": "2025-03-21T15:23:00Z",
+      "database_specific": {
+        "github_reviewed_at": "2025-03-21T15:23:00Z",
+        "nvd_published_at": "2025-03-21T15:15:42Z",
+        "severity": "CRITICAL",
+        "github_reviewed": true,
+        "cwe_ids": ["CWE-285", "CWE-863"]
+      },
+      "references": [
+        { "type": "WEB", "url": "https://github.com/vercel/next.js/security/advisories/GHSA-f82v-jwr5-mffw" },
+        { "type": "ADVISORY", "url": "https://nvd.nist.gov/vuln/detail/CVE-2025-29927" }
+      ],
+      "affected": [
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "13.0.0" }, { "fixed": "13.5.9" }] }],
+          "database_specific": { "source": "https://github.com/github/advisory-database/blob/main/advisories/github-reviewed/2025/03/GHSA-f82v-jwr5-mffw/GHSA-f82v-jwr5-mffw.json" }
+        },
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "14.0.0" }, { "fixed": "14.2.25" }] }]
+        },
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "15.0.0" }, { "fixed": "15.2.3" }] }]
+        },
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "11.1.4" }, { "fixed": "12.3.5" }] }]
+        }
+      ],
+      "schema_version": "1.7.0",
+      "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:N" }]
+    },
+    {
+      "id": "GHSA-g5qg-72qw-gw5v",
+      "summary": "Next.js Affected by Cache Key Confusion for Image Optimization API Routes",
+      "details": "A vulnerability in Next.js Image Optimization has been fixed in v15.4.5 and v14.2.31.",
+      "aliases": ["CVE-2025-57752"],
+      "modified": "2025-09-02T08:14:11.902Z",
+      "published": "2025-08-29T21:05:51Z",
+      "database_specific": { "github_reviewed": true, "severity": "MODERATE", "cwe_ids": ["CWE-524"] },
+      "affected": [
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "14.2.31" }] }]
+        },
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "15.0.0" }, { "fixed": "15.4.5" }] }]
+        }
+      ],
+      "schema_version": "1.7.0",
+      "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:N/A:N" }]
+    },
+    {
+      "id": "GHSA-9qr9-h5gf-34mp",
+      "summary": "Next.js is vulnerable to RCE in React flight protocol",
+      "details": "A vulnerability affects certain React packages for versions 19.0.0, 19.1.0, 19.1.1, and 19.2.0 and frameworks that use the affected packages, including Next.js 15.x and 16.x using the App Router.",
+      "aliases": ["CVE-2025-66478"],
+      "modified": "2025-12-05T18:40:02.551Z",
+      "published": "2025-12-03T18:01:36Z",
+      "database_specific": { "github_reviewed": true, "severity": "CRITICAL", "cwe_ids": ["CWE-502"] },
+      "affected": [
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [
+            {
+              "type": "SEMVER",
+              "events": [
+                { "introduced": "15.0.0-canary.0" }, { "fixed": "15.0.5" },
+                { "introduced": "15.1.0-canary.0" }, { "fixed": "15.1.9" },
+                { "introduced": "15.2.0-canary.0" }, { "fixed": "15.2.6" },
+                { "introduced": "15.3.0-canary.0" }, { "fixed": "15.3.6" },
+                { "introduced": "15.4.0-canary.0" }, { "fixed": "15.4.8" },
+                { "introduced": "15.5.0-canary.0" }, { "fixed": "15.5.7" },
+                { "introduced": "16.0.0-canary.0" }, { "fixed": "16.0.7" }
+              ]
+            }
+          ]
+        }
+      ],
+      "schema_version": "1.7.0",
+      "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }]
+    },
+    {
+      "id": "GHSA-qpjv-v59x-3qc4",
+      "summary": "Next.js Race Condition to Cache Poisoning",
+      "details": "A race condition in the Pages Router could cause a cache poisoning issue.",
+      "aliases": ["CVE-2025-32421"],
+      "modified": "2025-05-14T20:01:07.311Z",
+      "published": "2025-05-14T18:50:22Z",
+      "database_specific": { "github_reviewed": true, "severity": "LOW", "cwe_ids": ["CWE-362"] },
+      "affected": [
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "14.2.24" }] }]
+        },
+        {
+          "package": { "name": "next", "ecosystem": "npm", "purl": "pkg:npm/next" },
+          "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "15.0.0" }, { "fixed": "15.1.6" }] }]
+        }
+      ],
+      "schema_version": "1.7.0",
+      "severity": [{ "type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:N/I:L/A:N" }]
+    }
+  ]
+}

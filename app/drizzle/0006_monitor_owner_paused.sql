@@ -1,0 +1,1 @@
+ALTER TABLE "ops"."monitors" ADD COLUMN "owner_paused" boolean DEFAULT false NOT NULL;

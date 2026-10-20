@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>A plain site</title>
+  <link rel="stylesheet" href="/assets/index-4f2a.css">
+  <script type="module" crossorigin src="/assets/index-9b1c.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script>window.dataLayer = window.dataLayer || []; var cfg = { version: "1.4.2" };</script>
+</body>
+</html>

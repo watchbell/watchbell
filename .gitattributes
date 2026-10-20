@@ -1,0 +1,6 @@
+# Line endings per script type, on every checkout: bash fails on CRLF, cmd.exe wants CRLF.
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# The npm CLI (app/bin/watchbell.mjs): its "#!/usr/bin/env node" line must end in LF.
+app/bin/*.mjs text eol=lf

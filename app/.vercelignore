@@ -1,0 +1,7 @@
+# Never upload local secrets or build output; Vercel builds from source with its own env vars.
+.env*
+!.env.example
+node_modules
+.next
+.vercel
+coverage

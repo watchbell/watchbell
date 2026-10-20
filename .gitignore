@@ -1,0 +1,14 @@
+node_modules/
+.next/
+.vercel/
+.env
+.env.*
+!.env.example
+.work/
+*.log
+.DS_Store
+.cache/
+.worktrees/
+
+# Written by scripts/export-public.mjs when this repo was produced by an export
+.watchpost-export

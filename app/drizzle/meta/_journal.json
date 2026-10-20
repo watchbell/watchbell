@@ -1,0 +1,370 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1791731049052,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791731051313,
+      "tag": "0001_lock_down",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791770881804,
+      "tag": "0002_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791770886879,
+      "tag": "0003_rate_limits_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791790305831,
+      "tag": "0004_stage2_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791790308254,
+      "tag": "0005_stage2_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791798144534,
+      "tag": "0006_monitor_owner_paused",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791802919906,
+      "tag": "0007_app_security",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791802927725,
+      "tag": "0008_app_security_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791820221390,
+      "tag": "0009_db_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791824002778,
+      "tag": "0011_alerts_logs",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791824003778,
+      "tag": "0012_alerts_logs_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791831334909,
+      "tag": "0013_perf_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791833398709,
+      "tag": "0014_status_heartbeats",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1791833404337,
+      "tag": "0015_status_heartbeats_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791850957901,
+      "tag": "0016_ai_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791850967267,
+      "tag": "0017_ai_gateway_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791854732878,
+      "tag": "0018_keep_active",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1791854743658,
+      "tag": "0019_keep_active_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1791858343658,
+      "tag": "0020_ai_question_models",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1791861943658,
+      "tag": "0021_ai_usage_agent",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791865543658,
+      "tag": "0022_office_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1791925118608,
+      "tag": "0023_office_usage",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1791928094697,
+      "tag": "0024_office_patrol",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1791931694697,
+      "tag": "0025_office_meeting",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1792038991093,
+      "tag": "0026_backups",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1792038992777,
+      "tag": "0027_backups_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1792038994932,
+      "tag": "0028_github",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1792038997007,
+      "tag": "0029_github_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1792066713709,
+      "tag": "0030_office_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1792066721642,
+      "tag": "0031_office_proposals_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1792109314839,
+      "tag": "0032_dev_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1792109317228,
+      "tag": "0033_dev_notes_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1792109687877,
+      "tag": "0034_dependency_vulns",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792109698896,
+      "tag": "0035_dependency_vulns_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792109852621,
+      "tag": "0036_supabase_compute",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792109857621,
+      "tag": "0037_supabase_compute_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792116438643,
+      "tag": "0038_sql_connections",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792116443219,
+      "tag": "0039_sql_connections_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1792116444987,
+      "tag": "0040_office_teams",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1792116449987,
+      "tag": "0041_office_teams_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1792116450987,
+      "tag": "0042_stage8_providers",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1792116451987,
+      "tag": "0043_stage8_providers_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1792116452987,
+      "tag": "0046_auto_rollback",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1792123690808,
+      "tag": "0047_dependency_prs",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1792123691808,
+      "tag": "0048_create_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1792123692808,
+      "tag": "0049_create_requests_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1792123693808,
+      "tag": "0051_runner",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792123694808,
+      "tag": "0052_runner_lockdown",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792123695808,
+      "tag": "0053_daily_rerun_action",
+      "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792389355613,
+      "tag": "0054_local_auth",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792389356613,
+      "tag": "0055_watchbell_key_prefix",
+      "breakpoints": true
+    }
+  ]
+}

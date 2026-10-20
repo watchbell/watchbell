@@ -1,0 +1,96 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is([data-theme="dark"] *));
+
+:root {
+  --oc-bg: #f4f5f7; --oc-surface: #ffffff; --oc-surface-2: #f8f9fb; --oc-sunken: #eceef2; --oc-hover: #f1f3f6;
+  --oc-nav-bg: #ffffff; --oc-nav-text: #3b4250; --oc-nav-active-bg: #e9efff; --oc-nav-active-text: #1f45c9;
+  --oc-ink: #14171f; --oc-ink-soft: #596170; --oc-ink-faint: #858d9b;
+  --oc-line: #e2e5ea; --oc-line-strong: #cbd0d8;
+  --oc-brand: #1f45c9; --oc-brand-hover: #17359c; --oc-brand-soft: #e9efff; --oc-on-brand: #ffffff;
+  --oc-ok: #17773f; --oc-ok-soft: #e5f4ea; --oc-warn: #8f5200; --oc-warn-icon: #d08300; --oc-warn-soft: #fcf1dd;
+  --oc-err: #c0272d; --oc-err-soft: #fcebeb; --oc-idle: #6b7280;
+  --oc-teal: #0d6b52; --oc-teal-soft: #e2f4ee; --oc-amber: #8f5200; --oc-amber-soft: #fcf1dd; --oc-gray-soft: #eceef2;
+  --oc-code-bg: #0f1218; --oc-code-text: #d6dae1;
+  --oc-code-dim: #7c8492; --oc-code-info: #7fb4ff; --oc-code-warn: #f3c969; --oc-code-err: #ff9a9a; --oc-code-proj: #8fd5c4;
+
+  --background: var(--oc-bg); --foreground: var(--oc-ink);
+  --card: var(--oc-surface); --card-foreground: var(--oc-ink);
+  --popover: var(--oc-surface); --popover-foreground: var(--oc-ink);
+  --primary: var(--oc-brand); --primary-foreground: var(--oc-on-brand);
+  --secondary: var(--oc-surface-2); --secondary-foreground: var(--oc-ink);
+  --muted: var(--oc-sunken); --muted-foreground: var(--oc-ink-soft);
+  --accent: var(--oc-hover); --accent-foreground: var(--oc-ink);
+  --destructive: var(--oc-err);
+  --border: var(--oc-line); --input: var(--oc-line-strong); --ring: var(--oc-brand);
+  --radius: 0.5rem;
+}
+
+:root[data-theme="dark"] {
+  --oc-bg: #0d0f12; --oc-surface: #15181d; --oc-surface-2: #1a1e24; --oc-sunken: #111317; --oc-hover: #1d2128;
+  --oc-nav-bg: #111317; --oc-nav-text: #b3b9c4; --oc-nav-active-bg: #1b2541; --oc-nav-active-text: #9db6ff;
+  --oc-ink: #e8ebf0; --oc-ink-soft: #a3aab6; --oc-ink-faint: #727a88;
+  --oc-line: #252a32; --oc-line-strong: #353b45;
+  --oc-brand: #7c9cff; --oc-brand-hover: #9db6ff; --oc-brand-soft: #1b2541; --oc-on-brand: #0d0f12;
+  --oc-ok: #52c78d; --oc-ok-soft: #142a1f; --oc-warn: #f0b456; --oc-warn-icon: #f0b456; --oc-warn-soft: #2d2414;
+  --oc-err: #ff7272; --oc-err-soft: #321b1c; --oc-idle: #8a92a0;
+  --oc-teal: #5fd0b0; --oc-teal-soft: #13282a; --oc-amber: #f0b456; --oc-amber-soft: #2d2414; --oc-gray-soft: #1d2128;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --font-sans: var(--font-geist-sans), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-background: var(--background); --color-foreground: var(--foreground);
+  --color-card: var(--card); --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover); --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary); --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary); --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted); --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent); --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border); --color-input: var(--input); --color-ring: var(--ring);
+
+  --color-bg: var(--oc-bg); --color-surface: var(--oc-surface); --color-surface-2: var(--oc-surface-2);
+  --color-sunken: var(--oc-sunken); --color-hover: var(--oc-hover);
+  --color-nav: var(--oc-nav-bg); --color-nav-text: var(--oc-nav-text);
+  --color-nav-active: var(--oc-nav-active-bg); --color-nav-active-text: var(--oc-nav-active-text);
+  --color-ink: var(--oc-ink); --color-ink-soft: var(--oc-ink-soft); --color-ink-faint: var(--oc-ink-faint);
+  --color-line: var(--oc-line); --color-line-strong: var(--oc-line-strong);
+  --color-brand: var(--oc-brand); --color-brand-hover: var(--oc-brand-hover); --color-brand-soft: var(--oc-brand-soft);
+  --color-on-brand: var(--oc-on-brand);
+  --color-ok: var(--oc-ok); --color-ok-soft: var(--oc-ok-soft);
+  --color-warn: var(--oc-warn); --color-warn-icon: var(--oc-warn-icon); --color-warn-soft: var(--oc-warn-soft);
+  --color-err: var(--oc-err); --color-err-soft: var(--oc-err-soft); --color-idle: var(--oc-idle);
+  --color-teal: var(--oc-teal); --color-teal-soft: var(--oc-teal-soft);
+  --color-amber: var(--oc-amber); --color-amber-soft: var(--oc-amber-soft); --color-gray-soft: var(--oc-gray-soft);
+  --color-code-bg: var(--oc-code-bg); --color-code-text: var(--oc-code-text);
+  --color-code-dim: var(--oc-code-dim); --color-code-info: var(--oc-code-info); --color-code-warn: var(--oc-code-warn);
+  --color-code-err: var(--oc-code-err); --color-code-proj: var(--oc-code-proj);
+
+  --font-heading: var(--font-sans);
+  --radius-sm: calc(var(--radius) * 0.6); --radius-md: calc(var(--radius) * 0.8); --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4); --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+@layer base {
+  html, body { margin: 0; }
+  body { font-size: 14px; line-height: 1.45; }
+  a { color: var(--oc-brand); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+}
+
+/* Data-source labels: hidden until the tag button in the top bar is on (mockup .src). */
+.src { display: none; font: 500 10.5px var(--font-mono); padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; white-space: nowrap; }
+body.show-src .src { display: inline-block; }
+.src-api { background: var(--oc-brand-soft); color: var(--oc-brand); }
+.src-own { background: var(--oc-ok-soft); color: var(--oc-ok); }
+.src-calc { background: var(--oc-gray-soft); color: var(--oc-ink-soft); border: 1px solid var(--oc-line); }
+.src-test { background: var(--oc-warn-soft); color: var(--oc-warn); }
+
+/* Events: a row that arrived while the page was open flashes once (mockup .event.fresh). */
+@keyframes oc-flash { from { background: var(--oc-brand-soft); } to { background: transparent; } }
