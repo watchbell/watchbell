@@ -81,4 +81,4 @@ privately as described in the repository's security policy.
 
 ## License
 
-MIT
+MIT © 2026 [Trias](https://github.com/Trias1)

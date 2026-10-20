@@ -1,7 +1,42 @@
 [
-  { "path": "app/src/lib/logs/scrub.test.ts", "rule": "gitleaks-fixture" },
-  { "path": "app/src/lib/providers/stage8-providers.test.ts", "rule": "gitleaks-fixture" },
-  { "path": "app/src/private/assist/prompts.test.ts", "rule": "gitleaks-fixture" },
-  { "path": "app/src/private/assist/question-input.test.ts", "rule": "gitleaks-fixture" },
-  { "path": "app/src/private/ai/providers/providers-db.test.ts", "rule": "gitleaks-fixture" }
+  {
+    "path": "app/src/lib/logs/scrub.test.ts",
+    "rule": "gitleaks-fixture"
+  },
+  {
+    "path": "app/src/lib/providers/stage8-providers.test.ts",
+    "rule": "gitleaks-fixture"
+  },
+  {
+    "path": "app/src/private/assist/prompts.test.ts",
+    "rule": "gitleaks-fixture"
+  },
+  {
+    "path": "app/src/private/assist/question-input.test.ts",
+    "rule": "gitleaks-fixture"
+  },
+  {
+    "path": "app/src/private/ai/providers/providers-db.test.ts",
+    "rule": "gitleaks-fixture"
+  },
+  {
+    "path": "LICENSE",
+    "rule": "deny:16"
+  },
+  {
+    "path": "README.md",
+    "rule": "deny:14"
+  },
+  {
+    "path": "README.md",
+    "rule": "deny:16"
+  },
+  {
+    "path": "app/bin/README.md",
+    "rule": "deny:14"
+  },
+  {
+    "path": "app/bin/README.md",
+    "rule": "deny:16"
+  }
 ]

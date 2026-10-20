@@ -303,4 +303,4 @@ Please report vulnerabilities privately through GitHub's private vulnerability r
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT © 2026 [Trias](https://github.com/Trias1). See [LICENSE](LICENSE).
