@@ -19,7 +19,7 @@ export default async function ProviderStatusPage() {
   return (
     <>
       <AutoRefresh at={now.getTime()} />
-      <PageHeader crumbs={[{ label: "Observe" }, { label: "Provider status" }]} title="Provider status"
+      <PageHeader crumbs={[{ label: "Home" }, { label: "Provider status" }]} title="Provider status"
         sub="Public status feeds, polled every 5 minutes. When a provider has an incident, its alerts are labelled so you know the problem isn't your app. Cloudflare data centres (outages and maintenance) count only for SIN and CGK; an open incident is coloured by its own impact." />
       <Card flush>
         <PlainTable head={HEAD} rows={rows.map((r) => ({

@@ -44,7 +44,7 @@ export default async function WelcomePage() {
       <div className="grid gap-4 min-[1001px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <section className="rounded-lg border border-line bg-surface">
           <Step n={1} title="Connect Vercel" body="Paste an access token. The console lists your projects but watches nothing until you choose." done={connected.has("vercel")}>
-            {connected.has("vercel") ? <Link href="/connections">View connection</Link> : <AccountDialog provider="vercel" triggerLabel="Connect Vercel" primary />}
+            {connected.has("vercel") ? <Link href="/connections?provider=vercel">View connection</Link> : <AccountDialog provider="vercel" triggerLabel="Connect Vercel" primary />}
           </Step>
           <Step n={2} title="Pick the apps to watch" body="Run Sync and tick the projects you care about. Each gets an uptime check every minute." done={watching}>
             {vercel ? <SyncButton accountId={vercel.id} title={`Vercel · ${hideEmails(vercel.label)}`} label="Sync Vercel" primary watchNew={vercel.watchNew} /> : <span className="text-[12.5px] text-ink-faint">Connect Vercel first</span>}

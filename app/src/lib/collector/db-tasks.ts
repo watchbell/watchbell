@@ -5,7 +5,7 @@ import { accounts, links, resources, snapshots } from "@/db/schema";
 import { statusAfterTest } from "@/lib/accounts";
 import { openOrNull } from "@/lib/crypto";
 import { recordEvents } from "@/lib/data/events-write";
-import { autoRestoreHook } from "@/lib/data/keep-active-db";
+import { autoRestoreHook, hasAutoRestore } from "@/lib/data/keep-active-db";
 import { classifyFailure, databaseEvent, goodState } from "@/lib/databases/events";
 import { firestoreState, quotaDayStart } from "@/lib/databases/firebase";
 import { neonProjectState } from "@/lib/databases/neon";
@@ -25,7 +25,8 @@ import type { NewEvent } from "./rules";
 // Database reads for the collector (spec §7.2–7.4, §9.2). Read-only: no call here changes anything at a provider, and
 // nothing connects to a monitored database. The only POST that reaches one is the daily read-only size query, which
 // runs only for a project already in use (D1).
-export type Ctx = { now: Date; deadline: number; errors: string[] };
+// protectOnly (Watchbell 1.2): the task's section is paused; only its protective write runs (schedule.ts PROTECT_TASKS).
+export type Ctx = { now: Date; deadline: number; errors: string[]; protectOnly?: boolean };
 type Snap = typeof snapshots.$inferSelect;
 type Res = typeof resources.$inferSelect;
 type Acc = typeof accounts.$inferSelect;
@@ -126,17 +127,24 @@ export async function appsWithPausedDatabase(appIds: string[]): Promise<Set<stri
 }
 
 // Every 5 min: one project list per account (spec §15: "single call for all projects per account").
+// Watchbell 1.2: while the Database section is off (ctx.protectOnly) only Auto-restore runs, and only when a project has
+// it on: no states, no events, no account status change (review A1, Important 2).
 export async function taskSupabase(ctx: Ctx): Promise<void> {
+  if (ctx.protectOnly && !(await hasAutoRestore())) return;
   for (const { acc, credential } of await accountsOf("supabase")) {
     within(ctx);
     if (!credential) { ctx.errors.push(`supabase/${acc.label}: credential can't be read`); continue; }
     const items = await watchedOf(acc.id, "supabase_project");
     if (!items.length) continue;
     const list = await listProjects(credential, within(ctx));
-    if (!list.ok) { await accountDown("supabase", acc, items, list, ctx); continue; }
+    if (!list.ok) {
+      if (ctx.protectOnly) ctx.errors.push(`supabase/${acc.label}: ${list.error}`);
+      else await accountDown("supabase", acc, items, list, ctx);
+      continue;
+    }
     const byRef = new Map(list.data.map((p) => [p.ref, p]));
     const evs: (NewEvent | null)[] = [];
-    for (const it of items) {
+    for (const it of ctx.protectOnly ? [] : items) {
       const p = byRef.get(it.r.externalId);
       if (!p) { evs.push(await writeState(it, { state: "off", label: "Not found", patch: { status: "REMOVED" } }, ctx.now)); continue; }
       const st = supabaseState(p.status);

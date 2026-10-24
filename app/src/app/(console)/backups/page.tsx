@@ -35,7 +35,7 @@ export default async function BackupsPage({ searchParams }: { searchParams: Prom
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "Administration" }, { label: "Backups" }]}
+        crumbs={[{ label: "Manage" }, { label: "Backups" }]}
         title="Backups"
         sub="A summary of every month is saved to your Google Drive automatically. Backups older than 3 months are moved to Drive trash, and Drive deletes them for good 30 days later."
         actions={<BackUpNowButton monthLabel={monthLabel(monthOf(now)).split(" ")[0]} disabled={!connected} />}

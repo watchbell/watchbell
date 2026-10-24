@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { recommendationDismissals, rollupsHourly } from "@/db/schema";
+import { accounts, recommendationDismissals, rollupsHourly } from "@/db/schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { fakeDb, payloadOf, whereOf } from "@/lib/data/fake-db";
 import { RETENTION_DAYS } from "./retention";
@@ -20,6 +20,9 @@ vi.mock("@/lib/data/security-db", () => ({ runSecurityChecks: h.runSecurityCheck
 vi.mock("@/lib/data/advisor-db", () => ({ runAdvisor: h.runAdvisor }));
 vi.mock("@/lib/data/events-write", () => ({ recordEvents: h.recordEvents }));
 vi.mock("@/lib/data/heartbeats-db", () => ({ recordPing: h.recordPing }));
+// Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
+const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
+vi.mock("@/lib/data/sections-db", () => ({ pausedSections: async () => sec.paused }));
 
 import { runDaily } from "./daily";
 
@@ -32,6 +35,27 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   h.runSecurityChecks.mockResolvedValue({ failed: [] });
   h.runAdvisor.mockResolvedValue([]);
+  sec.paused = new Set();
+});
+
+describe("runDaily with paused sections (D11)", () => {
+  it("skips a paused section's steps and its providers' account syncs, and runs the rest", async () => {
+    sec.paused = new Set(["database", "devops"]);
+    // The sync's account list (the only read that answers): one Vercel, one Supabase account.
+    const list = [{ id: "acc-v", label: "me", provider: "vercel" }, { id: "acc-s", label: "main", provider: "supabase" }];
+    const byTable = (calls: { method: string; args: unknown[] }[]) => (calls.find((c) => c.method === "from")?.args[0] === accounts ? list : []);
+    h.current = fakeDb(Array.from({ length: 10 }, () => byTable), [[{ id: "run-1" }]]);
+    h.syncAccount.mockResolvedValue({ ok: true, skippedTeams: [], overLimit: null });
+    const r = await runDaily();
+    expect(h.syncAccount.mock.calls.map((c) => c[0])).toEqual(["acc-v"]);
+    expect(h.githubDailyStep).not.toHaveBeenCalled();
+    expect(h.taskDatabasesDaily).not.toHaveBeenCalled();
+    // Keep active protects the owner's projects: it runs whatever the Database switch says.
+    expect(h.runKeepAlive).toHaveBeenCalled();
+    expect(h.runSecurityChecks).toHaveBeenCalled();
+    expect(r.tasks).toEqual(["rollups", "backup", "retention", "sync", "keep-active", "security", "advisor"]);
+    expect(r.errors).toEqual([]);
+  });
 });
 
 describe("runDaily keep-active step (A8)", () => {

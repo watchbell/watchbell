@@ -28,7 +28,7 @@ export default async function LogsPage({ searchParams }: { searchParams: Promise
     <>
       {page === 1 && <AutoRefresh at={now.getTime()} />}
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Logs" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Logs" }]}
         title="Logs"
         sub="Metadata only: time, key, client, model, tokens, latency and result. Prompts and completions are never stored. Kept 30 days."
         actions={<ExportButton params={sp} />}

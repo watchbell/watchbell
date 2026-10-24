@@ -6,7 +6,21 @@ vi.mock("@/db/client", () => ({ db: () => { throw new Error("no database in test
 const ext = vi.hoisted(() => ({ extensions: { nav: [], palette: [] } as { nav: never[]; palette: never[]; runner?: { queueLockfileJob: unknown; lockfileJobActive: (r: string, b: string) => Promise<boolean> } } }));
 vi.mock("@/lib/extensions", () => ext);
 
-import { runnerLockfileActive, type WatchDeps, watchDepPrs } from "./dep-pr-watch-db";
+import { depPrMinuteStep, resetDepWatch, runnerLockfileActive, type WatchDeps, watchDepPrs } from "./dep-pr-watch-db";
+
+// Watchbell 1.2 (review A1, minor 5): the merge watcher pauses with the DevOps section.
+describe("depPrMinuteStep and the DevOps section", () => {
+  it("does nothing while DevOps is off, and watches again once it is on", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    resetDepWatch();
+    await depPrMinuteStep(new Date("2026-10-16T10:00:00Z"), {}, async () => new Set(["devops"]));
+    expect(warn).not.toHaveBeenCalled(); // no database read at all (the test database throws)
+    resetDepWatch();
+    await depPrMinuteStep(new Date("2026-10-16T10:00:00Z"), {}, async () => new Set());
+    expect(warn).toHaveBeenCalledWith("deps/watch failed:", "Error");
+    warn.mockRestore();
+  });
+});
 
 const now = new Date("2026-10-16T10:00:00Z");
 const min = (m: number) => new Date(now.getTime() - m * 60_000);

@@ -17,7 +17,7 @@ export default async function UpstashPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Upstash Redis" }]}
+        crumbs={[{ label: "Database" }, { label: "Upstash Redis" }]}
         title="Upstash Redis"
         sub="Region, commands and bandwidth this month and data size from the Upstash Developer API, read hourly with a read-only key. The console never connects to Redis itself."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}

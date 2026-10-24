@@ -17,13 +17,22 @@ only what you use.
 
 ## How connecting works
 
-1. Create the token at the provider (links below).
-2. In Watchbell open **Connections** (owner only), find the provider and press **Connect** (or the add button for
-   providers that allow several accounts).
-3. Paste the token, give the account a label (shown next to everything that comes from it) and press
-   **Test connection**. Watchbell saves the token only after the test works.
+1. In Watchbell open **Connections** (owner only). Providers are shown as tiles grouped by the section they belong
+   to (Hosting, Database, DevOps; Google Drive backups sit under Manage). Each tile says whether the provider is
+   connected, how many accounts it has and whether one needs attention. Click a tile to open its drawer. A link to
+   `/connections?provider=<name>` (for example `?provider=neon`) opens that drawer directly.
+2. In the drawer, **Create one** opens the provider's token page (the links below), and **It needs** lists the smallest
+   permissions. Create the token there.
+3. Paste the token, give the account a name (shown next to everything that comes from it) and press
+   **Test connection** to check it without saving anything. **Save** always runs the same test first and stores the
+   token only when it works. A token with more access than Watchbell needs is accepted. Watchbell can tell only once
+   an action has used the token's write access; from then on the account's **Access** line says "Actions on".
 4. Press **Sync** on the new account. It lists everything the token can see; tick what Watchbell should watch and save
    the selection. Nothing is watched until you choose.
+
+Each account in the drawer also has **Test connection** (re-checks the stored token and updates the account's status:
+a rejected token marks the account as needing attention), **Replace credential** and **Remove**. Providers that allow
+one account (Vercel, GitHub and the GitHub PR-write token) offer no second one once connected.
 
 Tokens are encrypted with `OPS_ENCRYPTION_KEY` (AES-256-GCM) before they are saved, are never sent to your browser and
 are never shown again. To change one, use **Replace credential**: the old one is deleted as soon as the new one works.

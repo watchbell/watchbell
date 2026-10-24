@@ -20,7 +20,7 @@ export default async function LogsPage() {
   // reads when it opens.
   return (
     <>
-      <PageHeader crumbs={[{ label: "Observe" }, { label: "Logs" }]} title="Logs"
+      <PageHeader crumbs={[{ label: "Hosting" }, { label: "Logs" }]} title="Logs"
         sub="Vercel Hobby keeps only a short history of request logs. The collector copies warnings and errors every 5 minutes so you can look back 7 days." />
       <Tabs defaultValue="live" className="gap-4">
         <TabsList variant="line">

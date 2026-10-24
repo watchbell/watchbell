@@ -6,9 +6,11 @@ import { isRuleKey, RULE_KEYS, RULES, type RuleConfig, type RuleKey } from "@/li
 import { evaluate } from "@/lib/alerts/evaluate";
 import { type OpenAlert, type PlanContext, planAlerts } from "@/lib/alerts/lifecycle";
 import { maintenanceSet } from "@/lib/maintenance";
+import { alertPaused, type SectionId } from "@/lib/sections";
 import { silenceUntil } from "@/lib/view/alerts";
 import { loadFacts } from "./alert-facts-db";
 import { listRawWindows } from "./maintenance-db";
+import { activeAlertFilter, pausedSections } from "./sections-db";
 
 export const FEED_LABEL: Record<string, string> = { vercel: "Vercel", supabase: "Supabase", neon: "Neon", cloudflare: "Cloudflare", firebase: "Firebase", gcp: "Google Cloud" };
 
@@ -19,14 +21,21 @@ export async function loadRules(): Promise<RuleConfig[]> {
 
 // One evaluation: load facts, rules and open alerts, plan, write. The writes run in one transaction; the partial unique
 // index makes a concurrent duplicate open fail instead of doubling (the watchdog and the collector can overlap).
+// Watchbell 1.2 (D11): the subjects of a section the owner turned off are left out on both sides (no observation, no
+// open alert), so nothing of theirs opens, repeats or resolves; their open alerts stay exactly as they were.
 export async function evaluateAlerts(now: Date, opts: { only?: RuleKey[] } = {}): Promise<{ opened: number; resolved: number }> {
-  const [facts, rules, openRows, feeds, windows] = await Promise.all([
+  const [facts, rules, openAll, feeds, windows, paused] = await Promise.all([
     loadFacts(now), loadRules(),
     db().select().from(alerts).where(isNull(alerts.resolvedAt)),
     db().select({ provider: providerStatus.provider, state: providerStatus.state }).from(providerStatus),
     listRawWindows(),
+    pausedSections(),
   ]);
-  const { observations, evaluated } = evaluate(facts, rules, opts.only);
+  const accountProvider = new Map(facts.accounts.map((a) => [a.id, a.provider as string]));
+  const openRows = openAll.filter((a) => !alertPaused(paused, a.ruleKey, a.accountId ? accountProvider.get(a.accountId) : null));
+  const all = evaluate(facts, rules, opts.only);
+  const evaluated = all.evaluated;
+  const observations = all.observations.filter((o) => !alertPaused(paused, o.rule, o.provider));
   // S4 / spec §9.1: CollectorStale itself judges the primary scheduler (cron-job.org), but it mutes the other alerts only
   // when NO scheduler has collected lately: the QStash fallback and manual runs count, so alerts keep working while the
   // fallback is collecting.
@@ -60,10 +69,12 @@ export async function evaluateAlerts(now: Date, opts: { only?: RuleKey[] } = {})
   return { opened: plan.open.length, resolved: plan.resolve.length };
 }
 
-// The bell and the nav pill: what still needs attention (info alerts go to the digest only).
+// The bell and the nav pill: what still needs attention (info alerts go to the digest only). The alerts of a paused
+// section (Manage › Sections) are left out until it is turned on again.
 export async function openAlertCount(): Promise<number> {
+  const paused = await pausedSections();
   const [r] = await db().select({ n: sql<number>`count(*)::int` }).from(alerts)
-    .where(and(isNull(alerts.resolvedAt), inArray(alerts.severity, ["critical", "warning"])));
+    .where(and(isNull(alerts.resolvedAt), inArray(alerts.severity, ["critical", "warning"]), activeAlertFilter(paused)));
   return r?.n ?? 0;
 }
 
@@ -72,10 +83,11 @@ const SEV_ORDER = sql`case ${alerts.severity} when 'critical' then 0 when 'warni
 
 // Open alerts, critical first and newest first, at most 200 (S7). The resource's name and kind come with them (a left
 // join: account and collector alerts have none), so the page can link an app's alerts to it.
-export async function listFiring(): Promise<FiringRow[]> {
+// `paused`: leave out the alerts of these sections (the Alerts page); the auto-actions step reads them all.
+export async function listFiring(paused: ReadonlySet<SectionId> = new Set()): Promise<FiringRow[]> {
   const rows = await db().select({ a: alerts, name: resources.name, kind: resources.kind }).from(alerts)
     .leftJoin(resources, eq(resources.id, alerts.resourceId))
-    .where(isNull(alerts.resolvedAt)).orderBy(SEV_ORDER, desc(alerts.startedAt)).limit(200);
+    .where(and(isNull(alerts.resolvedAt), activeAlertFilter(paused))).orderBy(SEV_ORDER, desc(alerts.startedAt)).limit(200);
   return rows.map(({ a, name, kind }) => ({ ...a, resourceName: name ?? null, resourceKind: kind ?? null }));
 }
 

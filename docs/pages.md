@@ -1,8 +1,11 @@
 # Pages
 
-The left menu groups the pages the way the console does. Some pages are for owners only; operators and viewers don't
+The left menu groups the pages into sections, the way the console does: Home, Hosting, Database, DevOps and Manage.
+Home, Hosting and Manage are there from the start. Database appears by itself when you connect Supabase, Neon,
+Firebase, Turso or Upstash, or once a database is watched; DevOps when you connect GitHub. An owner can turn Hosting,
+Database or DevOps off in [Manage › Sections](#manage). Some pages are for owners only; operators and viewers don't
 see them in the menu (see [roles](first-run.md#add-more-people)). Press Ctrl+K (Cmd+K on a Mac) anywhere to jump to a
-page by name.
+page by name; it lists the same pages as the menu.
 
 Watchbell reads your providers on a schedule of its own: a collector run every minute (each task only when its own
 interval has passed) and a daily job at 03:00 in your [time zone](configuration.md#time-zone). Nothing runs while the
@@ -10,14 +13,10 @@ machine is asleep or Watchbell is stopped; a missed daily job runs once when it 
 messages are in that zone.
 
 - [Home](#home)
-- [Workloads](#workloads)
-- [GitHub](#github)
-- [Network](#network)
-- [Databases](#databases)
-- [Observe](#observe)
-- [Automation](#automation)
-- [AI and API](#ai-and-api)
-- [Administration](#administration)
+- [Hosting](#hosting)
+- [Database](#database)
+- [DevOps](#devops)
+- [Manage](#manage)
 - [Pages outside the menu](#pages-outside-the-menu)
 
 ## Home
@@ -36,7 +35,11 @@ database links come from each app's Edit link. Select a node for its details.
 page is open; a change that repeats within an hour is counted on one row. This is also the audit log: approvals,
 auto-runs, sign-in related changes and setting changes are here.
 
-## Workloads
+**Provider status.** Public status feeds of Vercel, Supabase, Neon, Cloudflare, Firebase and Google Cloud, polled
+every 5 minutes. When a provider has an incident, related alerts are labelled so you know the problem
+isn't your app.
+
+## Hosting
 
 **Applications.** Your Vercel projects that you chose to watch, with their database, domain and uptime. Open one for:
 
@@ -48,13 +51,6 @@ auto-runs, sign-in related changes and setting changes are here.
 **Deployments.** Recent deployments of the watched apps, read from the Vercel API. Vercel's free Hobby plan can only
 roll back to the previous production deployment.
 
-## GitHub
-
-**Repositories.** A read-only browser of the repositories your GitHub token can read: README, files, commits,
-branches, Actions runs and dependency advisories. Shows "GitHub isn't connected" until you add a GitHub token.
-
-## Network
-
 **Domains.** Every domain of a watched app: DNS from Cloudflare, configuration from Vercel, registration expiry from
 RDAP, and certificate expiry from Watchbell's own TLS check. Warns when a domain is proxied through Cloudflare in front
 of Vercel and, for owners, offers a one-click "Set DNS only". Re-check reads a certificate again.
@@ -63,7 +59,15 @@ of Vercel and, for owners, offers a one-click "Set DNS only". Re-check reads a c
 add one (as a create request, below); both need the DNS Edit permission on the Cloudflare token. Records are never
 deleted from here.
 
-## Databases
+**Uptime.** HTTP checks (every minute) and heartbeats. A heartbeat waits for your own job to call its ping address,
+`<SITE_URL>/api/ping/<token>` (add `/start` or `/fail` to report those states), and alerts when a ping is late. Also
+maintenance windows (one-off or weekly): checks keep running inside a window but open no alerts and don't count
+against uptime.
+
+**Logs** (not for viewers). Two tabs: the last hour of request logs from Vercel, and stored errors. Vercel's free plan
+keeps only a short history, so the collector copies warnings and errors every 5 minutes and keeps them for 7 days.
+
+## Database
 
 **Supabase.** Each project's status, region and Postgres version from the Management API, which doesn't touch your
 database. Database size is read once a day, and only while the project is already active. Per project (owner only):
@@ -97,12 +101,21 @@ database, a record). A request is checked first and runs only after an owner app
 approval also show on Overview. Creating needs a token with write access for that provider (see
 [Connect providers](providers.md)).
 
-## Observe
+## DevOps
 
-**Uptime.** HTTP checks (every minute) and heartbeats. A heartbeat waits for your own job to call its ping address,
-`<SITE_URL>/api/ping/<token>` (add `/start` or `/fail` to report those states), and alerts when a ping is late. Also
-maintenance windows (one-off or weekly): checks keep running inside a window but open no alerts and don't count
-against uptime.
+Under the sub-heading **Automation**:
+
+**Repositories.** A read-only browser of the repositories your GitHub token can read: README, files, commits,
+branches, Actions runs and dependency advisories. Shows "GitHub isn't connected" until you add a GitHub token.
+
+## Manage
+
+**Connections** (owner only). The provider accounts Watchbell reads: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
+Cloudflare, GitHub and the optional GitHub PR-write token, as tiles grouped by section (Hosting, Database, DevOps,
+and Google Drive under Manage). A tile opens a drawer with the provider's accounts and the form to add one. Tokens are
+encrypted (AES-256-GCM) with `OPS_ENCRYPTION_KEY` before they are stored and never reach the browser. **Sync** lists
+everything in an account and you tick what to watch. A banner at the top lists connections that stopped working. See
+[Connect providers](providers.md).
 
 **Alerts.** Three tabs:
 
@@ -112,36 +125,17 @@ against uptime.
   their thresholds. Rules run after every collector run, and unknown data never opens or resolves an alert.
 - Notifications: where alerts go. See [Notifications](notifications.md).
 
-**Logs** (not for viewers). Two tabs: the last hour of request logs from Vercel, and stored errors. Vercel's free plan
-keeps only a short history, so the collector copies warnings and errors every 5 minutes and keeps them for 7 days.
-
-**Provider status.** Public status feeds of Vercel, Supabase, Neon, Cloudflare, Firebase and Google Cloud, polled
-every 5 minutes. When a provider has an incident, related alerts are labelled so you know the problem
-isn't your app.
-
-## Automation
-
 **Auto-actions** (owner only). Fixes Watchbell proposes for firing alerts, waiting for your approval, and a history of
 what ran. See [Auto-actions](auto-actions.md).
 
-## AI and API
-
-**AI Gateway** (owner only). Your own AI providers and the API for your apps and agents, with its own menu: Overview,
-Usage, Ask, API keys, Agents, Connect an agent, Bring your own key, Quota, Logs, Models and Playground. See
-[AI](ai.md).
-
-**API explorer** (owner only). Every endpoint of Watchbell's API (`/api/v1`) from one OpenAPI 3.1 file. Try a request
-with a console API key; it runs against this Watchbell with that key's scopes and rate limit.
-
-## Administration
-
-**Connections** (owner only). The provider accounts Watchbell reads: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
-Cloudflare, GitHub and the optional GitHub PR-write token. Tokens are encrypted (AES-256-GCM) with
-`OPS_ENCRYPTION_KEY` before they are stored and never reach the browser. **Sync** lists everything in an account and
-you tick what to watch. A banner at the top lists connections that stopped working. See
-[Connect providers](providers.md).
-
-**Backups** (owner only). Monthly summaries saved to your Google Drive. See [Backups](backups.md).
+**Sections** (owner only). Each section with a switch that shows whether it is in the menu, and one line of what it
+holds. Home and Manage are always on. Database or DevOps with nothing connected yet shows off and can't be switched;
+the line says what to connect. Turning Hosting, Database or DevOps off (after a confirm step; for Hosting it says that
+all uptime checks and heartbeats stop) hides it from the menu and pauses its collector tasks, its alert rules, its
+notifications and new auto-action proposals. Its data is kept, its pages still open from a link, and its firing
+alerts stay as they are (left out of the bell and the Alerts page) until you turn it on again; notices that waited go
+out on the next run. Keep active and Auto-restore keep running while Database is off, so a kept Supabase project is
+never paused because of the switch.
 
 **Settings** (owner only). Tabs:
 
@@ -157,6 +151,17 @@ you tick what to watch. A banner at the top lists connections that stopped worki
 - Lockfile: an optional GitHub Actions workflow in a small repository of your own that builds `package-lock.json`
   for update pull requests (see [Auto-actions](auto-actions.md#automatic-security-fixes)).
 - Auto-actions: which safe actions may run without asking, auto-rollback, and automatic security fixes.
+
+**AI Gateway** (owner only). Your own AI providers and the API for your apps and agents, with its own menu: Overview,
+Usage, Ask, API keys, Agents, Connect an agent, Bring your own key, Quota, Logs, Models and Playground. See
+[AI](ai.md).
+
+**API explorer** (owner only). Every endpoint of Watchbell's API (`/api/v1`) from one OpenAPI 3.1 file. Try a request
+with a console API key; it runs against this Watchbell with that key's scopes and rate limit.
+
+**Backups** (owner only). Monthly summaries saved to your Google Drive. See [Backups](backups.md).
+
+**Status page** (owner only). Opens the Status page tab of Settings (above).
 
 ## Pages outside the menu
 

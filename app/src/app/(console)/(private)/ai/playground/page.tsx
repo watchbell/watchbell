@@ -35,7 +35,7 @@ export default async function PlaygroundPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Playground" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Playground" }]}
         title="Playground"
         sub={ag.models.length
           ? PLAYGROUND_COPY.subAgent

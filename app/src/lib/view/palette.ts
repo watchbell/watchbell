@@ -1,6 +1,7 @@
 import type { ClientExtension } from "@/lib/extensions";
 import { type NavIconKey, visibleNav } from "@/lib/nav";
 import type { Role } from "@/lib/roles";
+import { SECTIONS, type SectionId } from "@/lib/sections";
 
 export const PALETTE_MAX = 20;
 
@@ -68,12 +69,12 @@ export function rankShown(items: PaletteItem[], shown: PaletteItem[], query: str
 // Pages first (the same nav config as the sidebar, so a role never sees a page it cannot open), then watched apps, then watched domains, then monitors.
 // Extension entries (5c, owner only: the layout sends them to owners alone, and they are dropped here for anyone else)
 // follow the pages; each takes the group and icon of the extension nav item it lives under.
-export function buildItems(role: Role, source: PaletteSource | null, ext: ClientExtension = { nav: [], palette: [] }): PaletteItem[] {
-  const groups = visibleNav(role, ext);
+export function buildItems(role: Role, source: PaletteSource | null, ext: ClientExtension = { nav: [], palette: [] }, sections?: SectionId[]): PaletteItem[] {
+  const groups = visibleNav(role, ext, sections);
   const pages = groups.flatMap((g) => g.items.map((i): PaletteItem => ({ id: `page:${i.key}`, label: i.label, hint: g.group, href: i.href, icon: i.icon })));
   const extra = role !== "owner" ? [] : ext.palette.filter((e) => !pages.some((p) => p.href === e.href)).map((e): PaletteItem => {
     const under = ext.nav.flatMap((g) => g.items.map((i) => ({ g, i }))).find(({ i }) => e.href === i.href || e.href.startsWith(`${i.href}/`));
-    return { id: `ext:${e.href}`, label: e.label, hint: under ? `${under.g.group} · ${under.i.label}` : "Page", href: e.href, icon: under?.i.icon ?? "dashboard", keywords: e.keywords };
+    return { id: `ext:${e.href}`, label: e.label, hint: under ? `${SECTIONS[under.g.section].label} · ${under.i.label}` : "Page", href: e.href, icon: under?.i.icon ?? "dashboard", keywords: e.keywords };
   });
   const all = [...pages, ...extra];
   if (!source) return all;

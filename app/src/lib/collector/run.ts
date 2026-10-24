@@ -12,6 +12,7 @@ import { recordEvents } from "@/lib/data/events-write";
 import { openOrNull } from "@/lib/crypto";
 import { taskLogs } from "@/lib/data/logs-db";
 import { deliverPending, taskDigest } from "@/lib/data/notify-db";
+import { pausedSections } from "@/lib/data/sections-db";
 import { taskPageViews } from "@/lib/data/pageviews-db";
 import { taskStatus } from "@/lib/data/provider-status-db";
 import { serverEnv } from "@/lib/env";
@@ -28,7 +29,7 @@ import { ruleFrom } from "@/lib/body-rule";
 import { writeCheckResult } from "./monitor-write";
 import { appState, deploymentEvent, monitorEvent, type NewEvent, nextMonitorState } from "./rules";
 import { safeError } from "./safe-error";
-import { ALERTS_RESERVE_MS, BUDGET_MS, checkTimeout, dueTasks, POST_TASKS, recheckable, type TaskName, taskFits } from "./schedule";
+import { ALERTS_RESERVE_MS, BUDGET_MS, checkTimeout, dueTasks, POST_TASKS, protectOnly, recheckable, type TaskName, taskFits } from "./schedule";
 
 export type RunSummary = { skipped: boolean; ok: boolean; tasks: string[]; checks: number; durationMs: number; errors: string[] };
 // "builtin" is the self-host scheduler. collector_runs.trigger is a pg enum without it, so it is stored as "manual".
@@ -391,7 +392,10 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
     mark("start");
     const lastRun = await readLastRun();
     const force = trigger !== "cron_job_org" && trigger !== "builtin"; // a scheduled tick respects each task's own interval
-    const due = dueTasks(lastRun, started, force);
+    // Watchbell 1.2 (D11): the tasks of a section the owner turned off are not due (schedule.ts TASK_SECTION).
+    // A protective task of a paused section (schedule.ts PROTECT_TASKS) runs in protect-only mode.
+    const paused = await pausedSections();
+    const due = dueTasks(lastRun, started, force, paused);
     // I10: the tasks before `alerts` work to a deadline ALERTS_RESERVE_MS earlier, so the alert rules always get time.
     const post = due.filter((t) => POST_TASKS.includes(t));
     const workDeadline = post.includes("alerts") ? deadline - ALERTS_RESERVE_MS : deadline;
@@ -406,7 +410,7 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
       if (task === "checks") checkCount += await taskChecks(new Date(), workDeadline, errors, force, windows);
       if (task === "vercel") await taskVercel(new Date(), workDeadline, errors);
       const dbTask = DB_TASKS[task];
-      if (dbTask) await dbTask({ now: new Date(), deadline: workDeadline, errors });
+      if (dbTask) await dbTask({ now: new Date(), deadline: workDeadline, errors, protectOnly: protectOnly(task, paused) });
       if (task === "cloudflare") await taskCloudflare(new Date(), workDeadline, errors);
       if (task === "domains") await taskDomains(new Date(), workDeadline, errors);
       if (task === "tls") await taskTls(new Date(), workDeadline, errors);

@@ -176,10 +176,10 @@ export const OPENAPI_COPY: OpenApiCopy = {
 };
 
 export const ENV_COPY: EnvCopy = {
-  notSet: (names, plural = false) => `${names} ${plural ? "aren't" : "isn't"} set in app/.env (restart Watchbell after adding ${plural ? "them" : "it"}).`,
-  setting: "a setting in app/.env",
-  keyHome: "app/.env (OPS_ENCRYPTION_KEY)",
-  checkWhere: "in app/.env",
+  notSet: (names, plural = false) => `${names} ${plural ? "aren't" : "isn't"} set in your .env file (~/.watchbell/.env with npm, app/.env with the installers; restart Watchbell after adding ${plural ? "them" : "it"}).`,
+  setting: "a setting in your .env file (~/.watchbell/.env with npm, app/.env with the installers)",
+  keyHome: "your .env file (OPS_ENCRYPTION_KEY; ~/.watchbell/.env with npm, app/.env with the installers)",
+  checkWhere: "in your .env file (~/.watchbell/.env with npm, app/.env with the installers)",
   apply: "restart Watchbell",
 };
 

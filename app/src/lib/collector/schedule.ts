@@ -1,3 +1,5 @@
+import type { SectionId } from "@/lib/sections";
+
 // Seconds between runs of each task, in run order. Every minute: checks, Vercel and the alert rules. The database reads
 // are spread out to fit the free tiers (spec §15): Supabase and Neon status and the Firestore health read every 5 min,
 // Supabase health/traffic and Firestore usage hourly; database size and Auth user counts are daily (/api/daily, step
@@ -75,10 +77,11 @@ export function slotStart(task: TaskName, now: Date): number {
 // Which tasks this run should do. Minute tasks: every run (a forced run too, unless one ran under 55 s ago, which only a
 // forced run can see). Slower tasks: once per slot, never on a forced run's account, so pressing Refresh can't spend
 // Cloudflare, RDAP or TLS requests (free-tier budget, spec §15). A slower task whose slot began more than a minute ago
-// (late) counts toward CATCH_UP_PER_RUN.
-export function dueTasks(lastRun: Partial<Record<TaskName, string>>, now: Date, force: boolean): TaskName[] {
+// (late) counts toward CATCH_UP_PER_RUN. The tasks of a paused section (TASK_SECTION) are never due, so they don't
+// take a catch-up place either.
+export function dueTasks(lastRun: Partial<Record<TaskName, string>>, now: Date, force: boolean, paused: ReadonlySet<SectionId> = new Set()): TaskName[] {
   let catchUps = 0;
-  return (Object.keys(TASKS) as TaskName[]).filter((t) => {
+  return activeTasks(Object.keys(TASKS) as TaskName[], paused).filter((t) => {
     const last = lastRun[t] ? new Date(lastRun[t]!).getTime() : null;
     if (TASKS[t] <= FORCE_MAX_S) {
       if (last === null || force) return true;
@@ -126,3 +129,31 @@ export function taskFits(task: TaskName, deadline: number, now: number): boolean
 
 // The tasks runCollector runs after the others and after the state refresh (settleRun), against the full deadline.
 export const POST_TASKS: readonly TaskName[] = ["alerts", "digest"];
+
+// Watchbell 1.2 (D11): the section each task reads for. A section the owner turned off (Manage › Sections) pauses its
+// tasks: they are left out of the run, not marked as run, and catch up (CATCH_UP_PER_RUN) once it is on again. null:
+// the collector's own work (provider status feeds, the EOL list, alert rules, digest), which always runs.
+export const TASK_SECTION: Record<TaskName, SectionId | null> = {
+  heartbeats: "hosting", checks: "hosting", vercel: "hosting", cloudflare: "hosting", domains: "hosting", tls: "hosting", rdap: "hosting",
+  logs: "hosting", pageviews: "hosting",
+  supabase: "database", supabaseUsage: "database", neon: "database", firebase: "database", firebaseUsage: "database", extraDbs: "database",
+  eol: null, status: null, alerts: null, digest: null,
+};
+
+// Tasks that also carry a protective write the owner asked for, so they keep running while their section is paused,
+// in a protect-only mode (no state, no events): `supabase` runs Auto-restore from the project statuses it reads
+// (review A1, Important 2; Keep active is a daily step, lib/collector/daily.ts).
+export const PROTECT_TASKS: readonly TaskName[] = ["supabase"];
+
+export function activeTasks(due: readonly TaskName[], paused: ReadonlySet<SectionId>): TaskName[] {
+  return due.filter((t) => {
+    const s = TASK_SECTION[t];
+    return s === null || !paused.has(s) || PROTECT_TASKS.includes(t);
+  });
+}
+
+// Whether this task runs in protect-only mode in this run (its section is paused).
+export const protectOnly = (task: TaskName, paused: ReadonlySet<SectionId>): boolean => {
+  const s = TASK_SECTION[task];
+  return s !== null && paused.has(s) && PROTECT_TASKS.includes(task);
+};

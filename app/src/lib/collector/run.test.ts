@@ -10,6 +10,7 @@ const h = vi.hoisted(() => ({
   revalidateTag: vi.fn(),
 }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
+vi.mock("@/lib/data/sections-db", async (orig) => ({ ...(await orig<typeof import("@/lib/data/sections-db")>()), pausedSections: async () => new Set() }));
 vi.mock("next/cache", () => ({ revalidateTag: h.revalidateTag, updateTag: vi.fn() }));
 vi.mock("./http-check", async (orig) => ({ ...(await orig<typeof import("./http-check")>()), checkUrl: h.checkUrl }));
 

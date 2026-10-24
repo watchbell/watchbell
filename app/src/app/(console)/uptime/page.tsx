@@ -112,7 +112,7 @@ export default async function UptimePage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Observe" }, { label: "Uptime" }]}
+        crumbs={[{ label: "Hosting" }, { label: "Uptime" }]}
         title="Uptime"
         sub="HTTP checks run every minute; heartbeats wait for your own jobs to ping. cron-job.org calls the collector, and Upstash QStash checks every 5 minutes that it is still running."
         actions={act ? <><RefreshButton /><MaintenanceDialog mode="add" options={options} /><MonitorDialog mode="add" apps={apps} /></> : undefined}

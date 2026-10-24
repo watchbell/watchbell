@@ -153,7 +153,7 @@ describe("in demo nothing leaves the server", () => {
     expect((await watchdog.POST(post("/api/watchdog"))).status).toBe(404);
     expect((await telegram.POST(post("/api/telegram/webhook"))).status).toBe(404);
     expect(fetchSpy).not.toHaveBeenCalled();
-  });
+  }, 30_000); // four cold route imports inside the test: 4-14 s on a busy machine, past the 5 s default
 
   // The private edition's extra routes test their demo refusals on their own side.
   it("/api/status refuses before reading the session", async () => {

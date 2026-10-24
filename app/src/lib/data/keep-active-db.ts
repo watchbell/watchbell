@@ -146,6 +146,13 @@ async function lastConsolePause(resourceId: string): Promise<Date | null> {
 
 export type ProjectStatus = { resourceId: string | null; accountId: string; status: string; orgSlug?: string };
 
+// Whether any project has Auto-restore on (one LIMIT 1 read): the Supabase status task runs for it alone while the
+// Database section is off (Watchbell 1.2).
+export async function hasAutoRestore(): Promise<boolean> {
+  const rows = await db().select({ id: keepActive.resourceId }).from(keepActive).where(eq(keepActive.autoRestore, true)).limit(1);
+  return rows.length > 0;
+}
+
 // The 5-minute Supabase status task calls this with the statuses it just read (A8). Every project the token sees is
 // passed (resourceId null when the console doesn't watch it) so the free slots are counted from the fresh list. With
 // nothing paused it reads nothing; otherwise one read of the paused projects that have Auto-restore on. `deadline` is

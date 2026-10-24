@@ -44,7 +44,7 @@ export default async function AiOverviewPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway" }]}
         title="AI Gateway"
         sub={AI_COPY.overviewSub}
         actions={

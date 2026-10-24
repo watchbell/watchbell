@@ -40,7 +40,7 @@ export default async function AiAskPage() {
     <>
       <AutoRefresh at={now.getTime()} everyMs={waiting ? FAST_MS : undefined} />
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Ask" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Ask" }]}
         title="Ask"
         sub="Questions about the console, answered by your own provider (Bring your own key) from scrubbed console data. Owner only."
       />

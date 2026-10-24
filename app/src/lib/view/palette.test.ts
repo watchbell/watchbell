@@ -62,7 +62,7 @@ describe("buildItems", () => {
   });
   it("lists the pages the role can see, then apps, then monitors", () => {
     const owner = buildItems("owner", source);
-    expect(owner.find((i) => i.label === "Settings")).toMatchObject({ href: "/settings", hint: "Administration" });
+    expect(owner.find((i) => i.label === "Settings")).toMatchObject({ href: "/settings", hint: "Manage" });
     expect(owner.find((i) => i.label === "web")).toMatchObject({ href: "/apps/a1", hint: "web.example.com", icon: "apps" });
     expect(owner.find((i) => i.label === "web/api/health")).toMatchObject({ href: "/apps/a1", hint: "Monitor", icon: "heartbeat" });
     expect(owner.findIndex((i) => i.label === "Overview")).toBeLessThan(owner.findIndex((i) => i.label === "web"));
@@ -73,6 +73,14 @@ describe("buildItems", () => {
     expect(labels).not.toContain("Logs");
     expect(labels).toContain("Overview");
   });
+  // Watchbell 1.2: Ctrl+K lists the same pages as the menu (the sections that are on).
+  it("follows the sections that are on, like the menu", () => {
+    const fresh = buildItems("owner", null, undefined, ["home", "hosting", "manage"]).map((i) => i.href);
+    expect(fresh).toContain("/uptime");
+    expect(fresh).not.toContain("/supabase");
+    expect(fresh).not.toContain("/repos");
+    expect(buildItems("owner", null).map((i) => i.href)).toContain("/supabase");
+  });
   it("works before the apps have loaded", () => {
     expect(buildItems("operator", null).some((i) => i.href.startsWith("/apps/"))).toBe(false);
   });
@@ -82,7 +90,7 @@ describe("buildItems", () => {
   });
   describe("extension entries (5c)", () => {
     const ext: ClientExtension = {
-      nav: [{ group: "AI & API", after: "Observe", items: [
+      nav: [{ section: "manage", after: "settings", items: [
         { key: "ai", label: "AI Gateway", href: "/ai", icon: "route", stage: 5, ownerOnly: true },
         { key: "api-docs", label: "API explorer", href: "/api-docs", icon: "api", stage: 5, ownerOnly: true },
       ] }],
@@ -90,9 +98,9 @@ describe("buildItems", () => {
     };
     it("lists the extension pages and sub-pages for owners, without duplicates", () => {
       const owner = buildItems("owner", null, ext);
-      expect(owner.find((i) => i.href === "/ai")).toMatchObject({ id: "page:ai", hint: "AI & API", icon: "route" });
+      expect(owner.find((i) => i.href === "/ai")).toMatchObject({ id: "page:ai", hint: "Manage", icon: "route" });
       expect(owner.filter((i) => i.href === "/ai")).toHaveLength(1);
-      expect(owner.find((i) => i.href === "/ai/keys")).toMatchObject({ label: "API keys", hint: "AI & API · AI Gateway", icon: "route" });
+      expect(owner.find((i) => i.href === "/ai/keys")).toMatchObject({ label: "API keys", hint: "Manage · AI Gateway", icon: "route" });
       expect(rankItems(owner, "token")[0].href).toBe("/ai/keys");
     });
     it("shows none of them to operators or viewers", () => {

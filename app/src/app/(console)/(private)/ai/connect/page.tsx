@@ -16,7 +16,7 @@ export default async function ConnectPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Connect an agent" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Connect an agent" }]}
         title="Connect an agent"
         sub="Agents connect to Watchbell's MCP server with a console key that has read:status. They can read apps, monitors, alerts, events, stored error logs and the advisor. The only writes are AI notes and answers, and only with write:notes."
         actions={<Link href="/ai/keys" className={buttonClass({ variant: "primary" })}>Create key</Link>}

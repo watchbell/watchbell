@@ -43,7 +43,7 @@ export default async function DomainsPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Network" }, { label: "Domains" }]}
+        crumbs={[{ label: "Hosting" }, { label: "Domains" }]}
         title="Domains"
         sub="Every domain of a watched app. DNS from Cloudflare, configuration from Vercel, domain expiry from RDAP, certificate expiry from our own TLS check."
       />

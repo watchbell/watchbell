@@ -68,7 +68,7 @@ export function DependenciesCard({ app, view, canAct, owner, now }: { app: { id:
             {fixable > 0 && (
               <p className="mt-2 text-[12.5px] text-ink-soft">
                 {fixable} direct package{fixable === 1 ? " has" : "s have"} a fixed version. {DEPS_COPY.cardProposes}
-                {owner && !view.writeConnected && <> It needs the <Link href="/connections">GitHub (PR write)</Link> token.</>}
+                {owner && !view.writeConnected && <> It needs the <Link href="/connections?provider=github_write">GitHub (PR write)</Link> token.</>}
               </p>
             )}
           </>

@@ -7,6 +7,7 @@ import { composeMessage, type Notice } from "@/lib/alerts/compose";
 import { open as openSealed, seal } from "@/lib/crypto";
 import { recordEvents } from "@/lib/data/events-write";
 import { readAliasBook } from "./aliases-db";
+import { activeAlertFilter, pausedSections } from "./sections-db";
 import { listProviderStatus } from "@/lib/data/provider-status-db";
 import { serverEnv } from "@/lib/env";
 import { sendDiscord } from "@/lib/notify/discord";
@@ -99,12 +100,15 @@ const isSilenced = (a: { silencedUntil: Date | null; silencedUntilResolved: bool
 // configured, when it was queued before Silence (an open or repeat; a resolve still goes out), or when it has waited 30
 // minutes. A dropped open keeps pending_since, so the alert engine retries it 6 hours after the attempt (I1). A failed
 // notice stays pending and its claim is released so the next run retries it.
+// Watchbell 1.2 (D11): the notices of a section the owner turned off are not read at all, so they stay queued as they
+// are (not sent, not dropped) until it is turned on again.
 export async function deliverPending(now: Date, deadline: number, deps: { sender?: { send: Sender; configured: Set<Push> } } = {}): Promise<{ sent: number; dropped: number }> {
   if (deadline - Date.now() < MIN_LEFT_MS) return { sent: 0, dropped: 0 };
+  const paused = await pausedSections();
   // `open` and `repeat` go out only for unresolved rows and `resolve` only for resolved ones, so a stale `open` on a
   // resolved row is never sent. Oldest first, so a backlog beyond 50 drains in order.
   const read = await db().select({ a: alerts, channels: alertRules.channels }).from(alerts).innerJoin(alertRules, eq(alertRules.key, alerts.ruleKey))
-    .where(and(isNotNull(alerts.pending), sql`(${alerts.pending} = 'resolve') = (${alerts.resolvedAt} is not null)`)).orderBy(asc(alerts.pendingSince)).limit(50);
+    .where(and(isNotNull(alerts.pending), sql`(${alerts.pending} = 'resolve') = (${alerts.resolvedAt} is not null)`, activeAlertFilter(paused))).orderBy(asc(alerts.pendingSince)).limit(50);
   if (!read.length) return { sent: 0, dropped: 0 };
   const claimedIds = new Set((await db().update(alerts).set({ claimedAt: now }).where(claimable(read.map((r) => r.a.id), now)).returning({ id: alerts.id })).map((r) => r.id));
   const rows = read.filter((r) => claimedIds.has(r.a.id));
@@ -151,12 +155,14 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
 
 // What the digest says, from bounded reads: firing ≤ 50, resolved ≤ 20, one grouped query each for the 24 h checks and
 // stored errors, and the providers whose feed isn't fine. Uptime leaves out checks made inside a maintenance window (U5).
+// The firing list leaves out the alerts of a paused section (Manage › Sections).
 export async function digestData(now: Date): Promise<Omit<DigestInput, "siteUrl">> {
   const since = new Date(now.getTime() - 24 * HOUR);
+  const paused = await pausedSections();
   const severityOrder = sql`case ${alerts.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`;
   const [firing, openedRows, resolvedRows, apps, providers] = await Promise.all([
     db().select({ ruleKey: alerts.ruleKey, severity: alerts.severity, title: alerts.title, message: alerts.message, resourceId: alerts.resourceId, startedAt: alerts.startedAt }).from(alerts)
-      .where(isNull(alerts.resolvedAt)).orderBy(severityOrder, desc(alerts.startedAt)).limit(50),
+      .where(and(isNull(alerts.resolvedAt), activeAlertFilter(paused))).orderBy(severityOrder, desc(alerts.startedAt)).limit(50),
     db().select({ n: sql<number>`count(*)::int` }).from(alerts).where(gte(alerts.startedAt, since)),
     db().select({ ruleKey: alerts.ruleKey, title: alerts.title, resourceId: alerts.resourceId, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt }).from(alerts)
       .where(and(isNotNull(alerts.resolvedAt), gte(alerts.resolvedAt, since))).orderBy(desc(alerts.resolvedAt)).limit(20),

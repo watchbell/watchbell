@@ -15,13 +15,13 @@ export const insertAfter = (list: PaletteEntry[], href: string, entry: PaletteEn
   return i < 0 ? [...list, entry] : [...list.slice(0, i + 1), entry, ...list.slice(i + 1)];
 };
 
-// Concatenates nav groups (same group name → items appended), palette entries, steps and Settings tabs; a later slot
+// Concatenates nav groups (same section and anchor → items appended), palette entries, steps and Settings tabs; a later slot
 // (or runner) wins.
 export function mergeExtensions(...parts: Part[]): Extension {
   const out: Extension = { nav: [], palette: [] };
   for (const p of parts) {
     for (const g of p.nav ?? []) {
-      const same = out.nav.find((x) => x.group === g.group);
+      const same = out.nav.find((x) => x.section === g.section && x.after === g.after);
       if (same) same.items = [...same.items, ...g.items];
       else out.nav.push({ ...g, items: [...g.items] });
     }
@@ -42,10 +42,10 @@ export function mergeExtensions(...parts: Part[]): Extension {
 }
 
 // ---- T1 foundation ----
-// Mockup: group "AI & API" after "Observe" (AI Gateway ti-route-2, API explorer ti-api); palette = every mockup sub-page
+// Watchbell 1.2: Manage, right after Settings (AI Gateway ti-route-2, API explorer ti-api); palette = every mockup sub-page
 // both editions have (each edition adds its own entry for /ai/ask: registry.public.ts and registry-blocks-private.ts).
 export const base: Part = {
-  nav: [{ group: "AI & API", after: "Observe", items: [
+  nav: [{ section: "manage", after: "settings", items: [
     { key: "ai", label: "AI Gateway", href: "/ai", icon: "route", stage: 5, ownerOnly: true },
     { key: "api-docs", label: "API explorer", href: "/api-docs", icon: "api", stage: 5, ownerOnly: true },
   ] }],
@@ -109,11 +109,11 @@ import { OfficeAutoRunTab } from "@/private/actions/auto-run-tab";
 import { depPrMinuteStep } from "@/private/actions/dep-pr-watch-db";
 import { proposalsMinuteStep, pruneProposals } from "@/private/actions/proposals-db";
 // Stage 9 slice 1 (owner 15 Oct): console actions proposed for firing alerts; the owner approves on /auto-actions or
-// on Telegram. Settings › Auto-actions picks which safe kinds run without asking (all off by default). The nav group is
-// its own ("Automation", right after Observe): lib/nav.ts navGroups inserts extension groups and never merges one into
-// a core group of the same name.
+// on Telegram. Settings › Auto-actions picks which safe kinds run without asking (all off by default). Watchbell 1.2: the
+// page sits in Manage right after Alerts (spec §5: Alerts and Auto-actions are Manage pages; lib/nav.ts navGroups puts
+// extension items into their section).
 export const t9public: Part = {
-  nav: [{ group: "Automation", after: "Observe", items: [
+  nav: [{ section: "manage", after: "alerts", items: [
     { key: "auto-actions", label: "Auto-actions", href: "/auto-actions", icon: "bolt", stage: 9, ownerOnly: true },
   ] }],
   palette: [{ label: "Auto-actions", href: "/auto-actions", keywords: ["proposal", "approve", "reject", "auto-run", "rollback"] }],

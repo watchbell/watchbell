@@ -35,7 +35,7 @@ export default async function SqlPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "SQL console" }]}
+        crumbs={[{ label: "Database" }, { label: "SQL console" }]}
         title="SQL console"
         sub="Read-only queries against your app databases, run with a role you create for the console. Every run is checked on the server, rolled back, capped and audited (database alias and a fingerprint, never the query text)."
       />

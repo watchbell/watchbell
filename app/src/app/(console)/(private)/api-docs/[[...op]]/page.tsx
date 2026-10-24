@@ -64,7 +64,7 @@ export default async function ApiExplorerPage({ params }: { params: Promise<{ op
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "API explorer", href: "/api-docs" }, { label: op.path }]}
+        crumbs={[{ label: "Manage" }, { label: "API explorer", href: "/api-docs" }, { label: op.path }]}
         title="API explorer"
         sub="Every endpoint from one OpenAPI 3.1 file. Try a request with a console API key; it runs against this deployment with that key's scopes and rate limit."
         actions={

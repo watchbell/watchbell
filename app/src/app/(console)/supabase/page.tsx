@@ -66,7 +66,7 @@ export default async function SupabasePage({ searchParams }: { searchParams: Pro
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Supabase" }]}
+        crumbs={[{ label: "Database" }, { label: "Supabase" }]}
         title="Supabase"
         sub="Status comes from the Management API, which doesn't touch your database. Database size is read once a day, and only while a project is already active. Keep active (owner, per project): warns from day 5 without API traffic and sends one keep-alive query a day. Auto-restore brings a paused project back only when its account has a free slot."
         actions={member.role === "owner" ? <><Link href="/connections" className={buttonClass()}>Manage accounts</Link><CreateButton type="supabase_project" target="" targetName="Supabase" label="New project" /></> : undefined}

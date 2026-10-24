@@ -57,7 +57,7 @@ export default async function KeysPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "API keys" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "API keys" }]}
         title="API keys"
         sub="Console API keys for apps and agents. A key is shown once; Watchbell keeps only its SHA-256 hash. Revoking stops it within a minute."
         actions={<CreateKeyDialog />}

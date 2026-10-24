@@ -75,7 +75,7 @@ export default async function ModelsPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Models" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Models" }]}
         title="Models"
         sub="Listed by each connected provider (its /models). Model ids are provider/model; a bare id goes to the default provider. Turn a model off and the gateway answers 400 model_not_enabled."
         actions={<RefreshModelsButton />}

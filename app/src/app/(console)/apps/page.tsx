@@ -21,7 +21,7 @@ export default async function AppsPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Workloads" }, { label: "Applications" }]}
+        crumbs={[{ label: "Hosting" }, { label: "Applications" }]}
         title="Applications"
         sub="Vercel projects with their database, domain, and uptime."
         actions={act ? <RefreshButton /> : undefined}

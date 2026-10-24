@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { alertRules, alerts, maintenanceWindows, providerStatus } from "@/db/schema";
 import type { Facts } from "@/lib/alerts/facts";
-import { type Call, fakeDb, limitOf, payloadOf } from "./fake-db";
+import { type Call, fakeDb, limitOf, payloadOf, whereOf } from "./fake-db";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, facts: null as unknown }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("./alert-facts-db", () => ({ loadFacts: async () => h.facts }));
+// Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
+const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
+vi.mock("./sections-db", async (orig) => ({ ...(await orig<typeof import("./sections-db")>()), pausedSections: async () => sec.paused }));
 
 import { evaluateAlerts, listFiring, listResolved, openAlertCount, rulesWithState, saveRule, silenceAlert } from "./alerts-db";
 
@@ -30,7 +34,8 @@ const useEval = ([rules, open, feeds, windows = []]: unknown[][]) => {
   return f;
 };
 
-beforeEach(() => { h.current = null; h.facts = null; });
+beforeEach(() => { h.current = null; h.facts = null; sec.paused = new Set(); });
+const whereSql = (calls: Call[]) => new PgDialect().sqlToQuery(whereOf(calls)!.getSQL() as never);
 
 describe("evaluateAlerts", () => {
   it("opens an alert with an open notice for a monitor that failed 3 times", async () => {
@@ -159,6 +164,70 @@ describe("openAlertCount", () => {
     use([[]]);
     expect(await openAlertCount()).toBe(0);
   });
+
+  it("leaves out the alerts of a paused section (D11)", async () => {
+    let f = use([[{ n: 3 }]]);
+    await openAlertCount();
+    expect(whereSql(f.queries[0]).sql).not.toContain("not (");
+    sec.paused = new Set(["database"]);
+    f = use([[{ n: 1 }]]);
+    expect(await openAlertCount()).toBe(1);
+    const q = whereSql(f.queries[0]);
+    expect(q.sql).toContain("not (");
+    expect(q.params).toEqual(expect.arrayContaining(["DatabasePaused", "StorageAlmostFull", "supabase", "neon"]));
+    expect(q.params).not.toContain("MonitorDown");
+  });
+});
+
+// Review focus 5: turning a section off while it has firing alerts pauses them (nothing opens, repeats, resolves or is
+// sent) and they come back unchanged when it is on again.
+describe("evaluateAlerts with a paused section (D11)", () => {
+  const sevenHoursAgo = new Date(now.getTime() - 7 * 3_600_000);
+  const firing = { id: "x1", ruleKey: "MonitorDown", subject: "m1", accountId: null, okStreak: 0, lastSampleAt: null, silencedUntil: null, silencedUntilResolved: false, notifiedOpen: true, lastNotifiedAt: sevenHoursAgo, pending: null };
+  const down2 = { ...down, id: "m2", url: "https://web.example.com/api" };
+
+  it("neither opens, repeats nor resolves the paused section's alerts", async () => {
+    sec.paused = new Set(["hosting"]);
+    h.facts = facts({ monitors: [down, down2] });
+    let f = useEval([[rule("MonitorDown")], [firing], []]);
+    expect(await evaluateAlerts(now)).toEqual({ opened: 0, resolved: 0 });
+    expect(f.writes).toEqual([]);
+    // Even when the monitor is gone from the facts (which would resolve it), the alert stays as it is.
+    h.facts = facts({ monitors: [] });
+    f = useEval([[rule("MonitorDown")], [firing], []]);
+    expect(await evaluateAlerts(now)).toEqual({ opened: 0, resolved: 0 });
+    expect(f.writes).toEqual([]);
+  });
+
+  it("picks the same alert up again, unchanged, when the section is on", async () => {
+    sec.paused = new Set();
+    h.facts = facts({ monitors: [down, down2] });
+    const f = useEval([[rule("MonitorDown")], [firing], []]);
+    expect(await evaluateAlerts(now)).toEqual({ opened: 1, resolved: 0 });
+    const touch = f.writes.find((w) => w.kind === "update" && w.table === alerts);
+    expect(payloadOf(touch!.calls)).toMatchObject({ okStreak: 0, pending: "repeat" });
+    expect(payloadOf(f.writes.find((w) => w.kind === "insert")!.calls)).toMatchObject({ ruleKey: "MonitorDown", subject: "m2" });
+  });
+
+  it("keeps the other sections' alerts and the collector's own working", async () => {
+    sec.paused = new Set(["database", "devops"]);
+    h.facts = facts({ lastMinuteRunAt: new Date(now.getTime() - 9 * 60_000), monitors: [down] });
+    const f = useEval([[rule("CollectorStale", { threshold: 5 }), rule("MonitorDown")], [], []]);
+    expect(await evaluateAlerts(now)).toEqual({ opened: 2, resolved: 0 });
+    expect(f.writes.filter((w) => w.kind === "insert").map((w) => payloadOf(w.calls)?.ruleKey).sort()).toEqual(["CollectorStale", "MonitorDown"]);
+  });
+
+  it("pauses an expiring credential by its account's provider", async () => {
+    sec.paused = new Set(["database"]);
+    const soon = new Date(now.getTime() + 3 * 86_400_000);
+    h.facts = facts({ accounts: [
+      { id: "acc-neon", provider: "neon", label: "main", expiresAt: soon, status: "ok", lastError: null },
+      { id: "acc-vercel", provider: "vercel", label: "me", expiresAt: soon, status: "ok", lastError: null },
+    ] as Facts["accounts"] });
+    const f = useEval([[rule("CredentialExpiring", { threshold: 14, severity: "warning" })], [], []]);
+    expect(await evaluateAlerts(now)).toEqual({ opened: 1, resolved: 0 });
+    expect(payloadOf(f.writes.find((w) => w.kind === "insert")!.calls)).toMatchObject({ ruleKey: "CredentialExpiring", accountId: "acc-vercel" });
+  });
 });
 
 describe("alert page reads", () => {
@@ -166,6 +235,7 @@ describe("alert page reads", () => {
     const f = use([[{ a: { id: "x1", ruleKey: "MonitorDown", resolvedAt: null }, name: "web", kind: "app" }, { a: { id: "x2", ruleKey: "CredentialExpiring" }, name: null, kind: null }]]);
     const rows = await listFiring();
     expect(limitOf(f.queries[0])).toBe(200);
+    expect(whereSql(f.queries[0]).sql).not.toContain("not (");
     expect(rows).toEqual([expect.objectContaining({ id: "x1", resourceName: "web", resourceKind: "app" }), expect.objectContaining({ id: "x2", resourceName: null, resourceKind: null })]);
   });
 

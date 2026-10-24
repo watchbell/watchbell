@@ -39,7 +39,7 @@ export default async function QuotaPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Quota" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Quota" }]}
         title="Quota"
         sub={QUOTA_PAGE_TEXT.sub}
       />

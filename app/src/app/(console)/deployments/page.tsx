@@ -15,7 +15,7 @@ export default async function DeploymentsPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Workloads" }, { label: "Deployments" }]}
+        crumbs={[{ label: "Hosting" }, { label: "Deployments" }]}
         title="Deployments"
         sub="Read from the Vercel API every minute. Hobby can only roll back to the previous production deployment."
       />

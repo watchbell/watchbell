@@ -2,6 +2,29 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.0
+
+### Sections
+
+- The menu is grouped into sections: Home, Hosting, Database, DevOps and Manage. Hosting is there from the start;
+  Database and DevOps appear by themselves when you connect a provider of theirs (or already have data there). Every
+  page keeps its address.
+- Manage › Sections turns Hosting, Database or DevOps off: the section leaves the menu and its sync, alerts,
+  notifications and new auto-action proposals pause. Nothing is deleted, and turning it back on picks up where it left
+  off. Keep active and Auto-restore keep running while Database is off, so a kept Supabase project is never paused
+  because of the switch.
+
+### Connections
+
+- Connections is a grid of providers grouped by section, with a drawer per provider: its accounts, "Create one" (the
+  provider's token page), "It needs" (the smallest permissions) and Test connection, which checks a token without
+  saving it.
+
+### Security
+
+- Next.js 16.4.2 (fixes GHSA-2464-fhr4-w9xw, GHSA-673q-mjm6-r5xr and GHSA-p3m5-59mp-jv5r). Update with
+  `watchbell update` (or `npm install -g watchbell@latest` from 1.0).
+
 ## 1.1.0
 
 ### Time zone

@@ -25,8 +25,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const keys = [...TAB_KEYS, ...(lockfileTab ? ["lockfile"] : []), ...extra.map((t) => t.key)];
   return (
     <>
-      <PageHeader crumbs={[{ label: "Administration" }, { label: "Settings" }]} title="Settings" />
-      <Tabs defaultValue={tab && keys.includes(tab) ? tab : "users"} className="mt-3.5">
+      <PageHeader crumbs={[{ label: "Manage" }, { label: "Settings" }]} title="Settings" />
+      {/* key: the menu's Status page link (/settings?tab=status-page) opens that tab even when Settings is already open. */}
+      <Tabs key={tab ?? ""} defaultValue={tab && keys.includes(tab) ? tab : "users"} className="mt-3.5">
         <TabsList variant="line">
           <TabsTrigger value="collector">Collector</TabsTrigger>
           <TabsTrigger value="budget">Free tier budget</TabsTrigger>

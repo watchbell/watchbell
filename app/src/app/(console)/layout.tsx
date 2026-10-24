@@ -6,6 +6,7 @@ import { extensions } from "@/lib/extensions";
 import { lastCollectorRunAt } from "@/lib/collector/run";
 import { openAlertCount } from "@/lib/data/alerts-db";
 import { aliasBook } from "@/lib/data/cached";
+import { sectionState } from "@/lib/data/sections-db";
 import { isDemo, mode } from "@/lib/mode";
 import { timeZone } from "@/lib/time";
 import { EMPTY_BOOK, SHOT_COOKIE } from "@/lib/view/display-name";
@@ -19,7 +20,11 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // reads are independent, so they go out together (perf P4).
   // The db-a, db-b … letters (privacy) come from a cached read; without them every database shows "db-?", never its name.
   // Screenshot mode is a per-browser cookie (components/alias.tsx), read here so the page is masked from the first paint.
-  const [last, alerts, book, jar] = await Promise.all([lastCollectorRunAt().catch(() => null), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies()]);
+  // Watchbell 1.2: the sections that are on (lib/sections.ts); unreadable means every section, so nothing disappears.
+  const [last, alerts, book, jar, sections] = await Promise.all([
+    lastCollectorRunAt().catch(() => null), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies(),
+    sectionState().then((s) => s.on).catch(() => undefined),
+  ]);
   const shot = jar.get(SHOT_COOKIE)?.value === "1";
   // 5c (R2): the private feature's nav and palette entries reach owners only; others never get them in the payload.
   const ext = member.role === "owner" ? { nav: extensions.nav, palette: extensions.palette, office: extensions.office } : { nav: [], palette: [] };
@@ -29,7 +34,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <>
       <TimeZoneSync zone={timeZone()} />
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext}>{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections}>{children}</Shell>
     </>
   );
 }

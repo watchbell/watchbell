@@ -39,7 +39,7 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
   if (!z) {
     return (
       <>
-        <PageHeader crumbs={[{ label: "Network" }, { label: "DNS records" }]} title="DNS records" />
+        <PageHeader crumbs={[{ label: "Hosting" }, { label: "DNS records" }]} title="DNS records" />
         <Card>
           <EmptyState icon={IconSitemap} title="No Cloudflare zone watched yet"
             action={member.role === "owner" ? <Link className={buttonClass({ size: "sm" })} href="/connections">Open connections</Link> : undefined}>
@@ -65,7 +65,7 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Network" }, { label: "DNS records" }]}
+        crumbs={[{ label: "Hosting" }, { label: "DNS records" }]}
         badge={<ResourceBadge kind="dns" />}
         title={z.name}
         sub="Cloudflare zone, read every hour. The owner can switch a record between proxied and DNS only, or edit an A, AAAA, CNAME or TXT record, after a review that shows the old and new value. New records are added only through a request the owner approves (Add record); the console never deletes records."
@@ -88,7 +88,7 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
         </dl>
         {f.cfErrors.filter((e) => e !== f.ssl?.error).map((e) => <p key={e} className="mt-3 text-[12.5px] text-ink-soft">{e}</p>)}
         {f.recordsTruncated && <p className="mt-3 text-[12.5px] text-ink-soft">This zone has more than 2,000 records. Only the first 2,000 are shown.</p>}
-        {hint?.tone === "off" && <p className="mt-3 text-[12.5px] text-warn">Editing is off: the last edit was refused. Add &quot;Zone → DNS → Edit&quot; to this Cloudflare token on <Link href="/connections" className="underline">Connections</Link>, then try again.</p>}
+        {hint?.tone === "off" && <p className="mt-3 text-[12.5px] text-warn">Editing is off: the last edit was refused. Add &quot;Zone → DNS → Edit&quot; to this Cloudflare token on <Link href="/connections?provider=cloudflare" className="underline">Connections</Link>, then try again.</p>}
       </Card>
       <Card flush>
         <ListFilter

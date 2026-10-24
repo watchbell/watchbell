@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import { registry } from "@ext/registry";
 import type { NavItem } from "@/lib/nav";
+import type { SectionId } from "@/lib/sections";
 import type { CallbackHandler } from "@/lib/notify/telegram-updates";
 
 // R1: the ONE point where the core reaches the private feature. "@ext/registry" resolves to src/private/registry.ts
@@ -10,7 +11,8 @@ import type { CallbackHandler } from "@/lib/notify/telegram-updates";
 // Server-only use: the registry may pull in server code (daily steps, slot components that read the database). Client
 // components never import this module; they get the nav and palette entries as props from the (console) layout.
 
-export type ExtensionNavGroup = { group: string; after: string; items: (NavItem & { ownerOnly: true })[] };
+// Watchbell 1.2: extension pages live in a section (lib/sections.ts), right after the item whose key is `after`.
+export type ExtensionNavGroup = { section: SectionId; after?: string; items: (NavItem & { ownerOnly: true })[] };
 export type PaletteEntry = { label: string; href: string; keywords?: string[] };
 
 export type Extension = {

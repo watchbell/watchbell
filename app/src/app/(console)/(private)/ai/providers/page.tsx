@@ -98,7 +98,7 @@ export default async function ProvidersPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Bring your own key" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Bring your own key" }]}
         title="Bring your own key"
         sub="OpenAI-compatible provider connections, Google models only. One is the default; a console key can be pinned to another provider or model. Keys are encrypted with AES-256-GCM, never sent to the browser, never logged. Watchbell never rotates between accounts."
       />

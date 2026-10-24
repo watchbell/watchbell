@@ -45,7 +45,7 @@ export default async function FirebasePage({ searchParams }: { searchParams: Pro
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Firebase" }]}
+        crumbs={[{ label: "Database" }, { label: "Firebase" }]}
         title="Firebase"
         sub="Firestore has no running or stopped state. Every 5 minutes the collector reads one health document (288 of your 50k daily reads)."
         actions={member.role === "owner" ? <><Link href="/connections" className={buttonClass()}>Manage accounts</Link>{createGrant !== null && <DisconnectGoogleCreateButton />}<CreateButton type="firebase_project" target="" targetName="Firebase" label="New project" /></> : undefined}

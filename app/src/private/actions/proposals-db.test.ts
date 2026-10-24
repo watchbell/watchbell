@@ -190,6 +190,37 @@ describe("runProposalsStep", () => {
     expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set() });
     expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ status: "done", auto: true }));
   });
+  // Watchbell 1.2 (D11): a section the owner turned off gets no new proposals; its open ones wait unchanged.
+  it("proposes nothing for a paused section's alerts and skips the log check while Hosting is off", async () => {
+    const d = deps({ paused: vi.fn().mockResolvedValue(new Set(["hosting"])), expire: vi.fn().mockResolvedValue(0) });
+    expect(await runProposalsStep(now, {}, d)).toEqual({ created: 0, expired: 0, autoRan: 0 });
+    expect(d.expire).toHaveBeenCalledWith([ALERT], now); // still firing: its pending proposals aren't expired
+    expect(d.facts).not.toHaveBeenCalled();
+    expect(d.create).not.toHaveBeenCalled();
+    expect(d.logs).not.toHaveBeenCalled();
+    expect(d.notifyNew).not.toHaveBeenCalled();
+  });
+  it("pauses an account alert by its account's provider (CredentialExpiring)", async () => {
+    const cred = { ...alert, id: "cred-1", ruleKey: "CredentialExpiring", subject: "acc-1", resourceId: null, resourceKind: null, accountId: "acc-1" };
+    const providers = vi.fn().mockResolvedValue(new Map([["acc-1", "supabase"]]));
+    const d = deps({ firing: vi.fn().mockResolvedValue([cred, alert]), paused: vi.fn().mockResolvedValue(new Set(["database"])), providers });
+    await runProposalsStep(now, {}, d);
+    expect(providers).toHaveBeenCalledWith(["acc-1"]);
+    expect(d.expire).toHaveBeenCalledWith(["cred-1", ALERT], now);
+    // Only the Hosting alert (MonitorDown) reached the proposal reads.
+    expect((d.facts as ReturnType<typeof vi.fn>).mock.calls[0][0].map((a: { id: string }) => a.id)).toEqual([ALERT]);
+    const none = deps({ firing: vi.fn().mockResolvedValue([cred]), providers });
+    providers.mockClear();
+    await runProposalsStep(now, {}, none);
+    expect(providers).not.toHaveBeenCalled(); // nothing paused: no provider read
+  });
+  it("still proposes for the sections that are on", async () => {
+    const d = deps({ paused: vi.fn().mockResolvedValue(new Set(["database", "devops"])) });
+    expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1 });
+    expect(d.logs).toHaveBeenCalled();
+    const failing = deps({ paused: vi.fn().mockRejectedValue(new Error("db down")) });
+    expect(await runProposalsStep(now, {}, failing)).toMatchObject({ created: 1 }); // unreadable: nothing paused
+  });
   it("never auto-runs a risky kind, nor with under 8 s left", async () => {
     const d = deps({ create: vi.fn().mockResolvedValue([row({ action: "vercel_redeploy", risk: "risky" })]), autoRun: vi.fn().mockResolvedValue({ ...off, vercel_redeploy: true }) });
     await runProposalsStep(now, {}, d);

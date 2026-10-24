@@ -38,7 +38,7 @@ export default async function NeonPage({ searchParams }: { searchParams: Promise
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Neon" }]}
+        crumbs={[{ label: "Database" }, { label: "Neon" }]}
         title="Neon"
         sub="Compute state, CU-hours, storage and transfer from the Neon API. Reading them doesn't wake the compute, and the console never connects to the database."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}

@@ -107,7 +107,7 @@ export function MonitorDialog(props: Props) {
       {/* Esc and the scrim do nothing while the save runs. */}
       <Dialog open={open} onOpenChange={(next) => { if (!pending) setOpen(next); }}>
         {props.mode === "add" && (noApps
-          ? <span title="Watch an app first, in Connections → Sync" className="inline-flex"><Button variant="primary" disabled>Add monitor</Button></span>
+          ? <span className="inline-flex items-center gap-2"><Button variant="primary" disabled>Add monitor</Button><span className="text-[12.5px] text-ink-faint">Watch an app first: Connections, then Sync.</span></span>
           : <DialogTrigger render={<Button variant="primary">Add monitor</Button>} />)}
         <DialogContent className="gap-0 p-0 sm:max-w-[640px]" showCloseButton={false}>
           <div className="flex items-start gap-3 px-[18px] pb-2 pt-4">

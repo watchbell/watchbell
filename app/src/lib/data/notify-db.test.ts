@@ -1,9 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { alerts, channels, checks, events, resources, settings } from "@/db/schema";
-import { fakeDb, payloadOf } from "./fake-db";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { type Call, fakeDb, payloadOf, whereOf } from "./fake-db";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, readAliasBook: vi.fn(), readLang: vi.fn(), readLangs: vi.fn(), sendEmail: vi.fn() }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
+// Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
+const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
+vi.mock("./sections-db", async (orig) => ({ ...(await orig<typeof import("./sections-db")>()), pausedSections: async () => sec.paused }));
 vi.mock("@/lib/crypto", () => ({ open: () => JSON.stringify({ to: "me@example.com" }), seal: vi.fn() }));
 vi.mock("@/lib/notify/env", () => ({ notifyEnv: () => ({ telegramToken: null, resendKey: "re_x", digestFrom: "Ops <a@b.co>" }) }));
 // Privacy: the db-a letters come from their own reader (aliases-db), so the queued reads below stay as they were.
@@ -34,6 +38,7 @@ const alertWrites = (f: ReturnType<typeof use>) => f.writes.filter((w) => w.tabl
 
 beforeEach(() => {
   h.current = null;
+  sec.paused = new Set();
   h.readAliasBook.mockReset();
   h.readLang.mockReset();
   h.readLang.mockResolvedValue("en");
@@ -80,6 +85,38 @@ describe("notifications never name a database or show an email (privacy)", () =>
     const d = await digestData(NOW);
     expect(d.firing.map((a) => [a.title, a.message])).toEqual([["db-b", "Supabase project db-b is paused."]]);
     expect(d.resolved.map((r) => r.title)).toEqual(["db-a"]);
+  });
+});
+
+// Review focus 5: a paused section's notices aren't read, so they are neither sent nor dropped while it is off.
+describe("deliverPending with a paused section (D11)", () => {
+  const whereSql = (calls: Call[]) => new PgDialect().sqlToQuery(whereOf(calls)!.getSQL() as never);
+  it("reads only the notices of sections that are on, and leaves the paused ones queued", async () => {
+    sec.paused = new Set(["hosting"]);
+    const f = use([[]]);
+    const send = vi.fn().mockResolvedValue(ok);
+    expect(await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["telegram"]) } })).toEqual({ sent: 0, dropped: 0 });
+    const q = whereSql(f.queries[0]);
+    expect(q.sql).toContain("not (");
+    expect(q.params).toEqual(expect.arrayContaining(["MonitorDown", "HighLatency", "DeploymentFailed", "vercel", "cloudflare"]));
+    expect(q.params).not.toContain("DatabasePaused");
+    expect(f.writes).toEqual([]); // no claim, no drop
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("reads every pending notice when nothing is paused", async () => {
+    const f = use([[]]);
+    await deliverPending(NOW, deadline(), { sender: { send: vi.fn(), configured: new Set(["telegram"]) } });
+    expect(whereSql(f.queries[0]).sql).not.toContain("not (");
+  });
+
+  it("leaves a paused section's alerts out of the digest's firing list", async () => {
+    sec.paused = new Set(["database"]);
+    const f = fakeDb([]);
+    h.current = f;
+    await digestData(NOW);
+    const firing = f.queries.find((q) => q.some((c) => c.method === "select" && "message" in ((c.args[0] ?? {}) as object)))!;
+    expect(whereSql(firing).params).toEqual(expect.arrayContaining(["DatabasePaused", "supabase"]));
   });
 });
 

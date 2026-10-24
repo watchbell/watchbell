@@ -102,7 +102,7 @@ These are built in and can't be changed. They explain why a message may not arri
 - While **CollectorStale** fires (the collector stopped running), no other alert is sent, because the data is stale.
 - A paused database mutes **MonitorDown** and **HighLatency** for the apps linked to it.
 - An alert resolves only after 2 good checks in a row, so a flapping site doesn't page you twice.
-- An alert in a maintenance window doesn't open at all (see [Pages › Uptime](pages.md#observe)).
+- An alert in a maintenance window doesn't open at all (see [Pages › Uptime](pages.md#hosting)).
 - A silenced alert sends nothing until the silence ends.
 
 If nothing arrives at all, see [Troubleshooting](troubleshooting.md#no-notifications-arrive).

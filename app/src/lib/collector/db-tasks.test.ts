@@ -7,9 +7,9 @@ const h = vi.hoisted(() => ({
   current: null as null | { db: () => unknown },
   listProjects: vi.fn(), databaseSize: vi.fn(), serviceHealth: vi.fn(), apiCounts: vi.fn(), orgPlan: vi.fn(),
   getNeonProject: vi.fn(), listEndpoints: vi.fn(), listBranches: vi.fn(), googleAccessToken: vi.fn(), firestorePing: vi.fn(), authUserCount: vi.fn(),
-  autoRestoreHook: vi.fn(),
+  autoRestoreHook: vi.fn(), hasAutoRestore: vi.fn(),
 }));
-vi.mock("@/lib/data/keep-active-db", () => ({ autoRestoreHook: h.autoRestoreHook }));
+vi.mock("@/lib/data/keep-active-db", () => ({ autoRestoreHook: h.autoRestoreHook, hasAutoRestore: h.hasAutoRestore }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("@/lib/env", () => ({ serverEnv: () => ({ OPS_ENCRYPTION_KEY: "k" }) }));
 vi.mock("@/lib/crypto", () => ({ openOrNull: () => "sbp_fake" }));
@@ -41,6 +41,7 @@ beforeEach(() => {
   h.current = null;
   for (const f of [h.listProjects, h.databaseSize, h.serviceHealth, h.apiCounts, h.orgPlan, h.getNeonProject, h.listEndpoints, h.listBranches, h.googleAccessToken, h.firestorePing, h.authUserCount, h.autoRestoreHook]) f.mockReset();
   h.autoRestoreHook.mockResolvedValue(undefined);
+  h.hasAutoRestore.mockReset().mockResolvedValue(true);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -84,6 +85,33 @@ describe("taskSupabase", () => {
       { resourceId: null, accountId: "acc1", status: "ACTIVE_HEALTHY", orgSlug: "org-a" },
     ], c.deadline);
     expect(c.errors).toEqual([]);
+  });
+
+  // Watchbell 1.2 (review A1, Important 2): with the Database section off, Auto-restore still runs, and nothing else.
+  it("protect-only (Database off): runs Auto-restore from the statuses, writes no state, no event, no account change", async () => {
+    const f = fakeDb([[acc], [{ r: res("r1", "aaaaaaaaaaaaaaaaaaaa", "quillpad"), s: snap("r1", "ok") }]]);
+    h.current = f;
+    h.listProjects.mockResolvedValue({ ok: true, data: [project("aaaaaaaaaaaaaaaaaaaa", "INACTIVE")] });
+    const c = { ...ctx(), protectOnly: true };
+    await taskSupabase(c);
+    expect(h.autoRestoreHook).toHaveBeenCalledWith(now, [{ resourceId: "r1", accountId: "acc1", status: "INACTIVE", orgSlug: "org-a" }], c.deadline);
+    expect(f.writes.filter((w) => w.table === snapshots || w.table === events || w.table === accounts)).toEqual([]);
+    expect(c.errors).toEqual([]);
+  });
+
+  it("protect-only: reads no provider when no project has Auto-restore on, and never marks the account on a failure", async () => {
+    h.hasAutoRestore.mockResolvedValue(false);
+    h.current = fakeDb([[acc], [{ r: res("r1", "aaaaaaaaaaaaaaaaaaaa", "quillpad"), s: snap("r1", "ok") }]]);
+    await taskSupabase({ ...ctx(), protectOnly: true });
+    expect(h.listProjects).not.toHaveBeenCalled();
+    h.hasAutoRestore.mockResolvedValue(true);
+    const f = fakeDb([[acc], [{ r: res("r1", "aaaaaaaaaaaaaaaaaaaa", "quillpad"), s: snap("r1", "ok") }]]);
+    h.current = f;
+    h.listProjects.mockResolvedValue({ ok: false, kind: "auth", status: 401, error: "Supabase rejected this credential (401)." });
+    const c = { ...ctx(), protectOnly: true };
+    await taskSupabase(c);
+    expect(f.writes).toEqual([]);
+    expect(c.errors).toEqual(["supabase/utama: Supabase rejected this credential (401)."]);
   });
 
   it("an Auto-restore failure is one short line and never fails the status task", async () => {

@@ -5,6 +5,7 @@ import { fakeDb } from "@/lib/data/fake-db";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
+vi.mock("@/lib/data/sections-db", async (orig) => ({ ...(await orig<typeof import("@/lib/data/sections-db")>()), pausedSections: async () => new Set() }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
 vi.mock("./db-tasks", async (orig) => ({ ...(await orig<typeof import("./db-tasks")>()), appsWithPausedDatabase: async () => new Set<string>() }));
 

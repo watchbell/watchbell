@@ -1,6 +1,6 @@
 # SQL console
 
-**Databases › SQL console** (owner only) runs read-only queries against the Supabase and Neon databases you watch, and
+**Database › SQL console** (owner only) runs read-only queries against the Supabase and Neon databases you watch, and
 has a query builder for Firestore. It is meant for looking, not changing: every query runs as a read-only database
 role you create for Watchbell, inside a read-only transaction that is rolled back afterwards.
 

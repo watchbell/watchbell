@@ -18,7 +18,7 @@ export default async function TursoPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Turso" }]}
+        crumbs={[{ label: "Database" }, { label: "Turso" }]}
         title="Turso"
         sub="Databases, rows read and written and storage this month from the Turso Platform API, read hourly. The free limits are per organization, so the meters show the organization's total."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}

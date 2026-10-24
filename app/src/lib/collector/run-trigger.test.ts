@@ -9,10 +9,14 @@ vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).d
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
 vi.mock("./lease", () => ({ acquireLease: async () => "owner-1", releaseLease: async () => {} }));
 vi.mock("./schedule", async (orig) => ({ ...(await orig<typeof import("./schedule")>()), dueTasks: h.dueTasks }));
+// Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
+const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
+vi.mock("@/lib/data/sections-db", () => ({ pausedSections: async () => sec.paused }));
 
 import { runCollector } from "./run";
 
 beforeEach(() => {
+  sec.paused = new Set();
   h.dueTasks.mockReset().mockReturnValue([]); // nothing due: the run only opens and closes its collector_runs row
   vi.spyOn(console, "info").mockImplementation(() => {});
 });
@@ -22,7 +26,7 @@ async function runWith(trigger: Parameters<typeof runCollector>[0]) {
   h.current = f;
   const summary = await runCollector(trigger);
   const insert = f.writes.find((w) => w.kind === "insert" && w.table === collectorRuns);
-  return { summary, stored: payloadOf(insert?.calls ?? [])?.trigger, force: h.dueTasks.mock.calls[0]?.[2] };
+  return { summary, stored: payloadOf(insert?.calls ?? [])?.trigger, force: h.dueTasks.mock.calls[0]?.[2], paused: h.dueTasks.mock.calls[0]?.[3] };
 }
 
 describe("runCollector trigger", () => {
@@ -36,6 +40,10 @@ describe("runCollector trigger", () => {
     const r = await runWith("cron_job_org");
     expect(r.force).toBe(false);
     expect(r.stored).toBe("cron_job_org");
+  });
+  it("asks for the due tasks without the paused sections' ones (D11)", async () => {
+    sec.paused = new Set(["database"]);
+    expect([...(await runWith("cron_job_org")).paused]).toEqual(["database"]);
   });
   it('"manual" (Refresh now) forces every task', async () => {
     const r = await runWith("manual");

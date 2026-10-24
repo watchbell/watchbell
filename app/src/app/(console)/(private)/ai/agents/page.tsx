@@ -62,7 +62,7 @@ export default async function AgentsPage() {
     <>
       <AgentsRefresh />
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Agents" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Agents" }]}
         title="Agents"
         sub="Detected automatically from the first request with a key: the MCP client name, the X-Client header, or the User-Agent. Nothing to register."
       />

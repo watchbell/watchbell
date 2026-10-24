@@ -6,6 +6,7 @@ import { loadPaletteSource } from "@/app/(console)/palette-action";
 import { usePrivacy, useMask } from "@/components/alias";
 import type { ClientExtension } from "@/lib/extensions";
 import type { Role } from "@/lib/roles";
+import type { SectionId } from "@/lib/sections";
 import { cn } from "@/lib/utils";
 import { buildItems, type PaletteItem, type PaletteSource, rankShown } from "@/lib/view/palette";
 import { NAV_ICONS } from "./nav-icons";
@@ -14,8 +15,8 @@ import { NAV_ICONS } from "./nav-icons";
 // render pays for them and an app added in Sync shows up on the next opening. The previous list stays visible while the
 // new one loads, and the pages are listed before the first one arrives.
 export function CommandPalette({
-  role, ext, open, opener, onOpen, onClose,
-}: { role: Role; ext: ClientExtension; open: boolean; opener: Element | null; onOpen: (opener: Element | null) => void; onClose: () => void }) {
+  role, ext, sections, open, opener, onOpen, onClose,
+}: { role: Role; ext: ClientExtension; sections?: SectionId[]; open: boolean; opener: Element | null; onOpen: (opener: Element | null) => void; onClose: () => void }) {
   const [source, setSource] = useState<PaletteSource | null>(null);
   const [failed, setFailed] = useState(false);
   const inflight = useRef(false);
@@ -43,7 +44,7 @@ export function CommandPalette({
       .finally(() => { inflight.current = false; });
   }, [open]);
 
-  const items = useMemo(() => buildItems(role, source, ext), [role, source, ext]);
+  const items = useMemo(() => buildItems(role, source, ext, sections), [role, source, ext, sections]);
   if (!open) return null;
   return <PaletteDialog items={items} loading={source === null && !failed} opener={opener} onClose={onClose} />;
 }

@@ -19,6 +19,8 @@ import { syncAccount } from "@/lib/sync-db";
 import { taskDatabasesDaily } from "./db-tasks";
 import { RETENTION_DAYS } from "./retention";
 import { readRetentionDays } from "@/lib/data/settings-db";
+import { pausedSections } from "@/lib/data/sections-db";
+import { SECTION_OF_PROVIDER, type SectionId } from "@/lib/sections";
 import { hourStart, rollup, rollupSince } from "./rollup";
 import type { RunSummary } from "./run";
 import { safeError } from "./safe-error";
@@ -31,6 +33,12 @@ export const SYNC_STOP_MS = 25_000;
 // whether a month is due; on the 1st (and on a retry) it writes the month before retention can delete any of it.
 export const BACKUP_STOP_MS = 20_000;
 export const GITHUB_STEP_MS = 6_000;
+
+// Watchbell 1.2 (D11): the daily steps that read for one section; a section the owner turned off skips them (and the
+// sync skips its providers' accounts). The rest (rollups, backup, retention, Advisor) is the console's own, and
+// keep-active always runs: it is a protective write the owner asked for per project, so a Database section that is off
+// never lets Supabase pause a kept project (review A1, Important 2).
+export const DAILY_STEP_SECTION: Record<string, SectionId> = { github: "devops", deps: "devops", databases: "database", security: "hosting" };
 
 // Picks up where the last rollup left off, so a missed day (or a week of them) is filled in on the next run.
 async function rollupRecent(now: Date): Promise<void> {
@@ -79,6 +87,7 @@ export async function runDaily(): Promise<RunSummary> {
   const started = new Date();
   const [run] = await db().insert(collectorRuns).values({ startedAt: started, trigger: "vercel_cron" }).returning({ id: collectorRuns.id });
   const errors: string[] = [];
+  const paused = await pausedSections();
   const steps: [string, () => Promise<void>][] = [
     ["rollups", () => rollupRecent(started)],
     // B4: before retention, so the month's deployments and events are all still there. Never throws.
@@ -90,7 +99,8 @@ export async function runDaily(): Promise<RunSummary> {
     ["sync", async () => {
       // Every provider that has a Sync (Vercel apps, database projects, Cloudflare zones). No new account sync starts
       // after SYNC_STOP_MS, so the database and security steps keep their share of the 60 s; the rest syncs tomorrow.
-      const list = await db().select({ id: accounts.id, label: accounts.label, provider: accounts.provider }).from(accounts).where(inArray(accounts.provider, SYNC_PROVIDERS));
+      const list = (await db().select({ id: accounts.id, label: accounts.label, provider: accounts.provider }).from(accounts).where(inArray(accounts.provider, SYNC_PROVIDERS)))
+        .filter((a) => !paused.has((SECTION_OF_PROVIDER as Record<string, SectionId | undefined>)[a.provider] ?? "manage"));
       for (const [i, a] of list.entries()) {
         if (Date.now() > started.getTime() + SYNC_STOP_MS) {
           errors.push(`sync: ${list.length - i} account${list.length - i > 1 ? "s" : ""} left for the next run, time budget used`);
@@ -133,6 +143,7 @@ export async function runDaily(): Promise<RunSummary> {
   const done: string[] = [];
   try {
     for (const [name, fn] of steps) {
+      if (paused.has(DAILY_STEP_SECTION[name])) continue; // its section is off: not run, not an error
       try {
         await fn();
         done.push(name);

@@ -35,7 +35,7 @@ export default async function D1Page() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Cloudflare D1" }]}
+        crumbs={[{ label: "Database" }, { label: "Cloudflare D1" }]}
         title="Cloudflare D1"
         sub="Size from the D1 API and rows read and written today (UTC) from Cloudflare's GraphQL analytics, read hourly with the Cloudflare token on Connections. The console never runs a query on a database."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}

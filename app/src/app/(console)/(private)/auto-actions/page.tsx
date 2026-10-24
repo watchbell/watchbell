@@ -41,7 +41,7 @@ export default async function AutoActionsPage({ searchParams }: { searchParams: 
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader
-        crumbs={[{ label: "Automation" }, { label: "Auto-actions" }]}
+        crumbs={[{ label: "Manage" }, { label: "Auto-actions" }]}
         title="Auto-actions"
         sub="Console actions proposed for firing alerts. Approve runs the console's own action with you as the actor, and every run is in Events. Risky actions always wait for you."
         actions={

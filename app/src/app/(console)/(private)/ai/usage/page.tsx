@@ -76,7 +76,7 @@ export default async function UsagePage({ searchParams }: { searchParams: Promis
     <>
       <AutoRefresh at={now.getTime()} everyMs={live.running ? RUNNING_MS : undefined} />
       <PageHeader
-        crumbs={[{ label: "AI & API" }, { label: "AI Gateway", href: "/ai" }, { label: "Usage" }]}
+        crumbs={[{ label: "Manage" }, { label: "AI Gateway", href: "/ai" }, { label: "Usage" }]}
         title="Usage & Analytics"
         sub={USAGE_COPY.sub}
       />

@@ -17,7 +17,7 @@ export default async function ReposPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "GitHub" }, { label: "Repositories" }]}
+        crumbs={[{ label: "DevOps" }, { label: "Repositories" }]}
         title="Repositories"
         sub="The repositories the GitHub token can read. Open one for its README, files, commits and checks. Read-only."
       />

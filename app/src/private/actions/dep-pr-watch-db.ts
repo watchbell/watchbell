@@ -4,6 +4,8 @@ import { db } from "@/db/client";
 import { dependencyPrs, githubRepos, monitors, resources } from "@/db/schema";
 import { readAliasBook } from "@/lib/data/aliases-db";
 import { recordAction } from "@/lib/data/audit-db";
+import { pausedSections } from "@/lib/data/sections-db";
+import type { SectionId } from "@/lib/sections";
 import { actionsLockfilePending } from "@/lib/data/actions-lockfile-db";
 import { writeAccount } from "@/lib/data/deps-pr";
 import { repoReadAccess } from "@/lib/data/github-db";
@@ -227,13 +229,15 @@ async function apply(row: Row, seen: Seen, app: string, windowMin: number, now: 
   await d.notify({ ...n, kind: "stopped", reason }).catch(() => undefined);
 }
 
-// The minute step (minuteSteps): every 2 minutes per instance; never throws.
+// The minute step (minuteSteps): every 2 minutes per instance; never throws. Watchbell 1.2: paused while the DevOps
+// section is off (Manage › Sections); the watch picks up where it was once it is on again.
 let lastWatch: number | null = null;
 export function resetDepWatch(): void {
   lastWatch = null;
 }
-export async function depPrMinuteStep(now: Date, ctx?: { deadline?: number }): Promise<void> {
+export async function depPrMinuteStep(now: Date, ctx?: { deadline?: number }, paused: () => Promise<Set<SectionId>> = pausedSections): Promise<void> {
   if (!watchDue(now, lastWatch)) return;
+  if ((await paused()).has("devops")) return;
   lastWatch = now.getTime();
   try {
     const r = await watchDepPrs(now, ctx?.deadline ?? now.getTime() + 50_000);

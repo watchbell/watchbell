@@ -51,8 +51,9 @@ or a reverse proxy.
 ### Which hosting providers does it support?
 
 Apps on Vercel; databases on Supabase, Neon, Firebase (Firestore), Turso, Upstash Redis and Cloudflare D1; domains
-and DNS on Cloudflare; repositories on GitHub. Uptime checks and heartbeats work for any HTTP address and any job that
-can make an HTTP request to Watchbell.
+and DNS on Cloudflare; repositories on GitHub. Uptime checks and heartbeats belong to a watched app: connect
+Vercel, sync and tick an app first, then add checks for any HTTP address and heartbeats for any job that can make an
+HTTP request to Watchbell.
 
 ### Can heartbeats from my cron jobs reach a laptop?
 

@@ -69,7 +69,7 @@ export default async function RepoPage({ params, searchParams }: { params: Promi
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "GitHub" }, { label: "Repositories", href: "/repos" }, { label: repo.name }]}
+        crumbs={[{ label: "DevOps" }, { label: "Repositories", href: "/repos" }, { label: repo.name }]}
         title={<span className="font-mono text-[20px]"><Masked kind="repo" real={repo.fullName} /></span>}
         actions={outboundLinks() && <a href={gh} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 rounded-md border border-line-strong bg-surface px-3 py-1.5 text-[13px] text-ink hover:bg-hover">Open on GitHub {ext}</a>}
       />

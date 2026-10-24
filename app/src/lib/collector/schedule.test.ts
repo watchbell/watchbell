@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ALERTS_RESERVE_MS, BUDGET_MS, CATCH_UP_PER_RUN, checkTimeout, dueTasks, OFFSETS, POST_TASKS, recheckable, slotStart, type TaskName, TASKS, taskFits,
+  activeTasks, PROTECT_TASKS, protectOnly, ALERTS_RESERVE_MS, BUDGET_MS, CATCH_UP_PER_RUN, checkTimeout, dueTasks, OFFSETS, POST_TASKS, recheckable, slotStart, TASK_SECTION, type TaskName, TASKS, taskFits,
 } from "./schedule";
 
 const now = new Date("2026-10-12T10:00:01Z");
@@ -164,5 +164,45 @@ describe("taskFits", () => {
   it("keeps a few seconds of the 20 s run back for the alert rules", () => {
     expect(ALERTS_RESERVE_MS).toBeGreaterThanOrEqual(3_000);
     expect(ALERTS_RESERVE_MS).toBeLessThan(BUDGET_MS / 4);
+  });
+});
+
+// Watchbell 1.2 (D11): a section the owner turned off pauses its collector tasks.
+describe("paused sections", () => {
+  // Review A1, Important 2: Auto-restore rides on the Supabase status task, so it keeps running in protect-only mode.
+  it("keeps the protective Supabase status task due while Database is off, in protect-only mode", () => {
+    const database = new Set(["database"] as const);
+    expect(PROTECT_TASKS).toEqual(["supabase"]);
+    expect(activeTasks(["supabase", "neon", "supabaseUsage"], database)).toEqual(["supabase"]);
+    expect(protectOnly("supabase", database)).toBe(true);
+    expect(protectOnly("supabase", new Set())).toBe(false);
+    expect(protectOnly("checks", new Set(["hosting"] as const))).toBe(false);
+  });
+
+  it("gives every task a section (or none for the collector's own work)", () => {
+    expect(Object.keys(TASK_SECTION).sort()).toEqual([...ORDER].sort());
+    expect(TASK_SECTION).toMatchObject({ checks: "hosting", heartbeats: "hosting", vercel: "hosting", cloudflare: "hosting", supabase: "database", extraDbs: "database", alerts: null, digest: null, status: null });
+  });
+
+  it("leaves a paused section's tasks out of the run, and only theirs", () => {
+    // A forced first run: the minute tasks and the first CATCH_UP_PER_RUN slower ones.
+    expect(dueTasks({}, now, true)).toEqual(["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "alerts"]);
+    expect(dueTasks({}, now, true, new Set(["hosting"] as const))).toEqual(["supabase", "supabaseUsage", "alerts"]);
+    expect(dueTasks({}, now, true, new Set(["database"] as const))).not.toContain("supabaseUsage");
+    expect(dueTasks({}, now, true, new Set(["database"] as const))).toContain("checks");
+    expect(activeTasks(["checks", "neon", "alerts"], new Set(["hosting", "database"] as const))).toEqual(["alerts"]);
+    expect(dueTasks({}, now, true, new Set())).toEqual(dueTasks({}, now, true));
+  });
+
+  it("doesn't spend a catch-up place on a paused task, and catches it up once its section is on again", () => {
+    // Everything late (first run): only CATCH_UP_PER_RUN slower tasks start, and none of them is a paused one.
+    const paused = new Set(["database"] as const);
+    const first = slowOnly(dueTasks({}, now, false, paused));
+    expect(first).toHaveLength(CATCH_UP_PER_RUN);
+    expect(first.some((t) => TASK_SECTION[t as TaskName] === "database" && !PROTECT_TASKS.includes(t as TaskName))).toBe(false);
+    // Turned on again: the database tasks never ran, so they are late and start catching up.
+    const last = { ...fresh(now) };
+    for (const t of ORDER) if (TASK_SECTION[t as TaskName] === "database") delete (last as Record<string, string>)[t];
+    expect(slowOnly(dueTasks(last, now, false))).toEqual(["supabase", "supabaseUsage"]);
   });
 });

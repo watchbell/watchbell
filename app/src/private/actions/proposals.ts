@@ -30,6 +30,8 @@ export type ProposalAlert = {
   id: string; ruleKey: string; subject: string; severity: "critical" | "warning" | "info"; title: string; message: string;
   resourceId: string | null; resourceKind: string | null; resourceName: string | null; causedBy: string | null;
   silencedUntil: Date | null; silencedUntilResolved: boolean;
+  // An account alert's account (CredentialExpiring), so a paused section's credential gets no proposal (Watchbell 1.2).
+  accountId?: string | null;
 };
 
 export type SuspendedNeon = { resourceId: string; resourceKind: "neon_project" | "neon_branch"; endpointId: string };

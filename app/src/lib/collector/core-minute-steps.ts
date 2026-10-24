@@ -1,5 +1,6 @@
 import { guardPool } from "@/lib/data/pool-guard";
 import { isCloud } from "@/lib/mode";
+import { pausedSections } from "@/lib/data/sections-db";
 import { scrapeSupabaseMetrics } from "@/lib/data/supabase-metrics-db";
 
 // The core's own minute steps, run by /api/collect after the response like the private feature's minuteSteps (same
@@ -11,5 +12,9 @@ export const CORE_MINUTE_STEPS: MinuteStep[] = [
   // The pooler only exists in cloud; selfhost/demo use an in-process database, so the step is a no-op there.
   { name: "pool-guard", run: async () => { if (!isCloud()) return; await guardPool().catch((e) => console.warn("pool guard failed:", e instanceof Error ? e.message.slice(0, 160) : "error")); } },
   // Stage 12: Supabase compute (Metrics API), at most once per 5-minute slot, only for projects with a metrics key.
-  { name: "supabase-metrics", run: async (now, ctx) => { await scrapeSupabaseMetrics(now, ctx?.deadline ?? now.getTime() + 30_000); } },
+  // Watchbell 1.2: paused while the Database section is turned off (Manage › Sections).
+  { name: "supabase-metrics", run: async (now, ctx) => {
+    if ((await pausedSections()).has("database")) return;
+    await scrapeSupabaseMetrics(now, ctx?.deadline ?? now.getTime() + 30_000);
+  } },
 ];

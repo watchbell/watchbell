@@ -2,10 +2,12 @@ import "server-only";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { ACTIONS_COPY } from "@/lib/copy/edition";
-import { deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
+import { accounts, deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
 import { readAliasBook } from "@/lib/data/aliases-db";
 import { listFiring } from "@/lib/data/alerts-db";
 import { fixableApps } from "@/lib/data/deps-db";
+import { pausedSections } from "@/lib/data/sections-db";
+import { alertPaused, type SectionId } from "@/lib/sections";
 import { tokenFromSetting } from "@/lib/heartbeat";
 import { tokenHash } from "@/lib/heartbeat-token";
 import { neonData, readData, supabaseData } from "@/lib/databases/snapshot-data";
@@ -331,6 +333,10 @@ export type StepDeps = {
   autoSecurity?: typeof readAutoSecurity;
   bumpReady?: typeof autoBumpReady;
   approveAutoBump?: (id: string, now: Date) => Promise<boolean>;
+  // Watchbell 1.2 (D11): the sections the owner turned off; their alerts get no new proposals (left out: none paused).
+  paused?: () => Promise<Set<SectionId>>;
+  // The provider of each account id (an account alert follows its provider's section), read only while something is paused.
+  providers?: (accountIds: string[]) => Promise<Map<string, string>>;
 };
 
 async function approveAuto(id: string, now: Date): Promise<boolean> {
@@ -460,22 +466,34 @@ async function autoBumps(created: RunRow[], left: () => number, deps: StepDeps):
   return ran;
 }
 
+// Watchbell 1.2: the providers of these accounts (CredentialExpiring follows its provider's section).
+async function providersOf(ids: string[]): Promise<Map<string, string>> {
+  const rows = await db().select({ id: accounts.id, provider: accounts.provider }).from(accounts).where(inArray(accounts.id, ids));
+  return new Map(rows.map((r) => [r.id, r.provider as string]));
+}
+
 const STEP: StepDeps = {
   firing: () => listFiring(), book: () => readAliasBook(), facts: readProposalFacts, create: createProposals, expire: expireProposals,
   autoRun: readAutoRun, approveAuto, execute: (id, now) => executeProposal(id, "auto", now), notifyNew: notifyNewProposals, notifyResult: notifyProposalResult,
   logs: logsIfDue,
   autoRollback: () => readAutoRollback(), rollbackContext: readRollbackContext, approveAutoRollback, notifyRollback: notifyAutoRollback,
-  autoSecurity: () => readAutoSecurity(), bumpReady: autoBumpReady, approveAutoBump,
+  autoSecurity: () => readAutoSecurity(), bumpReady: autoBumpReady, approveAutoBump, paused: pausedSections, providers: providersOf,
 };
 
 // Every minute (minuteSteps): proposals for the firing alerts, expiry, and the auto-run of the safe kinds the owner
 // switched on. Cheap when nothing fires (one read of the firing alerts, one expiry update). Bounded by ctx.deadline: no
 // run starts with under 8 s left. Never throws. Returns what happened, for the log line and the tests.
+// Watchbell 1.2 (D11): the alerts of a section the owner turned off get no new proposals (and Hosting off skips the log
+// check), but they still count as firing for the expiry, so their open proposals wait unchanged.
 export async function runProposalsStep(now: Date, ctx: { deadline?: number } = {}, deps: StepDeps = STEP): Promise<{ created: number; expired: number; autoRan: number }> {
   const out = { created: 0, expired: 0, autoRan: 0 };
   const left = () => (ctx.deadline ?? Number.POSITIVE_INFINITY) - Date.now();
-  const alerts = await deps.firing();
-  out.expired = await deps.expire(alerts.map((a) => a.id), now);
+  const firing = await deps.firing();
+  out.expired = await deps.expire(firing.map((a) => a.id), now);
+  const paused = deps.paused ? await deps.paused().catch(() => new Set<SectionId>()) : new Set<SectionId>();
+  const accountIds = [...new Set(firing.flatMap((a) => (a.accountId ? [a.accountId] : [])))];
+  const providerOf = paused.size && accountIds.length && deps.providers ? await deps.providers(accountIds).catch(() => new Map<string, string>()) : new Map<string, string>();
+  const alerts = firing.filter((a) => !alertPaused(paused, a.ruleKey, a.accountId ? providerOf.get(a.accountId) : null));
   let bookP: Promise<AliasBook> | null = null;
   const book = () => (bookP ??= deps.book().catch(() => EMPTY_BOOK));
   const created: RunRow[] = [];
@@ -489,7 +507,7 @@ export async function runProposalsStep(now: Date, ctx: { deadline?: number } = {
     created.push(...(await deps.create(alerts.flatMap((a) => proposalsFor(a, facts, b, now)))));
   }
   // The officers' log check (log-proposals.ts): at most every 5 minutes, only with time left; a failure stays here.
-  if (left() > 10_000) {
+  if (left() > 10_000 && !paused.has("hosting")) {
     try {
       const logs = await deps.logs(now, book);
       created.push(...logs.created);

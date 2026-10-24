@@ -18,7 +18,7 @@ export default async function CatalogPage() {
   return (
     <>
       <PageHeader
-        crumbs={[{ label: "Databases" }, { label: "Free databases" }]}
+        crumbs={[{ label: "Database" }, { label: "Free databases" }]}
         title="Free databases"
         sub={`Hosted databases you can use for free today (checked ${CHECKED_ON} against official pricing pages), and what the console can monitor for each.`}
       />

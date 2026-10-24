@@ -38,5 +38,9 @@
   {
     "path": "app/bin/README.md",
     "rule": "deny:16"
+  },
+  {
+    "path": "app/src/app/(console)/connections/credential-actions.test.ts",
+    "rule": "gitleaks-fixture"
   }
 ]
