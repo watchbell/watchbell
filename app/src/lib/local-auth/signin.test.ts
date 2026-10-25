@@ -9,9 +9,11 @@ import { localSessions, localUsers, members, rateLimits } from "@/db/schema";
 import { type Limit, LIMITS, subjectKey, windowStart } from "@/lib/rate-limit";
 import { hashPassword } from "./password";
 import { hashToken } from "./session-token";
+import { BACKOFF, BACKOFF_NAMES, backoffKeys } from "@/lib/backoff";
 
-const h = vi.hoisted(() => ({ db: undefined as unknown }));
+const h = vi.hoisted(() => ({ db: undefined as unknown, alert: vi.fn(async () => {}) }));
 vi.mock("@/db/client", () => ({ db: () => h.db }));
+vi.mock("@/lib/data/auth-alert", () => ({ notifyAuthFailures: h.alert }));
 vi.mock("./password", async (importOriginal) => {
   const real = await importOriginal<typeof import("./password")>();
   return { ...real, dummyVerify: vi.fn(real.dummyVerify), verifyPassword: vi.fn(real.verifyPassword) };
@@ -61,13 +63,15 @@ const attempt = (over: Partial<Parameters<typeof passwordSignIn>[0]> = {}) =>
 const addMember = (role: "owner" | "operator" | "viewer") => db.insert(members).values({ userId, email: "ana@example.com", role });
 const count = async (l: Limit, subject: string) =>
   (await db.select({ n: rateLimits.count }).from(rateLimits).where(eq(rateLimits.key, subjectKey(l, subject))))[0]?.n ?? 0;
+const fails = async (name: string, subject: string) =>
+  (await db.select({ n: rateLimits.count }).from(rateLimits).where(eq(rateLimits.key, backoffKeys(name, subject)[0])))[0]?.n ?? 0;
 // Every counter a sign-in for ana@example.com from `ip` touches.
 const counts = async (ip: string) => ({
-  emailIp: await count(LIMITS.passwordEmailIp, `ana@example.com ${ip}`),
-  email: await count(LIMITS.passwordEmail, "ana@example.com"),
-  ip: await count(LIMITS.passwordIp, ip),
+  emailIp: await fails(BACKOFF_NAMES.accountIp, `ana@example.com ${ip}`),
+  ip: await fails(BACKOFF_NAMES.ip, ip),
   all: await count(LIMITS.passwordFailuresAll, "all"),
 });
+const later = (s: number) => vi.setSystemTime(new Date(Date.now() + s * 1000));
 const sessions = () => db.select().from(localSessions).where(eq(localSessions.userId, userId));
 
 describe("password sign-in (self-host)", () => {
@@ -99,56 +103,80 @@ describe("password sign-in (self-host)", () => {
     expect(await sessions()).toHaveLength(0);
   });
 
-  it("locks an email from a known IP after 10 wrong passwords in 15 minutes, even for the right password then", async () => {
-    for (let i = 0; i < 10; i++) expect(await attempt({ password: `wrong ${i}`, ip: "198.51.100.7" })).toEqual({ ok: false, message: WRONG });
-    expect(await counts("198.51.100.7")).toEqual({ emailIp: 10, email: 10, ip: 10, all: 10 });
+  // Watchbell 1.2.1 (audit L5): exponential back-off instead of hard windows; another network never locks the owner out.
+  it("backs off an email from one network after 5 wrong passwords, even for the right password; another network still gets in", async () => {
+    for (let i = 0; i < BACKOFF.free; i++) expect(await attempt({ password: `wrong ${i}`, ip: "198.51.100.7" })).toEqual({ ok: false, message: WRONG });
+    expect(await counts("198.51.100.7")).toEqual({ emailIp: 5, ip: 5, all: 5 });
     const locked = await attempt({ ip: "198.51.100.7" });
-    expect(locked.ok).toBe(false);
-    if (locked.ok) throw new Error("expected refusal");
-    expect(locked.message).toMatch(/^Too many attempts\. Try again in \d+ min\.$/);
-    expect(verifyPassword).toHaveBeenCalledTimes(10);
+    expect(locked).toEqual({ ok: false, message: "Too many attempts. Try again in 1 min." });
+    expect(verifyPassword).toHaveBeenCalledTimes(5);
     expect(await sessions()).toHaveLength(0);
     // The refused attempt added to no counter.
-    expect(await counts("198.51.100.7")).toEqual({ emailIp: 10, email: 10, ip: 10, all: 10 });
-    // The same email from another address still gets in (a stranger can't lock the owner out from one IP).
+    expect(await counts("198.51.100.7")).toEqual({ emailIp: 5, ip: 5, all: 5 });
     await addMember("viewer");
     expect(await attempt({ ip: "192.0.2.1" })).toMatchObject({ ok: true });
-    expect(await counts("192.0.2.1")).toEqual({ emailIp: 0, email: 10, ip: 0, all: 10 });
   }, 60_000);
 
-  it("without a trusted IP, locks an email after 50 wrong passwords (unknown emails alike)", async () => {
-    for (let i = 0; i < 50; i++) await attempt({ email: "ghost@example.com", password: "x", ip: null });
-    expect(await attempt({ email: "ghost@example.com", password: "x", ip: null })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
-    expect(await count(LIMITS.passwordEmail, "ghost@example.com")).toBe(50);
-    for (let i = 0; i < 49; i++) await attempt({ password: `wrong ${i}`, ip: null });
-    await addMember("viewer");
-    expect(await attempt({ ip: null })).toMatchObject({ ok: true });
-    expect(await count(LIMITS.passwordEmail, "ana@example.com")).toBe(49);
-    await attempt({ password: "wrong again", ip: null });
-    expect(await attempt({ ip: null })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
-    expect(await count(LIMITS.passwordEmail, "ana@example.com")).toBe(50);
+  // Review I1: parallel guesses can't all pass a stale back-off read.
+  it("40 parallel wrong passwords from one network reach the password check at most the burst cap (10 per 15 minutes)", async () => {
+    await Promise.all(Array.from({ length: 40 }, (_, i) => attempt({ password: `wrong ${i}`, ip: "198.51.100.44" })));
+    expect(vi.mocked(verifyPassword).mock.calls.length).toBeLessThanOrEqual(LIMITS.passwordBurst.max);
   }, 120_000);
 
-  it("a successful sign-in gives back exactly its email and email+IP hits, and never touches the IP count", async () => {
+  // Review I2: many networks together are bounded per account; a network that signed in before isn't.
+  it("50 wrong passwords from 50 networks back the account off for new networks; a network that signed in before still gets in", async () => {
     await addMember("viewer");
-    for (let i = 0; i < 3; i++) await attempt({ password: `wrong ${i}`, ip: "198.51.100.8" });
-    expect(await counts("198.51.100.8")).toEqual({ emailIp: 3, email: 3, ip: 3, all: 3 });
-    for (let i = 0; i < 3; i++) expect((await attempt({ ip: "198.51.100.8" })).ok).toBe(true);
-    expect(await counts("198.51.100.8")).toEqual({ emailIp: 3, email: 3, ip: 3, all: 3 });
+    expect(await attempt({ ip: "192.0.2.77" })).toMatchObject({ ok: true }); // the owner's own network
+    for (let i = 0; i < 50; i++) await attempt({ password: "x", ip: `2001:db8:${i.toString(16)}::/64` });
+    expect(await attempt({ ip: "203.0.113.200" })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
+    expect(await attempt({ ip: "192.0.2.77" })).toMatchObject({ ok: true });
+  }, 180_000);
+
+  // Review T2b-fix I-3: the network stays known past the 30-day session it signed in with.
+  it("a network that signed in is still known when its 30-day session has run out", async () => {
+    await addMember("viewer");
+    expect(await attempt({ ip: "192.0.2.77" })).toMatchObject({ ok: true });
+    later(30 * 86_400 + 60);
+    for (let i = 0; i < 50; i++) await attempt({ password: "x", ip: `2001:db8:${i.toString(16)}::/64` });
+    expect(await attempt({ ip: "203.0.113.200" })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
+    expect(await attempt({ ip: "192.0.2.77" })).toMatchObject({ ok: true });
+  }, 180_000);
+
+  it("the wait doubles after each further failure and ends on its own", async () => {
+    await addMember("viewer");
+    for (let i = 0; i < BACKOFF.free; i++) await attempt({ password: `wrong ${i}`, ip: "198.51.100.9" });
+    later(31);
+    expect(await attempt({ password: "wrong again", ip: "198.51.100.9" })).toEqual({ ok: false, message: WRONG });
+    later(31);
+    expect((await attempt({ ip: "198.51.100.9" })).ok).toBe(false); // 60 s now
+    later(30);
+    expect(await attempt({ ip: "198.51.100.9" })).toMatchObject({ ok: true });
+    expect((await counts("198.51.100.9")).emailIp).toBe(0); // a success starts the account over on this network
   }, 60_000);
 
-  it("failures on other emails mixed with the attacker's own successes still reach the per-IP cap (30)", async () => {
+  it("without a trusted IP the email alone backs off (unknown emails alike), and a success starts it over", async () => {
+    for (let i = 0; i < BACKOFF.free; i++) await attempt({ email: "ghost@example.com", password: "x", ip: null });
+    expect(await attempt({ email: "ghost@example.com", password: "x", ip: null })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
     await addMember("viewer");
-    for (let i = 0; i < 30; i++) {
-      expect((await attempt({ email: `p${i}@example.com`, password: "x", ip: "203.0.113.9" })).ok).toBe(false);
-      // The 30th failure fills the IP's budget, so that round's own sign-in is already refused.
-      expect((await attempt({ ip: "203.0.113.9" })).ok).toBe(i < 29);
-    }
-    expect(await count(LIMITS.passwordIp, "203.0.113.9")).toBe(30);
+    for (let i = 0; i < BACKOFF.free - 1; i++) await attempt({ password: `wrong ${i}`, ip: null });
+    expect(await attempt({ ip: null })).toMatchObject({ ok: true });
+    expect(await fails(BACKOFF_NAMES.account, "ana@example.com")).toBe(0);
+  }, 120_000);
+
+  it("failures on other emails back off the network itself; another address is unaffected", async () => {
+    await addMember("viewer");
+    for (let i = 0; i < BACKOFF.free; i++) expect((await attempt({ email: `p${i}@example.com`, password: "x", ip: "203.0.113.9" })).ok).toBe(false);
     expect(await attempt({ ip: "203.0.113.9" })).toMatchObject({ ok: false, message: expect.stringMatching(/^Too many attempts/) });
-    expect(await count(LIMITS.passwordIp, "203.0.113.9")).toBe(30);
-    // Another address is unaffected.
     expect(await attempt({ ip: "203.0.113.10" })).toMatchObject({ ok: true });
+  }, 60_000);
+
+  it("10 wrong passwords for an account in a day (from any network) send the Telegram alert", async () => {
+    for (let i = 0; i < 9; i++) await attempt({ password: "x", ip: `198.51.100.${i + 30}` });
+    expect(h.alert).not.toHaveBeenCalled();
+    await attempt({ password: "x", ip: "198.51.100.99" });
+    expect(h.alert).toHaveBeenCalledWith("password", "ana@example.com", 10);
+    await attempt({ email: "nobody@example.com", password: "x", ip: "198.51.100.98" });
+    expect(h.alert).toHaveBeenCalledTimes(1); // unknown emails never alert
   }, 120_000);
 
   it("many failures across everyone only log a warning, once per window, and refuse nobody", async () => {
@@ -199,8 +227,8 @@ describe("password sign-in (self-host)", () => {
     expect(await attempt({ ip: "198.51.100.20" })).toEqual({ ok: false, message: TEMP_PASSWORD_EXPIRED });
     expect(TEMP_PASSWORD_EXPIRED).toBe("This temporary password has expired. Ask an owner for a new one.");
     expect(await sessions()).toHaveLength(0);
-    // Only the wrong guess counts.
-    expect(await counts("198.51.100.20")).toEqual({ emailIp: 1, email: 1, ip: 1, all: 1 });
+    // Only the wrong guess counts (the right one started the account over on this network).
+    expect(await counts("198.51.100.20")).toEqual({ emailIp: 0, ip: 1, all: 1 });
     // Still within its 7 days: in, straight to the password change.
     await db.update(localUsers).set({ tempPasswordExpiresAt: new Date(NOW.getTime() + 1) }).where(eq(localUsers.id, userId));
     expect(await attempt({ ip: "198.51.100.20" })).toMatchObject({ ok: true, redirectTo: "/account/password" });

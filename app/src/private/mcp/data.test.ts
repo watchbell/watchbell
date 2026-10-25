@@ -15,10 +15,11 @@ const monitor = {
   id: "m1", appId: APP, url: "https://shop.example.com/health?token=abc", path: "/health?token=abc", state: "err", lastStatus: 503, lastLatencyMs: 812, failStreak: 3,
   paused: false, ownerPaused: false, lastCheckedAt: t, expectedStatus: 200, timeoutMs: 10000, intervalS: 60, bodyContains: null, jsonPath: null, jsonEquals: null,
   lastError: SECRET, kind: "http", name: null, periodS: null, graceS: null, lastPingAt: null, stateSince: t, maintUntil: null,
+  move: { from: "old.example.com", to: "shop.example.com" }, // Watchbell 1.2.1: told as a flag, never the hosts
 };
 const app = {
   id: APP, name: "ticketer", gone: false, state: "err", stateSince: t, domain: "shop.example.com", framework: "nextjs", productionBranch: "main", createdAt: t,
-  teamName: "Acme team owner@example.com", teamSlug: "acme", repo: "acme/ticketer", repoType: "github", functionRegions: ["sin1"], monitors: [monitor],
+  teamName: "Acme team owner@example.com", teamSlug: "acme", repo: "acme/ticketer", repoType: "github", functionRegions: ["sin1"], domainLines: { lines: [{ name: "shop.example.com", tag: null, target: null }], more: 0 }, monitors: [monitor],
   lastDeploy: { id: "dep", state: "error", target: "production", branch: "main", commitSha: "abcdef1234567", commitMessage: `fix ${SECRET}`, url: "ticketer-abc.vercel.app", createdAt: t, buildingAt: t, readyAt: t, isCurrent: true, isPreviousProduction: false },
   uptime30: 99.1, response: { hourly: [], p95: 900, p50: 300 }, days: new Map(), security: null,
   database: { id: DB, externalId: "abcd1234supabaseref", name: "ticketer-prod-db", kind: "supabase_project", account: "Acme Supabase", state: "warn" }, dbPaused: true,
@@ -41,7 +42,7 @@ vi.mock("@/db/client", () => {
 vi.mock("@/lib/data/apps-db", () => ({ listApps: async () => [app], getApp: async (id: string) => (id === APP ? app : null) }));
 vi.mock("@/lib/data/monitors-db", () => ({ listMonitors: async () => [{ ...monitor, appName: "ticketer", appGone: false, days: undefined, uptime30: 98.5 }] }));
 vi.mock("@/lib/data/alerts-db", () => ({
-  listFiring: async () => [{
+  listShownFiring: async () => [{
     id: ALERT, ruleKey: "db-paused", subject: "ticketer-prod-db", resourceId: DB, accountId: "acc", severity: "critical", title: "ticketer-prod-db is paused",
     message: SECRET, startedAt: t, lastSeenAt: t, resolvedAt: null, okStreak: 0, lastSampleAt: t, silencedUntil: null, silencedUntilResolved: false, silencedBy: null,
     causedBy: SECRET, providerIncident: null, notifiedOpen: true, lastNotifiedAt: t, resourceName: "ticketer-prod-db", resourceKind: "supabase_project",
@@ -99,7 +100,8 @@ describe("MCP read tools leak nothing (R5)", () => {
     const r = await findTool("get_app")!.call({ app: "ticketer" }, ctx);
     const a = (r.structuredContent as { app: Record<string, unknown> }).app;
     expect(a).toMatchObject({ id: APP, name: "ticketer", state: "err", database: { alias: "db-a", kind: "supabase_project", paused: true } });
-    expect(a.monitors).toEqual([expect.objectContaining({ path: "/health", state: "err", lastStatus: 503 })]);
+    expect(a.monitors).toEqual([expect.objectContaining({ path: "/health", state: "err", lastStatus: 503, domainMoved: true })]);
+    expect(a.domainMoved).toBe(true);
     expect((a.problems as { where: string }[]).map((p) => p.where)).toEqual(["Monitor /health", "Database db-a", "Production deployment abcdef1"]);
     const dbs = await findTool("list_databases")!.call({}, ctx);
     expect(dbs.structuredContent).toEqual({ databases: [{ alias: "db-a", kind: "supabase_project", state: "warn", stateSince: t.toISOString(), usedBy: ["ticketer"] }] });

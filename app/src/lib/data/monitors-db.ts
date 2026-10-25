@@ -10,6 +10,7 @@ import { same, writeCheckResult } from "@/lib/collector/monitor-write";
 import { monitorEvent, nextMonitorState } from "@/lib/collector/rules";
 import { RECHECK_AFTER_MS } from "@/lib/collector/schedule";
 import { recordEvents } from "@/lib/data/events-write";
+import { type DomainMove, monitorMoves, storedDomains } from "@/lib/domain-move";
 import { heartbeatKey, newToken } from "@/lib/heartbeat-token";
 import { activeFor } from "@/lib/maintenance";
 import { isDemo } from "@/lib/mode";
@@ -33,6 +34,8 @@ export type MonitorLite = {
   kind: "http" | "heartbeat"; name: string | null; periodS: number | null; graceS: number | null; lastPingAt: Date | null;
   // When the monitor entered its current state (the "Why" popover's "since").
   stateSince?: Date | null;
+  // Watchbell 1.2.1: the host is no longer a domain of the app (listMonitors, listApps).
+  move?: DomainMove | null;
 };
 
 export function toMonitorLite(m: typeof monitors.$inferSelect): MonitorLite {
@@ -46,19 +49,32 @@ export function toMonitorLite(m: typeof monitors.$inferSelect): MonitorLite {
   };
 }
 
-export type MonitorRow = MonitorLite & { appName: string; appGone: boolean; days: Map<string, DayCount> | undefined; uptime30: number | null };
+// move (Watchbell 1.2.1): the HTTP monitor's host is no longer a domain of its app (lib/domain-move.ts): "Domain
+// changed: from → to" with Update monitor, instead of reading as the app being down.
+export type MonitorRow = MonitorLite & { appName: string; appGone: boolean; days: Map<string, DayCount> | undefined; uptime30: number | null; move?: DomainMove | null };
 
 // Uptime page: every monitor of a watched app, with its 90 days and 30-day uptime. Per app, HTTP checks come before
 // heartbeats ('http' sorts after 'heartbeat', hence desc), as in the mockup.
 export async function listMonitors(now: Date): Promise<MonitorRow[]> {
-  const rows = await db().select({ m: monitors, appName: resources.name, goneAt: resources.goneAt }).from(monitors)
+  const rows = await db().select({ m: monitors, appName: resources.name, goneAt: resources.goneAt, appMeta: resources.meta }).from(monitors)
     .innerJoin(resources, eq(resources.id, monitors.resourceId))
     .where(and(eq(resources.kind, "app"), eq(resources.monitored, true)))
     .orderBy(resources.name, desc(monitors.kind), monitors.url).limit(PAGE_ROWS.monitors);
   const days = await monitorDays(rows.map((r) => r.m.id), now);
+  const moves = await movesOf(rows.map((r) => ({ id: r.m.id, kind: r.m.kind, url: r.m.url, appId: r.m.resourceId, appName: r.appName, appMeta: r.appMeta, lastError: r.m.lastError })));
   return rows.map(({ m, appName, goneAt }) => ({
     ...toMonitorLite(m), appName, appGone: goneAt !== null, days: days.get(m.id), uptime30: uptimePct(lastDays(days.get(m.id), now, UPTIME_DAYS)),
+    move: moves.get(m.id) ?? null,
   }));
+}
+
+// Watchbell 1.2.1: the moved monitors among these. The watched apps' domains are read only when one of these apps has
+// stored domains (an app synced before 1.2.1 has none: nothing changes).
+export async function movesOf(mons: Parameters<typeof monitorMoves>[0]): Promise<Map<string, DomainMove>> {
+  if (!mons.some((m) => storedDomains(m.appMeta) !== null)) return new Map();
+  const apps = await db().select({ id: resources.id, name: resources.name, meta: resources.meta }).from(resources)
+    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt))).limit(500);
+  return monitorMoves(mons, apps);
 }
 
 export type Audit = { message: string; detail?: string; resourceId: string | null };

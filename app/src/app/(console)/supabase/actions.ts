@@ -6,9 +6,12 @@ import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import { setFlag } from "@/lib/data/keep-active-db";
 import type { Done } from "@/lib/data/monitors-db";
-import { supabaseAct } from "@/lib/data/supabase-action";
+import { loadTarget } from "@/lib/data/provider-action-db";
+import { GONE, supabaseAct } from "@/lib/data/supabase-action";
+import { servicesMessage } from "@/lib/databases/supabase";
 import { isUuid } from "@/lib/ids";
-import { INVALID } from "@/lib/provider-actions";
+import { cooldownText, INVALID, STALE } from "@/lib/provider-actions";
+import { serviceHealth } from "@/lib/providers/supabase";
 import { LIMITS, minutesText } from "@/lib/rate-limit";
 import { limit } from "@/lib/rate-limit-db";
 
@@ -30,6 +33,23 @@ export async function restoreAction(resourceId: string, expectedRef: string): Pr
   return runGuarded("operator", async (member): Promise<ActionResult> => {
     if (!isUuid(resourceId) || !isRef(expectedRef)) return { ok: false, error: INVALID };
     return supabaseAct("restore", member, resourceId, expectedRef);
+  }, deps);
+}
+
+// 1.2.1 (4c): row menu → Check services. A read of the Management API's /health (the collector's hourly read), so no
+// dialog and no audit; one check a minute per project.
+export async function checkServicesAction(resourceId: string, expectedRef: string): Promise<ActionResult> {
+  return runGuarded("operator", async (): Promise<ActionResult> => {
+    if (!isUuid(resourceId) || !isRef(expectedRef)) return { ok: false, error: INVALID };
+    const quota = await limit(LIMITS.actionTarget, `check-services:${resourceId}`);
+    if (!quota.allowed) return { ok: false, error: cooldownText("target", quota.retryAfter) };
+    const t = await loadTarget(resourceId, "supabase_project");
+    if (!t) return { ok: false, error: GONE };
+    if (t.resource.externalId !== expectedRef) return { ok: false, error: STALE };
+    const r = await serviceHealth(t.token, t.resource.externalId);
+    if (!r.ok) return { ok: false, error: `Couldn't read the service health at Supabase: ${r.error}` };
+    const m = servicesMessage(r.data);
+    return m.ok ? { ok: true, message: m.message } : { ok: false, error: m.message };
   }, deps);
 }
 

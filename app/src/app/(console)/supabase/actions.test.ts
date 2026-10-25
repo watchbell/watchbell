@@ -26,7 +26,7 @@ vi.mock("@/lib/data/provider-action-db", async (orig) => ({ ...(await orig<typeo
 vi.mock("@/lib/data/keep-active-db", async (orig) => ({ ...(await orig<typeof import("@/lib/data/keep-active-db")>()), setFlag: h.setFlag, accountPlans: h.accountPlans }));
 
 import { LIMITS } from "@/lib/rate-limit";
-import { pauseAction, restoreAction, setAutoRestore, setKeepActive } from "./actions";
+import { checkServicesAction, pauseAction, restoreAction, setAutoRestore, setKeepActive } from "./actions";
 
 // MSW: an unexpected provider call fails the test (copied from lib/security/osv.test.ts).
 const unmatched: string[] = [];
@@ -217,5 +217,48 @@ describe.each([
     expect(await call("nope", true)).toEqual({ ok: false, error: "Something in that request wasn't valid." });
     expect(await call(UUID, "yes" as unknown as boolean)).toEqual({ ok: false, error: "Something in that request wasn't valid." });
     expect(h.setFlag).not.toHaveBeenCalled();
+  });
+});
+
+// 1.2.1 (4c): Supabase → row menu → Check services: a read of the Management API's /health, no write, no audit.
+describe("checkServicesAction", () => {
+  const health = (body: object, status = 200) => http.get(`${API}/v1/projects/${REF}/health`, () => HttpResponse.json(body, { status }));
+
+  it("reads the project's service health and answers with one sentence", async () => {
+    server.use(health(["auth", "rest", "realtime", "storage", "db"].map((name) => ({ name, healthy: true, status: "ACTIVE_HEALTHY" }))), catchAll);
+    expect(await checkServicesAction(UUID, REF)).toEqual({ ok: true, message: "All 5 services are healthy: Auth, REST, Realtime, Storage, Database." });
+    expect(h.loadTarget).toHaveBeenCalledWith(UUID, "supabase_project");
+    expect(h.recordAction).not.toHaveBeenCalled();
+    expect(posts).toEqual([]);
+  });
+
+  it("an unhealthy service is a failure toast that names it", async () => {
+    server.use(health([{ name: "auth", healthy: true, status: "ACTIVE_HEALTHY" }, { name: "storage", healthy: false, status: "UNHEALTHY", error: "timeout" }]), catchAll);
+    expect(await checkServicesAction(UUID, REF)).toEqual({ ok: false, error: "Not healthy: Storage (timeout). Healthy: Auth." });
+  });
+
+  it("needs an operator and valid ids; one check a minute per project", async () => {
+    server.use(catchAll);
+    expect(await checkServicesAction("nope", REF)).toEqual({ ok: false, error: "Something in that request wasn't valid." });
+    h.limit.mockResolvedValueOnce({ allowed: false, retryAfter: 40 });
+    expect(await checkServicesAction(UUID, REF)).toMatchObject({ ok: false });
+    expect(h.limit.mock.calls[0]).toEqual([LIMITS.actionTarget, `check-services:${UUID}`]);
+    expect(h.loadTarget).not.toHaveBeenCalled();
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await checkServicesAction(UUID, REF)).toEqual({ ok: false, error: "You don't have permission to do that." });
+  });
+
+  it("refuses a stale row and a gone project", async () => {
+    server.use(catchAll);
+    expect(await checkServicesAction(UUID, OTHER)).toEqual({ ok: false, error: "This changed since you opened it. Reload and try again." });
+    h.loadTarget.mockResolvedValue(null);
+    expect(await checkServicesAction(UUID, REF)).toMatchObject({ ok: false });
+  });
+
+  it("a failed read says so", async () => {
+    server.use(health({ message: "boom" }, 500), catchAll);
+    const r = await checkServicesAction(UUID, REF);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/^Couldn't read the service health at Supabase: /);
   });
 });

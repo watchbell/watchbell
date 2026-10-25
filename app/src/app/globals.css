@@ -7,7 +7,7 @@
 :root {
   --oc-bg: #f4f5f7; --oc-surface: #ffffff; --oc-surface-2: #f8f9fb; --oc-sunken: #eceef2; --oc-hover: #f1f3f6;
   --oc-nav-bg: #ffffff; --oc-nav-text: #3b4250; --oc-nav-active-bg: #e9efff; --oc-nav-active-text: #1f45c9;
-  --oc-ink: #14171f; --oc-ink-soft: #596170; --oc-ink-faint: #858d9b;
+  --oc-ink: #14171f; --oc-ink-soft: #596170; --oc-ink-faint: #646b78;
   --oc-line: #e2e5ea; --oc-line-strong: #cbd0d8;
   --oc-brand: #1f45c9; --oc-brand-hover: #17359c; --oc-brand-soft: #e9efff; --oc-on-brand: #ffffff;
   --oc-ok: #17773f; --oc-ok-soft: #e5f4ea; --oc-warn: #8f5200; --oc-warn-icon: #d08300; --oc-warn-soft: #fcf1dd;
@@ -31,7 +31,7 @@
 :root[data-theme="dark"] {
   --oc-bg: #0d0f12; --oc-surface: #15181d; --oc-surface-2: #1a1e24; --oc-sunken: #111317; --oc-hover: #1d2128;
   --oc-nav-bg: #111317; --oc-nav-text: #b3b9c4; --oc-nav-active-bg: #1b2541; --oc-nav-active-text: #9db6ff;
-  --oc-ink: #e8ebf0; --oc-ink-soft: #a3aab6; --oc-ink-faint: #727a88;
+  --oc-ink: #e8ebf0; --oc-ink-soft: #a3aab6; --oc-ink-faint: #8a92a0;
   --oc-line: #252a32; --oc-line-strong: #353b45;
   --oc-brand: #7c9cff; --oc-brand-hover: #9db6ff; --oc-brand-soft: #1b2541; --oc-on-brand: #0d0f12;
   --oc-ok: #52c78d; --oc-ok-soft: #142a1f; --oc-warn: #f0b456; --oc-warn-icon: #f0b456; --oc-warn-soft: #2d2414;

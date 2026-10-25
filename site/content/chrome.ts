@@ -1,0 +1,41 @@
+import type { Lang } from "@/lib/paths";
+
+// Header, footer and docs labels in both languages.
+export const chrome = {
+  en: {
+    skip: "Skip to content",
+    home: "Watchbell home",
+    night: "One night",
+    board: "The board",
+    setup: "Set it up",
+    docs: "Docs",
+    github: "GitHub ↗",
+    theme: "dark / light",
+    themeLabel: "Switch between dark and light",
+    language: "Language",
+    changelog: "Changelog",
+    security: "Security",
+    docsMenu: "Docs menu",
+    onThisSite: "Documentation",
+    edit: "Edit this page on GitHub",
+    updated: "Last updated",
+  },
+  id: {
+    skip: "Langsung ke isi",
+    home: "Beranda Watchbell",
+    night: "Satu malam",
+    board: "Papan status",
+    setup: "Pasang",
+    docs: "Dokumentasi",
+    github: "GitHub ↗",
+    theme: "gelap / terang",
+    themeLabel: "Ganti tema gelap atau terang",
+    language: "Bahasa",
+    changelog: "Changelog",
+    security: "Keamanan",
+    docsMenu: "Menu dokumentasi",
+    onThisSite: "Dokumentasi",
+    edit: "Sunting halaman ini di GitHub",
+    updated: "Terakhir diperbarui",
+  },
+} satisfies Record<Lang, Record<string, string>>;

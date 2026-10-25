@@ -8,11 +8,23 @@ import { setSectionOn } from "./actions";
 // on: shown; off: turned off by hand; waiting: an automatic section with nothing connected yet (off and disabled).
 export type SwitchState = "on" | "off" | "waiting";
 
+// The switch's shown value and the server state it came from. When the server's state changes (a refresh after another
+// tab or member switched it), the switch takes it; otherwise the local value stays (1.2 review minor 3).
+type Shown = { server: SwitchState; value: boolean };
+export function followServer(s: Shown, server: SwitchState): Shown {
+  return s.server === server ? s : { server, value: server === "on" };
+}
+
 // The mockup's switch (a checkbox styled as a toggle), as on AI Gateway › Bring your own key. Turning a section off
 // asks first and says what stops (`stops`); turning it on is one click.
 export function SectionSwitch({ section, label, state, stops }: { section: string; label: string; state: SwitchState; stops: string }) {
   const [pending, start] = useTransition();
-  const [value, setValue] = useState(state === "on");
+  const [shown, setShown] = useState<Shown>({ server: state, value: state === "on" });
+  // React's "adjust state when a prop changes": during render, before the children see the old value.
+  const next = followServer(shown, state);
+  if (next !== shown) setShown(next);
+  const value = next.value;
+  const setValue = (v: boolean) => setShown((s) => ({ ...s, value: v }));
   const [confirm, setConfirm] = useState(false);
   const waiting = state === "waiting";
   return (

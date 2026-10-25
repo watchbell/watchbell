@@ -1,5 +1,7 @@
 # Watchbell documentation
 
+Bahasa Indonesia: [id/README.md](id/README.md)
+
 Watchbell is a self-hosted ops console. You run it on your own laptop or server, it watches the apps, databases and
 domains you connect, and it tells you when something breaks. These pages explain how to install it and how to use
 every part of it. For a quick look first, the [project README](../README.md#features) has screenshots of the main
@@ -35,4 +37,5 @@ pages.
 - [Changelog](../CHANGELOG.md)
 - [Developer notes for the app](../app/README.md)
 
-An online copy of this documentation and a live demo with made-up data are coming soon.
+This documentation is also online at [watchbell.west-solutions.web.id/docs](https://watchbell.west-solutions.web.id/docs)
+([in Bahasa Indonesia](https://watchbell.west-solutions.web.id/id/docs)).

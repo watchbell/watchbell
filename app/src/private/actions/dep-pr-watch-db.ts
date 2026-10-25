@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
-import { dependencyPrs, githubRepos, monitors, resources } from "@/db/schema";
+import { dependencyPrs, dependencyScans, githubRepos, monitors, resources } from "@/db/schema";
 import { readAliasBook } from "@/lib/data/aliases-db";
 import { recordAction } from "@/lib/data/audit-db";
 import { pausedSections } from "@/lib/data/sections-db";
@@ -11,11 +11,12 @@ import { writeAccount } from "@/lib/data/deps-pr";
 import { repoReadAccess } from "@/lib/data/github-db";
 import { loadTarget } from "@/lib/data/provider-action-db";
 import {
-  checksVerdict, type HttpProbe, httpVerdict, isAuthWall, logsVerdict, OPEN_STAGES, type PrStage, SMOKE_TIMEOUT_MS, smokePaths, type SmokeVerdict,
-  stageLine, watchDue, type WatchStep, watchStep,
+  checksVerdict, type HttpProbe, httpVerdict, isAuthWall, logsVerdict, MAX_REVIEW_COMMITS, type MergeReview, OPEN_STAGES, type PrCommit, type PrStage,
+  SMOKE_TIMEOUT_MS, smokePaths, WATCH_TIMEOUT_MS, type SmokeVerdict, stageLine, unexpectedChange, lockfileChangeProblem, lockfileMissing, manifestChangeProblem, watchDue, type WatchStep, watchStep,
 } from "@/lib/deps/pr-watch";
+import { cleanRootDir, inDir } from "@/lib/deps/root-dir";
 import { runsForCommit } from "@/lib/providers/github";
-import { commitChecks, mergeWatchpostPull, pullState } from "@/lib/providers/github-write";
+import { commitChecks, commitFiles, isNpmLockfilePath, lockfileAt, manifestAt, mergeWatchpostPull, pullCommits, pullFiles, pullState, tokenLogin } from "@/lib/providers/github-write";
 import { deploymentsForCommit } from "@/lib/providers/vercel";
 import { readRequestLogs } from "@/lib/providers/vercel-request-logs";
 import { appAlias, EMPTY_BOOK } from "@/lib/view/display-name";
@@ -38,6 +39,8 @@ type Row = {
   id: string; repoId: string; appId: string | null; proposalId: string | null; number: number; branch: string; baseBranch: string; headSha: string;
   title: string; packages: string[]; auto: boolean; stage: PrStage; smokeMode: "http" | "logs" | null; previewReadyAt: Date | null; openedAt: Date;
   fullName: string; appName: string | null;
+  // For the allow-list (1.2.1, audit M1): the app's Vercel Root Directory (meta.rootDirectory) and the scan's lockfile.
+  meta?: Record<string, unknown> | null; lockfilePath?: string | null;
 };
 
 export type WatchDeps = {
@@ -55,6 +58,8 @@ export type WatchDeps = {
   probe: (url: string) => Promise<{ status: number | null; ms: number; authWall: boolean }>;
   errorLogs: (v: { token: string; teamId: string; projectId: string }, deploymentId: string, since: Date, now: Date) => Promise<number | null>;
   merge: typeof mergeWatchpostPull;
+  // What the allow-list checks before a merge (null: GitHub couldn't be read; the PR waits for the next round).
+  review: (token: string, row: Row) => Promise<MergeReview | null>;
   save: (id: string, set: Partial<typeof dependencyPrs.$inferInsert>, proposalId: string | null, stageText: string) => Promise<void>;
   notify: (n: DepPrNotice) => Promise<void>;
   audit: (message: string, appId: string | null) => Promise<void>;
@@ -81,13 +86,58 @@ export async function runnerLockfileActive(repoId: string, branch: string): Prom
   return (await extensions.runner?.lockfileJobActive(repoId, branch).catch(() => false)) ?? false;
 }
 
+// The paths the update PR may change (deps-pr.ts: <rootDirectory>/package.json and the scan's lockfile, else the
+// folder's package-lock.json), the PR's files and commits, and the files of each commit that isn't the token's own.
+// The token's login is read once per instance.
+let ownLogin: { token: string; login: string } | null = null;
+export async function reviewPr(token: string, row: Row): Promise<MergeReview | null> {
+  const dir = cleanRootDir(row.meta?.rootDirectory);
+  const manifest = inDir(dir, "package.json");
+  const lockfile = row.lockfilePath ?? inDir(dir, "package-lock.json");
+  if (ownLogin?.token !== token) {
+    const me = await tokenLogin(token);
+    if (!me.ok) return null;
+    ownLogin = { token, login: me.data };
+  }
+  const login = ownLogin.login;
+  const [files, list] = await Promise.all([pullFiles(token, row.fullName, row.number), pullCommits(token, row.fullName, row.number)]);
+  if (!files.ok || !list.ok) return null;
+  const commits: PrCommit[] = [];
+  for (const c of list.data.slice(0, MAX_REVIEW_COMMITS + 1)) {
+    const mine = c.login !== null && c.login.toLowerCase() === login.toLowerCase();
+    const changed = mine ? null : await commitFiles(token, row.fullName, c.sha);
+    if (changed && !changed.ok) return null;
+    commits.push({ ...c, files: changed ? changed.data : null });
+  }
+  // Review I4: what package.json says at the base and at the head the checks were read at.
+  const [before, after] = await Promise.all([
+    manifestAt(token, row.fullName, row.baseBranch, {}, manifest), manifestAt(token, row.fullName, row.headSha, {}, manifest),
+  ]);
+  if (!before.ok || !after.ok) return null;
+  const manifestProblem = before.data && after.data ? manifestChangeProblem(before.data.text, after.data.text, row.packages) : "unexpected change: package.json is missing";
+  // Review T2b-fix I-1: the lockfile too, when the PR changes it (only npm's can be checked; another kind waits for the owner).
+  let lockfileProblem: string | null = null;
+  if (lockfile !== manifest && files.data.some((f) => f.filename === lockfile || f.previous === lockfile)) {
+    if (!isNpmLockfilePath(lockfile)) lockfileProblem = `unexpected lockfile change ${lockfile} (only package-lock.json can be checked)`;
+    else {
+      const [lockBefore, lockAfter] = await Promise.all([
+        lockfileAt(token, row.fullName, row.baseBranch, lockfile), lockfileAt(token, row.fullName, row.headSha, lockfile),
+      ]);
+      if (!lockBefore.ok || !lockAfter.ok) return null;
+      lockfileProblem = lockfileChangeProblem(lockBefore.data, lockAfter.data, lockfile);
+    }
+  }
+  return { manifest, lockfile, lockfileRequired: !!row.lockfilePath, manifestProblem, lockfileProblem, headSha: row.headSha, tokenLogin: login, files: files.data, commits };
+}
+
 const DEPS: WatchDeps = {
   rows: async () => (await db().select({
     id: dependencyPrs.id, repoId: dependencyPrs.repoId, appId: dependencyPrs.appId, proposalId: dependencyPrs.proposalId, number: dependencyPrs.number,
     branch: dependencyPrs.branch, baseBranch: dependencyPrs.baseBranch, headSha: dependencyPrs.headSha, title: dependencyPrs.title, packages: dependencyPrs.packages,
     auto: dependencyPrs.auto, stage: dependencyPrs.stage, smokeMode: dependencyPrs.smokeMode, previewReadyAt: dependencyPrs.previewReadyAt, openedAt: dependencyPrs.openedAt,
-    fullName: githubRepos.fullName, appName: resources.name,
+    fullName: githubRepos.fullName, appName: resources.name, meta: resources.meta, lockfilePath: dependencyScans.lockfilePath,
   }).from(dependencyPrs).innerJoin(githubRepos, eq(githubRepos.id, dependencyPrs.repoId)).leftJoin(resources, eq(resources.id, dependencyPrs.appId))
+    .leftJoin(dependencyScans, eq(dependencyScans.repoId, dependencyPrs.repoId))
     .where(inArray(dependencyPrs.stage, [...OPEN_STAGES])).orderBy(asc(dependencyPrs.openedAt)).limit(MAX_PRS)) as Row[],
   security: readAutoSecurity,
   rollback: readAutoRollback,
@@ -106,6 +156,7 @@ const DEPS: WatchDeps = {
     return r.ok ? r.lines.length : null;
   },
   merge: mergeWatchpostPull,
+  review: reviewPr,
   save: async (id, set, proposalId, stageText) => {
     await db().update(dependencyPrs).set({ ...set, stageText, checkedAt: new Date() }).where(eq(dependencyPrs.id, id));
     if (proposalId) await db().update(actionProposals).set({ result: stageText }).where(eq(actionProposals.id, proposalId)).catch(() => undefined);
@@ -177,8 +228,8 @@ async function oneRound(row: Row, now: Date, token: string, rollbackOn: boolean,
     }
   }
   const step = watchStep({
-    now, openedAt: row.openedAt, pr: { state: pr.data.state, merged: pr.data.merged, mergeable: pr.data.mergeable, headSha: pr.data.headSha },
-    recordedSha: row.headSha, checks: verdict, preview, smoke, autoRollbackOn: rollbackOn,
+    now, openedAt: row.openedAt, pr: { state: pr.data.state, merged: pr.data.merged, mergeable: pr.data.mergeable, headSha: pr.data.headSha, base: pr.data.base },
+    recordedSha: row.headSha, recordedBase: row.baseBranch, checks: verdict, preview, smoke, autoRollbackOn: rollbackOn,
   });
   return { step, smoke, previewReadyAt: preview.readyAt, headSha: pr.data.headSha };
 }
@@ -206,6 +257,27 @@ async function apply(row: Row, seen: Seen, app: string, windowMin: number, now: 
     await d.save(row.id, { stage: step.stage, finishedAt: now, ...smokeSet }, row.proposalId, stageLine(row.number, step.stage, step.stage === "ready-manual" ? null : step.reason));
     out.stopped++;
     await d.notify({ ...n, kind: step.stage === "ready-manual" ? "ready-manual" : "stopped", reason: step.reason }).catch(() => undefined);
+    return;
+  }
+  // The allow-list (1.2.1, audit M1): only package.json and its lockfile, only Watchbell's own commits.
+  const review = await d.review(token, row).catch(() => null);
+  if (!review) return; // GitHub couldn't be read: the next round tries again
+  const unexpected = unexpectedChange(review);
+  if (!unexpected && lockfileMissing(review) && now.getTime() - row.openedAt.getTime() > WATCH_TIMEOUT_MS) {
+    const reason = "the lockfile wasn't added within 45 minutes";
+    await d.save(row.id, { stage: "timeout", finishedAt: now, ...smokeSet }, row.proposalId, stageLine(row.number, "timeout", reason));
+    out.stopped++;
+    await d.notify({ ...n, kind: "stopped", reason }).catch(() => undefined);
+    return;
+  }
+  if (!unexpected && lockfileMissing(review)) {
+    await d.save(row.id, { stage: "checks" }, row.proposalId, stageLine(row.number, "checks", "waiting for the lockfile"));
+    return;
+  }
+  if (unexpected) {
+    await d.save(row.id, { stage: "failed", finishedAt: now, ...smokeSet }, row.proposalId, stageLine(row.number, "failed", unexpected));
+    out.stopped++;
+    await d.notify({ ...n, kind: "stopped", reason: unexpected }).catch(() => undefined);
     return;
   }
   // Merge: the head must still be the one the checks were read at (GitHub refuses otherwise too).

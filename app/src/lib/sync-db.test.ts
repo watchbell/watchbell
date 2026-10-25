@@ -9,9 +9,12 @@ vi.mock("@/lib/crypto", () => ({ openOrNull: () => "token" }));
 vi.mock("@/lib/providers/vercel", () => ({
   productionHost: async (_t: string, _team: string, _id: string, name: string) => ({ ok: true, data: `${name}.example.com` }),
   discoverVercel: vi.fn(), tokenExpiry: vi.fn(),
+  listProjectDomains: vi.fn(),
+  chooseProductionDomain: (list: { name: string; redirect?: string | null }[], name: string) => list.find((d) => !d.redirect)?.name ?? `${name}.vercel.app`,
 }));
 
-import { listSyncRows, saveSelection, syncMonitors } from "./sync-db";
+import { listProjectDomains } from "@/lib/providers/vercel";
+import { keepDomainKeys, listSyncRows, refreshAppDomains, saveSelection, syncMonitors } from "./sync-db";
 
 const app = (id: string, over: Record<string, unknown> = {}) => ({ id, name: id, externalId: `prj_${id}`, monitored: true, goneAt: null, meta: { teamId: "t1" }, ...over });
 const mon = (id: string, resourceId: string, over: Record<string, unknown> = {}) => ({ id, resourceId, paused: true, ownerPaused: false, ...over });
@@ -138,5 +141,43 @@ describe("Sync is scoped to the account's resource kind", () => {
     const f = use([[{ id: "acc", provider: "drive", credentialCiphertext: "c", credentialIv: "i" }]]);
     expect(await saveSelection("acc", [], false)).toEqual({ ok: false, error: "Sync for this provider arrives in a later stage." });
     expect(f.writes).toHaveLength(0);
+  });
+});
+
+describe("Sync stores the app's domains and primary domain (1.2.1)", () => {
+  const dom = (name: string, redirect: string | null = null) => ({ name, redirect, verified: true, gitBranch: null, customEnvironmentId: null });
+  it("merges domains and primaryDomain into each watched app's meta, and skips unwatched or gone apps", async () => {
+    vi.mocked(listProjectDomains).mockResolvedValue({ ok: true, data: [dom("old.example.com", "new.example.com"), dom("new.example.com")] });
+    const f = use([[app("a1"), app("a2", { monitored: false }), app("a3", { goneAt: new Date() })]]);
+    await refreshAppDomains("acc", "token");
+    expect(vi.mocked(listProjectDomains).mock.calls.map((c) => c[2])).toEqual(["prj_a1"]);
+    expect(f.writes).toHaveLength(1);
+    const meta = payloadOf(f.writes[0].calls)?.meta as { getSQL: () => unknown };
+    const q = new PgDialect().sqlToQuery(meta.getSQL() as never);
+    expect(q.params).toContain(JSON.stringify({ domains: ["old.example.com", "new.example.com"], primaryDomain: "new.example.com", pastDomains: [] }));
+  });
+  it("keeps what was stored when the read fails", async () => {
+    vi.mocked(listProjectDomains).mockReset().mockResolvedValue({ ok: false, kind: "transient", error: "x" });
+    const f = use([[app("a1")]]);
+    await refreshAppDomains("acc", "token");
+    expect(f.writes).toEqual([]);
+  });
+  it("remembers a domain that left the project as a past domain", async () => {
+    vi.mocked(listProjectDomains).mockReset().mockResolvedValue({ ok: true, data: [dom("new.example.com")] });
+    const f = use([[app("a1", { meta: { teamId: "t1", domains: ["old.example.com", "new.example.com"], primaryDomain: "old.example.com" } })]]);
+    await refreshAppDomains("acc", "token");
+    const meta = payloadOf(f.writes[0].calls)?.meta as { getSQL: () => unknown };
+    expect(new PgDialect().sqlToQuery(meta.getSQL() as never).params).toContain(JSON.stringify({ domains: ["new.example.com"], primaryDomain: "new.example.com", pastDomains: ["old.example.com"] }));
+  });
+  it("keeps the stored domain keys through a Sync's meta rewrite", () => {
+    expect(keepDomainKeys({ teamId: "t", domains: ["a.example.com"], primaryDomain: "a.example.com", pastDomains: ["b.example.com"] }))
+      .toEqual({ domains: ["a.example.com"], primaryDomain: "a.example.com", pastDomains: ["b.example.com"] });
+    expect(keepDomainKeys({ teamId: "t" })).toEqual({});
+    expect(keepDomainKeys(undefined)).toEqual({});
+  });
+  it("creates a new default monitor on the stored primary domain", async () => {
+    const f = use([[app("a1", { meta: { teamId: "t1", primaryDomain: "new.example.com" } })], [], [{ n: 0 }]]);
+    await syncMonitors("acc", "token");
+    expect(payloadOf(f.writes[0].calls)).toEqual({ resourceId: "a1", url: "https://new.example.com/", ownerPaused: false });
   });
 });

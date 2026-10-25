@@ -7,7 +7,7 @@ export type CheckResult = { ok: boolean; statusCode: number | null; latencyMs: n
 export const MAX_REDIRECTS = 20;
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const BLOCKED: CheckResult = { ok: false, statusCode: null, latencyMs: null, error: "Blocked address" };
-const UPTIME_AGENT = "OpsConsole-Uptime/1.0 (+https://west-solutions.web.id)";
+const UPTIME_AGENT = "OpsConsole-Uptime/1.0 (+https://watchbell.west-solutions.web.id)";
 
 async function resolveAddresses(host: string): Promise<string[]> {
   return (await dnsLookup(host, { all: true, verbatim: true })).map((a) => a.address);
@@ -99,6 +99,12 @@ const REFUSED = { blocked: "Blocked address", redirects: "Too many redirects", o
 
 // One GET per monitor. Plain http is refused at every hop, so only https→https redirects are followed ("/" → "/en", apex → www); the final status is compared. The timeout covers the
 // whole chain, DNS included.
+// Watchbell 1.2.1: Vercel's own answer for a domain that no deployment serves (the app moved away from it). Only this
+// fixed code is kept, appended to the check's error ("HTTP 404 · DEPLOYMENT_NOT_FOUND"); no other header is read or stored.
+export const VERCEL_NOT_FOUND = "DEPLOYMENT_NOT_FOUND";
+const vercelNotFound = (res: Response) =>
+  /^vercel$/i.test(res.headers.get("server")?.trim() ?? "") && res.headers.get("x-vercel-error")?.trim() === VERCEL_NOT_FOUND;
+
 export async function checkUrl(
   url: string,
   opts: {
@@ -118,7 +124,7 @@ export async function checkUrl(
     // The body is read only when there is a rule and the status already passed (a wrong status is the failure to report).
     if (!statusOk || !opts.body) {
       await r.res.body?.cancel().catch(() => undefined);
-      return { ok: statusOk, statusCode: r.res.status, latencyMs, error: statusOk ? null : `HTTP ${r.res.status}` };
+      return { ok: statusOk, statusCode: r.res.status, latencyMs, error: statusOk ? null : `HTTP ${r.res.status}${vercelNotFound(r.res) ? ` · ${VERCEL_NOT_FOUND}` : ""}` };
     }
     // The server answered, so a body that doesn't arrive in time keeps the status and says what failed.
     let read: { bytes: Uint8Array; truncated: boolean };

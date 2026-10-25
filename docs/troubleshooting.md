@@ -1,5 +1,7 @@
 # Troubleshooting
 
+Bahasa Indonesia: [id/troubleshooting.md](id/troubleshooting.md)
+
 Start with the server log; most problems print a clear line there.
 
 | How Watchbell runs | Where the log is |
@@ -183,6 +185,7 @@ Forgot the password, or lost the authenticator? On the machine Watchbell runs on
 npm run reset-login -- you@example.com
 ```
 
+With the npm package, run `watchbell stop` and then `watchbell reset-login you@example.com` instead.
 It prints a temporary password (valid 7 days), removes the authenticator and ends the account's sessions. Start
 Watchbell, sign in with the temporary password, pick a new one and set up the authenticator again. If it says
 "Watchbell is running on …", stop Watchbell first. If it says "No Watchbell database in …", run it in the `app` folder

@@ -32,3 +32,20 @@ describe("runProposalAction: github_bump_pr (Stage 9 slice 5)", () => {
     expect(bump).not.toHaveBeenCalled();
   });
 });
+
+describe("runProposalAction: github_bump_pr of FrameworkVulnerable (Watchbell 1.2)", () => {
+  it("asks the PR core for the Next.js update; any other rule keeps the dependency PR", async () => {
+    const bump = vi.fn().mockResolvedValue({ ok: true, message: "Pull request #21 opened." });
+    await runProposalAction({ action: "github_bump_pr", resourceId: APP, targetRef: REPO, proposalId: "p1", ruleKey: "FrameworkVulnerable" }, owner, deps(bump));
+    expect(bump.mock.calls[0][4]).toEqual({ proposalId: "p1", framework: true });
+    await runProposalAction({ action: "github_bump_pr", resourceId: APP, targetRef: REPO, proposalId: "p2", ruleKey: "VulnerableDependency" }, owner, deps(bump));
+    expect(bump.mock.calls[1][4]).toEqual({ proposalId: "p2" });
+  });
+
+  it("the auto-run carries the owner's severities with it", async () => {
+    const bump = vi.fn().mockResolvedValue({ ok: true });
+    const d = { ...deps(bump), autoSecurity: vi.fn().mockResolvedValue({ enabled: true, severities: ["critical"] }) } as unknown as RunDeps;
+    await runProposalAction({ action: "github_bump_pr", resourceId: APP, targetRef: REPO, ruleKey: "FrameworkVulnerable" }, "auto", d);
+    expect(bump.mock.calls[0][4]).toEqual({ proposalId: null, auto: { severities: ["critical"] }, framework: true });
+  });
+});

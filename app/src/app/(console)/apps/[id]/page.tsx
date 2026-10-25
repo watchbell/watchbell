@@ -5,7 +5,7 @@ import { HourBars, Sparkline, UptimeBars } from "@/components/charts";
 import { NoDeployments, NoMonitors } from "@/components/empty-states";
 import { Banner, Card, PageHeader } from "@/components/kit";
 import { AutoRefresh } from "@/components/live";
-import { Masked, MaskedText } from "@/components/alias";
+import { Masked } from "@/components/alias";
 import { Recommendations } from "@/components/recommendations";
 import { ResourceBadge } from "@/components/resource";
 import { SevTag } from "@/components/severity";
@@ -24,6 +24,7 @@ import { aliasBook, databaseOptions, listDomains } from "@/lib/data/cached";
 import { listDeployments } from "@/lib/data/deployments-db";
 import { appMetrics, productionDeploys } from "@/lib/data/metrics-db";
 import { appDepsView } from "@/lib/data/deps-db";
+import { pausedSections } from "@/lib/data/sections-db";
 import { type AppRepoView, appRepoView } from "@/lib/data/github-db";
 import { readEol } from "@/lib/data/network-db";
 import { suggestRepo } from "@/lib/github/links";
@@ -41,6 +42,8 @@ import { dbAlias, hideRec } from "@/lib/view/display-name";
 import { isStale, type PageViewsView } from "@/lib/view/pageviews";
 import { lastDeployText, longDate, msText, pct, shortSha } from "@/lib/view/format";
 import { appStatus, canAct, monitorStatus } from "@/lib/view/labels";
+import { DomainMoved } from "../../uptime/domain-moved";
+import { DomainsCell } from "./domains-cell";
 import { openInLinks } from "@/lib/view/open-in";
 import { vercelLogsUrl } from "@/lib/view/logs";
 import { outboundLinks } from "@/lib/demo/links";
@@ -63,8 +66,11 @@ export const maxDuration = 60;
 const KV = "grid grid-cols-[170px_minmax(0,1fr)] gap-x-4 gap-y-2.5 max-[720px]:grid-cols-1 max-[720px]:gap-y-1 [&_dd]:min-w-0 [&_dd]:[overflow-wrap:anywhere] [&_dt]:text-ink-soft";
 const mono = "font-mono text-[12.5px]";
 
-export default async function AppPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
+// ?tab= opens a tab directly (Applications → row menu → View logs links to ?tab=logs).
+const TAB_IDS = ["details", "metrics", "deployments", "logs"] as const;
+
+export default async function AppPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ [k: string]: string | string[] | undefined }> }) {
+  const [{ id }, sp] = await Promise.all([params, searchParams]);
   const member = await requirePageMember();
   // An id that isn't a UUID or isn't a watched app is a 404, never a database error.
   if (!isUuid(id)) notFound();
@@ -74,7 +80,7 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
   // for an id that isn't a watched app the extra reads come back empty and the page is a 404 as before.
   // The Advisor's items for this app (a side card: left out if its row can't be read). Started with the reads below.
   const recsRead = listRecommendations(now, id).catch(() => null);
-  const [app, metrics, deploys, prodDeploys, eol, domains, options, book, repoView, depsView] = await Promise.all([
+  const [app, metrics, deploys, prodDeploys, eol, domains, options, book, repoView, depsView, offSections] = await Promise.all([
     getApp(id, now),
     appMetrics(id, now),
     listDeployments({ appId: id }),
@@ -87,6 +93,8 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
     appRepoView(id).catch(() => null),
     // Stage 9 slice 5: the linked repository's dependency scan; never fails the page.
     appDepsView(id).catch(() => null),
+    // DevOps off: no GitHub reads, so the Dependencies card says why it isn't scanned (cached with the layout's read).
+    pausedSections(),
   ]);
   if (!app) notFound();
   const stored = await recsRead;
@@ -113,6 +121,8 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
     return d ? { id: d.externalId, sha: shortSha(d.commitSha).replace("—", "") } : null;
   };
   const staged = refOf(targets.stagedId);
+  const askedTab = TAB_IDS.find((t) => t === sp.tab) ?? "details";
+  const startTab = askedTab === "logs" && member.role === "viewer" ? "details" : askedTab;
   const zoneDomain = domains.find((d) => d.appId === app.id && d.zoneName);
   const openIn = !siteUrl ? [] : openInLinks({
     teamSlug: app.teamSlug, projectName: app.name, repo: app.repo, repoType: app.repoType, siteUrl,
@@ -133,7 +143,7 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
           <Banner tone="warning" title="Rolled back: new pushes don't go live until you promote one." action={act ? <PromoteStaged app={{ id: app.id, name: app.name }} staged={staged} /> : undefined} />
         </div>
       )}
-      <Tabs defaultValue="details" className="gap-4">
+      <Tabs defaultValue={startTab} className="gap-4">
         <TabsList variant="line">
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="metrics">Metrics</TabsTrigger>
@@ -146,8 +156,8 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
             <Card title="Details" meta={<Src kind="api" />}>
               <dl className={KV}>
                 <dt>Name</dt><dd><Masked kind="app" real={app.name} /></dd>
-                <dt>Domain</dt>
-                <dd>{siteUrl ? <a href={siteUrl} target="_blank" rel="noreferrer"><MaskedText text={app.domain} inLink /> <IconExternalLink size={14} aria-hidden className="inline align-[-2px]" /></a> : <MaskedText text={app.domain} />}</dd>
+                <dt>Domains</dt>
+                <dd><DomainsCell data={app.domainLines} link={links} /></dd>
                 <dt>Framework</dt><dd>{app.framework ?? "—"}</dd>
                 <dt>Function region</dt><dd className={cn(mono, !app.functionRegions.length && "text-ink-faint")}>{app.functionRegions.join(", ") || "—"}</dd>
                 <dt>Production branch</dt><dd className={mono}>{app.productionBranch ?? "—"}</dd>
@@ -180,6 +190,10 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
                       <span key={m.id} title={ms.label} className="mr-2.5 inline-flex items-center gap-1.5">{inner}</span>
                     );
                   })}
+                  {/* Watchbell 1.2.1: a monitor still on the app's old domain */}
+                  {app.monitors.filter((m) => m.move && !app.gone).map((m) => (
+                    <div key={`move-${m.id}`} className="mt-1"><DomainMoved monitorId={m.id} from={m.move!.from} to={m.move!.to} canAct={act} /></div>
+                  ))}
                 </dd>
               </dl>
             </Card>
@@ -189,7 +203,7 @@ export default async function AppPage({ params }: { params: Promise<{ id: string
           </div>
           {depsView && repoView && (repoView.connected || repoView.link) && (
             <div className="mt-4">
-              <DependenciesCard app={{ id: app.id, name: app.name }} view={depsView} canAct={act && !app.gone} owner={member.role === "owner"} now={now} />
+              <DependenciesCard app={{ id: app.id, name: app.name }} view={depsView} canAct={act && !app.gone} owner={member.role === "owner"} now={now} devopsOff={offSections.has("devops")} />
             </div>
           )}
           {repoView && (repoView.connected || repoView.link) && (

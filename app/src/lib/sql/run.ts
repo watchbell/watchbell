@@ -167,13 +167,14 @@ export const PRIVILEGE_SQL = `select r.rolsuper, r.rolcreaterole, r.rolcreatedb,
   exists (select 1 from pg_catalog.pg_namespace n where n.nspname not in ('pg_catalog', 'information_schema')
     and n.nspname !~ '^pg_' and has_schema_privilege(n.oid, 'CREATE')) as create_schema,
   (pg_has_role('pg_write_server_files', 'MEMBER') or pg_has_role('pg_execute_server_program', 'MEMBER')
-    or pg_has_role('pg_write_all_data', 'MEMBER')) as server_roles
+    or pg_has_role('pg_write_all_data', 'MEMBER') or pg_has_role('pg_read_server_files', 'MEMBER')
+    or pg_has_role('pg_signal_backend', 'MEMBER')) as server_roles
 from pg_catalog.pg_roles r where r.rolname = current_user`;
 
 export const PROBE_SQL = "CREATE TEMP TABLE watchpost_probe (x int)";
 export const CAN_WRITE = "This role can write; use a read-only role.";
 
-const PRIVILEGE_NAMES = ["superuser", "CREATEROLE", "CREATEDB", "REPLICATION", "INSERT/UPDATE/DELETE on a table", "CREATE in a schema", "a pg_write_* or server-program role"];
+const PRIVILEGE_NAMES = ["superuser", "CREATEROLE", "CREATEDB", "REPLICATION", "INSERT/UPDATE/DELETE on a table", "CREATE in a schema", "a pg_write_*, pg_read_server_files, server-program or pg_signal_backend role"];
 
 export type VerifyResult = { ok: true; role: string } | { ok: false; error: string; canWrite?: boolean };
 

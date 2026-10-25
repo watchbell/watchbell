@@ -43,6 +43,27 @@ describe("loadFacts", () => {
     expect(f.lastAnyRunAt).toEqual(new Date("2026-10-13T11:59:30Z"));
   });
 
+  it("marks a monitor moved only with evidence (Vercel's DEPLOYMENT_NOT_FOUND or a past domain), never a non-Vercel host or a shared one (1.2.1)", async () => {
+    const meta = { domains: ["new.example.com"], primaryDomain: "new.example.com" };
+    h.current = fakeDb([
+      [], [],
+      [
+        { m: monitor({ id: "old", url: "https://old.example.com/health", state: "err", lastStatus: 404, lastError: "HTTP 404 · DEPLOYMENT_NOT_FOUND" }), appName: "web", appMeta: meta },
+        { m: monitor({ id: "past", url: "https://past.example.com/" }), appName: "web", appMeta: { ...meta, pastDomains: ["past.example.com"] } },
+        { m: monitor({ id: "ok", url: "https://new.example.com/", lastError: "HTTP 404 · DEPLOYMENT_NOT_FOUND" }), appName: "web", appMeta: meta },
+        { m: monitor({ id: "shared", url: "https://blog.example.com/x", lastError: "HTTP 404 · DEPLOYMENT_NOT_FOUND" }), appName: "web", appMeta: meta },
+        { m: monitor({ id: "external", url: "https://api.mybackend.com/", state: "err", lastStatus: 502, lastError: "HTTP 502" }), appName: "web", appMeta: meta },
+        { m: monitor({ id: "legacy", url: "https://any.example.com/", lastError: "HTTP 404 · DEPLOYMENT_NOT_FOUND" }), appName: "web", appMeta: { teamId: "t" } },
+      ],
+      [{ id: "a1", name: "web", meta }, { id: "a2", name: "blog", meta: { domains: ["blog.example.com"], primaryDomain: "blog.example.com" } }],
+      [], [], [], [],
+    ]);
+    const f = await loadFacts(now);
+    expect(f.monitors.map((m) => [m.id, m.movedTo])).toEqual([
+      ["old", "new.example.com"], ["past", "new.example.com"], ["ok", null], ["shared", null], ["external", null], ["legacy", null],
+    ]);
+  });
+
   it("passes a heartbeat on as kind heartbeat, named after the job (U3)", async () => {
     h.current = fakeDb([
       [], [],

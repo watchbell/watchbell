@@ -12,7 +12,7 @@ import { urlProblem } from "@/lib/net/public-host";
 export const BOOTSTRAP_URL = "https://data.iana.org/rdap/dns.json";
 export type Services = [string[], string[]][];
 type Opts = { fetch?: typeof fetch; timeoutMs?: number; lookup?: (host: string) => Promise<string[]> };
-const RDAP_AGENT = "OpsConsole-Network/1.0 (+https://west-solutions.web.id)";
+const RDAP_AGENT = "OpsConsole-Network/1.0 (+https://watchbell.west-solutions.web.id)";
 export const NOT_PUBLIC = "The registry's RDAP address isn't a public https address";
 const MAX_BYTES = 512 * 1024;
 

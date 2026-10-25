@@ -15,6 +15,23 @@ const mon = (o: Partial<Facts["monitors"][number]> = {}): Facts["monitors"][numb
 });
 const find = (r: ReturnType<typeof evaluate>, rule: string, subject: string) => r.observations.find((o) => o.rule === rule && o.subject === subject);
 
+describe("evaluate: a monitor whose domain moved (1.2.1)", () => {
+  it("fires MonitorDomainMoved instead of MonitorDown while the host is detached", () => {
+    const r = evaluate({ ...base, monitors: [mon({ id: "mv", url: "https://old.example.com/health", failStreak: 5, state: "err", lastStatus: null, movedTo: "new.example.com" })] }, rules);
+    expect(find(r, "MonitorDomainMoved", "mv")).toMatchObject({
+      status: "firing", resourceId: "a1", title: "web /health", provider: "vercel",
+      message: "old.example.com is no longer a domain of web; production is on new.example.com.",
+    });
+    expect(find(r, "MonitorDown", "mv")).toMatchObject({ status: "ok", message: "old.example.com moved to new.example.com; MonitorDomainMoved takes over." });
+  });
+  it("an attached host changes nothing: MonitorDomainMoved is ok and MonitorDown fires as before", () => {
+    const r = evaluate({ ...base, monitors: [mon({ id: "d", failStreak: 3, state: "err", lastStatus: 502 }), mon({ id: "hb", kind: "heartbeat", url: "job", state: "ok" })] }, rules);
+    expect(find(r, "MonitorDomainMoved", "d")).toMatchObject({ status: "ok", message: "The monitor checks web.example.com, a domain of web." });
+    expect(find(r, "MonitorDown", "d")?.status).toBe("firing");
+    expect(find(r, "MonitorDomainMoved", "hb")).toBeUndefined();
+  });
+});
+
 describe("evaluate", () => {
   it("says a missed keyword in the MonitorDown message, not HTTP 200", () => {
     const r = evaluate({ ...base, monitors: [mon({ id: "k", failStreak: 3, state: "err", lastStatus: 200, lastError: "Keyword not found" })] }, rules);

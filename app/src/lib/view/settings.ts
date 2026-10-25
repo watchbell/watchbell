@@ -34,6 +34,7 @@ const TASK_LABEL: Record<TaskName, string> = {
   status: "Provider status feeds",
   logs: "Copy of Vercel warning and error logs",
   pageviews: "Web Analytics page views",
+  security: "Security check: Next.js versions and dependency advisories (also right after a production deploy)",
   alerts: "Alert rules and notices",
   digest: "Digest due check",
 };
@@ -88,6 +89,8 @@ export const VERCEL_HOBBY_LIMIT = "1M invocations, 4 h CPU, 360 GB-h memory / mo
 export const WEB_ANALYTICS_FREE_EVENTS = 50_000;
 
 export const NOT_READ = "not read yet";
+// Read nowhere in the console (no usage API is used): Vercel's monthly usage and the Web Analytics event count (1.2.1).
+export const NEVER_READ = "not read";
 
 export type BudgetRow = { key: string; item: string; limit: string; use: string; pct: number | null; tone: "ok" | "warn" | "err" | "none" };
 
@@ -135,12 +138,12 @@ export function budgetRows(i: BudgetInput, limits: BudgetLimits = BUDGET_DEFAULT
     key: "cron", item: "cron-job.org runs", limit: "1 run / min (shortest free interval)",
     use: `1 run / min (${num(86_400 / CRON_JOB_EVERY_S)} / day)`, pct: null, tone: "none",
   });
-  rows.push({ key: "vercel", item: "Vercel Hobby", limit: vercelHobbyLimit(limits), use: NOT_READ, pct: null, tone: "none" });
+  rows.push({ key: "vercel", item: "Vercel Hobby", limit: vercelHobbyLimit(limits), use: `${NEVER_READ} (Vercel dashboard → Usage)`, pct: null, tone: "none" });
   rows.push({
     key: "analytics", item: "Vercel Web Analytics", limit: `${num(limits.webAnalyticsEvents)} events / month`,
     use: i.apps.total === 0 ? "no apps watched"
-      : i.apps.read === 0 ? `${NOT_READ} · events ${NOT_READ}`
-        : `${i.apps.enabled} of ${i.apps.total} app${i.apps.total === 1 ? "" : "s"} enabled · events ${NOT_READ}`,
+      : i.apps.read === 0 ? `${NOT_READ} · events ${NEVER_READ}`
+        : `${i.apps.enabled} of ${i.apps.total} app${i.apps.total === 1 ? "" : "s"} enabled · events ${NEVER_READ}`,
     pct: null, tone: "none",
   });
   return rows;

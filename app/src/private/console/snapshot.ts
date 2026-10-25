@@ -2,7 +2,7 @@ import "server-only";
 import { cache } from "react";
 import { type Rec } from "@/lib/advisor/rules";
 import { listRecommendations } from "@/lib/data/advisor-db";
-import { listFiring } from "@/lib/data/alerts-db";
+import { listShownFiring } from "@/lib/data/alerts-db";
 import { type AppSummary, listApps } from "@/lib/data/apps-db";
 import { aliasBook, listDatabases } from "@/lib/data/cached";
 import { listEvents } from "@/lib/data/events-db";
@@ -49,7 +49,8 @@ const round2 = (n: number | null): number | null => (n === null ? null : Math.ro
 const bookOnce = cache(() => aliasBook());
 const appsAt = cache((ms: number) => listApps(new Date(ms)));
 const monitorsAt = cache((ms: number) => listMonitors(new Date(ms)));
-const firingOnce = cache(() => listFiring());
+// Without a turned-off section's alerts, like the bell (1.2 review minor 5).
+const firingOnce = cache(() => listShownFiring());
 const recsAt = cache((ms: number) => listRecommendations(new Date(ms)));
 
 const APP_STATE: Partial<Record<State, SnapshotApp["state"]>> = { ok: "running", warn: "degraded", err: "down", build: "building", paused: "paused", maint: "paused" };

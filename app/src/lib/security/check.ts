@@ -7,7 +7,7 @@ export const MAX_SCRIPTS = 12;
 export const SCRIPT_MAX_BYTES = 3 * 1024 * 1024;
 export const SITE_BUDGET_MS = 15_000;
 export const OSV_TIMEOUT_MS = 10_000;
-const AGENT = "OpsConsole-Security/1.0 (+https://west-solutions.web.id)";
+const AGENT = "OpsConsole-Security/1.0 (+https://watchbell.west-solutions.web.id)";
 
 type Deps = {
   // Epoch ms the caller must finish by (the daily step's budget). Past it the app is skipped (null), tried next time.

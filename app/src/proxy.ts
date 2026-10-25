@@ -1,6 +1,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { mode } from "@/lib/mode";
 import { isPublicPath } from "@/lib/paths";
+import { CSP_HEADER, cspHeader, isPrerenderedPath, newNonce, themeScriptHash } from "@/lib/security/csp";
+import { STATIC_HTML_PATHS } from "@/lib/security/static-html";
 import { updateSession } from "@/lib/supabase/proxy";
 
 function redirectKeepingCookies(url: URL, from: NextResponse) {
@@ -33,7 +35,21 @@ function gate(request: NextRequest, response: NextResponse, signedIn: boolean) {
   return response;
 }
 
+// Watchbell 1.2.1: a per-request nonce and the enforced Content-Security-Policy (lib/security/csp.ts). The
+// policy goes on the request too, where Next reads the nonce for its own scripts (request headers never reach the
+// browser), and on every response this proxy returns, the early-returning paths included.
 export async function proxy(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+  const nonce = isPrerenderedPath(path) ? null : newNonce();
+  const policy = cspHeader({ nonce, themeHash: await themeScriptHash(), dev: process.env.NODE_ENV === "development", staticFile: STATIC_HTML_PATHS.includes(path) });
+  request.headers.set("content-security-policy", policy);
+  if (nonce) request.headers.set("x-nonce", nonce);
+  const response = await route(request);
+  response.headers.set(CSP_HEADER, policy);
+  return response;
+}
+
+async function route(request: NextRequest) {
   const m = mode();
   // Demo checks its own signed wp_demo cookie (no database, never Supabase), and answers the routes it doesn't have
   // (404) or that need a visitor (401) before the gate. Loaded only there, so cloud and self-host never import it.
@@ -49,7 +65,7 @@ export async function proxy(request: NextRequest) {
   // Stage 9 slice 7: the Telegram webhook authenticates by its secret header alone, same treatment.
   // Stage 9 slice 4: /api/runner/ authenticates by the VM runner's own token alone, same treatment.
   const path = request.nextUrl.pathname;
-  if (path.startsWith("/api/ping/") || path.startsWith("/api/v1/") || path.startsWith("/api/runner/") || path.startsWith("/s/") || path === "/api/telegram/webhook") return NextResponse.next();
+  if (path.startsWith("/api/ping/") || path.startsWith("/api/v1/") || path.startsWith("/api/runner/") || path.startsWith("/s/") || path === "/api/telegram/webhook") return NextResponse.next({ request });
   // Self-host keeps its sessions in its own database (wp_session cookie); loaded only there, so cloud never imports it.
   const { response, userId } = m === "selfhost" ? await (await import("@/lib/local-auth/proxy")).updateSessionLocal(request) : await updateSession(request);
   return gate(request, response, !!userId);

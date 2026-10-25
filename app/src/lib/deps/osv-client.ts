@@ -6,7 +6,7 @@ import { type Advisory, batchBodies, isVulnId, OSV_BATCH_URL, OSV_VULN_URL, pars
 // Stage 9 slice 5: the scan's OSV.dev calls. Free, no key. querybatch answers only advisory ids, so each id's details
 // (severity, aliases, fixed versions, summary) are read once per scan, a few at a time. Every call ends by `deadline`.
 
-const UA = "OpsConsole-Deps/1.0 (+https://west-solutions.web.id)";
+const UA = "OpsConsole-Deps/1.0 (+https://watchbell.west-solutions.web.id)";
 export const BATCH_MAX_BYTES = 4 * 1024 * 1024;
 export const VULN_MAX_BYTES = 1024 * 1024;
 export const DETAIL_PARALLEL = 8;

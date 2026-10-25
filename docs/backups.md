@@ -1,9 +1,12 @@
 # Backups
 
+Bahasa Indonesia: [id/backups.md](id/backups.md)
+
 There are two different things to keep safe:
 
-1. **Watchbell itself**: the `app/data` folder (its database) and `app/.env` (its settings and the encryption key).
-   This is what you restore after a broken disk or when you move to another machine.
+1. **Watchbell itself**: the `app/data` folder (its database) and `app/.env` (its settings and the encryption key),
+   or `~/.watchbell/data` and `~/.watchbell/.env` with the npm package. This is what you restore after a broken disk or
+   when you move to another machine.
 2. **Monthly summaries in Google Drive** (optional): a readable record of each month (uptime, incidents, databases,
    domains), kept outside your machine. These are reports, not a copy of the database.
 
@@ -53,6 +56,33 @@ but:
 
 Passwords themselves are stored as one-way hashes and keep working.
 
+### With the npm package
+
+With `npm install -g watchbell` the database and the settings are in `~/.watchbell/` (`%USERPROFILE%\.watchbell\` on
+Windows, or the folder `WATCHBELL_HOME` names): `data/` and `.env`. The same rules apply: stop Watchbell, copy both,
+start it again.
+
+**Linux and macOS:**
+
+```bash
+watchbell stop
+tar czf ~/watchbell-backup-$(date +%F).tar.gz -C ~/.watchbell data .env
+watchbell
+```
+
+**Windows (PowerShell):**
+
+```powershell
+watchbell stop
+Compress-Archive -Path "$HOME\.watchbell\data", "$HOME\.watchbell\.env" -DestinationPath "$HOME\watchbell-backup-$(Get-Date -Format yyyy-MM-dd).zip"
+watchbell
+```
+
+If you set it up with `watchbell service install`, use the commands it printed instead: on Linux
+`systemctl --user stop watchbell` and `systemctl --user start watchbell`; on Windows and macOS `watchbell stop`, and
+log out and in again (or run `watchbell`) to start it. `watchbell status` shows whether it is still running and which
+folders it uses.
+
 ## Restore or move to another machine
 
 1. Install Watchbell on the new machine as described in [Install](install.md), but before running the installer, put
@@ -72,6 +102,11 @@ Passwords themselves are stored as one-way hashes and keep working.
 2. If the address changes (another port, or LAN access), update `SITE_URL` in `app/.env`, and the redirect URIs of
    your Google OAuth client if you use one.
 3. Start Watchbell and sign in with your usual account.
+
+With the npm package: install it (`npm install -g watchbell`), unpack the backup into `~/.watchbell/` before the first
+start (`tar xzf ~/watchbell-backup-2026-10-01.tar.gz -C ~/.watchbell`, or `Expand-Archive` to
+`$HOME\.watchbell` on Windows), then run `watchbell`. The first start keeps every value already in `.env` and only
+adds missing keys.
 
 To restore on the same machine: stop Watchbell, move the current `app/data` aside, unpack the backup into `app`, and
 start Watchbell again. Restore with the same Watchbell version that made the backup, or a newer one: database

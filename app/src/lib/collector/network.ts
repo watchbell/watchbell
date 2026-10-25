@@ -16,7 +16,7 @@ import { readCertificate } from "@/lib/network/tls";
 import { certificatePacks, listDnsRecords, listZones, sslMode } from "@/lib/providers/cloudflare";
 import { domainConfig, listProjectDomains } from "@/lib/providers/vercel";
 import { EOL_SETTINGS_KEY, fetchNextCycles } from "@/lib/security/eol";
-import { upsertZones } from "@/lib/sync-db";
+import { saveAppDomains, upsertZones } from "@/lib/sync-db";
 import { mapLimit } from "./http-check";
 import type { NewEvent } from "./rules";
 
@@ -103,6 +103,8 @@ export async function taskDomains(now: Date, deadline: number, errors: string[])
         if (list.kind === "auth") break; // this account's token can't read domains; other accounts still can (review M2)
         continue;
       }
+      // 1.2.1: the app's domains and primary domain, so a move is seen without a manual Sync (lib/domain-move.ts).
+      await saveAppDomains(app.id, app.name, app.meta, list.data);
       const keep = list.data.filter((d) => !d.gitBranch); // preview-branch domains aren't production
       const rows = keep.length
         ? await db().insert(resources).values(keep.map((d) => ({

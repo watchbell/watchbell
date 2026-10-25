@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { resources } from "@/db/schema";
-import { listFiring, listResolved } from "@/lib/data/alerts-db";
+import { listResolved, listShownFiring } from "@/lib/data/alerts-db";
 import { listRecommendations } from "@/lib/data/advisor-db";
 import { type AppSummary, getApp, listApps } from "@/lib/data/apps-db";
 import { listDatabases } from "@/lib/data/databases-db";
@@ -57,6 +57,9 @@ function appBrief(app: AppSummary, book: AliasBook, now: Date) {
     uptime30d: app.uptime30, database: app.database ? dbAlias(book, app.database.id) : null,
     lastDeploy: app.lastDeploy ? { state: app.lastDeploy.state, at: iso(app.lastDeploy.createdAt) } : null,
     problems: problems(app, book, now).length,
+    // Watchbell 1.2.1: a monitor still checks a domain the app no longer has ("Domain changed"; the fix is Update
+    // monitor, never a redeploy). A flag, not the hosts: no tool output carries a host (R5).
+    domainMoved: app.monitors.some((m) => !!m.move),
   };
 }
 
@@ -90,6 +93,7 @@ function monitorOf(m: MonitorLike, appName: string) {
     app: appName, kind: m.kind, path: pathOnly(m.path) ?? "/", name: m.name, state: m.state,
     lastStatus: m.lastStatus, lastLatencyMs: m.lastLatencyMs, lastError: m.lastError ? clip(scrubLog(m.lastError), 300) : null,
     paused: m.paused, lastCheckedAt: iso(m.lastCheckedAt), lastPingAt: iso(m.lastPingAt),
+    domainMoved: !!m.move, // Watchbell 1.2.1 (see appBrief)
   };
 }
 
@@ -99,7 +103,8 @@ export async function listMonitorsData(now: Date) {
 
 export async function listAlertsData(book: AliasBook, now: Date, state: "open" | "recent") {
   if (state === "open") {
-    return (await listFiring()).map((raw) => {
+    // Without a turned-off section's alerts, like the bell (1.2 review minor 5).
+    return (await listShownFiring()).map((raw) => {
       const a = hideAlert(raw, book);
       return {
         id: a.id, rule: a.ruleKey, severity: a.severity, title: a.title, message: a.message,
@@ -155,7 +160,7 @@ export async function questionContexts(book: AliasBook, now: Date, want: { kind:
   const alertIds = new Set(want.filter((w) => w.kind === "alert" && w.id).map((w) => w.id!));
   const [apps, alerts] = await Promise.all([
     appIds.size ? listApps(now) : Promise.resolve([] as AppSummary[]),
-    alertIds.size ? listFiring() : Promise.resolve([] as Awaited<ReturnType<typeof listFiring>>),
+    alertIds.size ? listShownFiring() : Promise.resolve([] as Awaited<ReturnType<typeof listShownFiring>>),
   ]);
   const out = new Map<string, unknown>();
   for (const a of apps) if (appIds.has(a.id)) out.set(`app:${a.id}`, { ...appBrief(a, book, now), problems: problems(a, book, now) });

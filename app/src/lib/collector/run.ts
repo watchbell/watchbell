@@ -2,6 +2,7 @@ import "server-only";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accounts, collectorRuns, deployments, monitors, resources, settings, snapshots, checks as checksTable } from "@/db/schema";
+import { monitorMoves, stickyPastDomains } from "@/lib/domain-move";
 import { credentialProblem, statusAfterTest } from "@/lib/accounts";
 import { expireTags } from "@/lib/cache/invalidate";
 import { tagsForTasks } from "@/lib/cache/tags";
@@ -14,9 +15,11 @@ import { taskLogs } from "@/lib/data/logs-db";
 import { deliverPending, taskDigest } from "@/lib/data/notify-db";
 import { pausedSections } from "@/lib/data/sections-db";
 import { taskPageViews } from "@/lib/data/pageviews-db";
+import { markAfterDeploy, marksPending, taskSecurity } from "@/lib/data/security-task";
 import { taskStatus } from "@/lib/data/provider-status-db";
 import { serverEnv } from "@/lib/env";
 import { activeFor, type Window } from "@/lib/maintenance";
+import { AFTER_DEPLOY_SETTING, type AfterDeploy, type DeployMark, deployToMark, parseAfterDeploy } from "@/lib/security/after-deploy";
 import { type DeploymentState, getDeployment, listDeployments, listProjects, listTeams, type VercelFailure } from "@/lib/providers/vercel";
 import type { State } from "@/lib/status";
 import { currentToFetch, deploymentChanged, missesAfter, pathOf, pickFlags, skippedIds } from "./deploy-sync";
@@ -29,7 +32,7 @@ import { ruleFrom } from "@/lib/body-rule";
 import { writeCheckResult } from "./monitor-write";
 import { appState, deploymentEvent, monitorEvent, type NewEvent, nextMonitorState } from "./rules";
 import { safeError } from "./safe-error";
-import { ALERTS_RESERVE_MS, BUDGET_MS, checkTimeout, dueTasks, POST_TASKS, protectOnly, recheckable, type TaskName, taskFits } from "./schedule";
+import { ALERTS_RESERVE_MS, BUDGET_MS, checkTimeout, dueTasks, POST_TASKS, protectOnly, recheckable, type TaskName, taskFits, withAfterDeploy } from "./schedule";
 
 export type RunSummary = { skipped: boolean; ok: boolean; tasks: string[]; checks: number; durationMs: number; errors: string[] };
 // "builtin" is the self-host scheduler. collector_runs.trigger is a pg enum without it, so it is stored as "manual".
@@ -45,9 +48,13 @@ const DB_TASKS: Partial<Record<TaskName, (ctx: Ctx) => Promise<void>>> = {
   supabase: taskSupabase, supabaseUsage: taskSupabaseUsage, neon: taskNeon, firebase: taskFirebase, firebaseUsage: taskFirebaseUsage, extraDbs: taskExtraDbs,
 };
 
-async function readLastRun(): Promise<Partial<Record<TaskName, string>>> {
-  const [row] = await db().select().from(settings).where(eq(settings.key, LAST_RUN_KEY)).limit(1);
-  return (row?.value as Partial<Record<TaskName, string>>) ?? {};
+// When each task last ran, and (Watchbell 1.2.1) the apps waiting for their after-deploy security check, in one read.
+async function readRunSettings(): Promise<{ lastRun: Partial<Record<TaskName, string>>; afterDeploy: unknown }> {
+  const rows = await db().select({ key: settings.key, value: settings.value }).from(settings).where(inArray(settings.key, [LAST_RUN_KEY, AFTER_DEPLOY_SETTING])).limit(2);
+  return {
+    lastRun: (rows.find((r) => r.key === LAST_RUN_KEY)?.value as Partial<Record<TaskName, string>> | undefined) ?? {},
+    afterDeploy: rows.find((r) => r.key === AFTER_DEPLOY_SETTING)?.value ?? null,
+  };
 }
 
 async function writeLastRun(value: Partial<Record<TaskName, string>>) {
@@ -133,7 +140,43 @@ async function startBackoff(failure: VercelFailure, now: Date): Promise<boolean>
 // true when the deployment's external id equals `id` (false for null), as an SQL expression for update statements
 const isDeployment = (id: string | null) => sql<boolean>`coalesce(${deployments.externalId} = ${id}::text, false)`;
 
-async function taskVercel(now: Date, deadline: number, errors: string[]): Promise<void> {
+// The current / previous production flags of these apps, from the READY production deployments we know and what Vercel
+// says is serving. Watchbell 1.2.1: an app whose current deployment just became current (or, review minor 2, a recent
+// one whose mark was never saved) is marked for the security task (lib/data/security-task.ts), which checks it first in
+// the next run, once per deployment. The marks collected are saved even when a later app's update throws.
+export async function updateCurrentFlags(
+  apps: readonly { id: string; externalId: string | null }[], ready: readonly { resourceId: string; id: string; createdAt: Date | null }[],
+  current: ReadonlyMap<string, string | null>, o: { now: Date; afterDeploy: AfterDeploy; errors: string[]; label: string },
+  mark: typeof markAfterDeploy = markAfterDeploy,
+): Promise<void> {
+  const marks: DeployMark[] = [];
+  try {
+    for (const app of apps) {
+      const mine = ready.filter((r) => r.resourceId === app.id);
+      const { currentId, previousId } = pickFlags(mine.map((r) => ({ id: r.id, createdAt: r.createdAt ?? new Date(0) })), (app.externalId ? current.get(app.externalId) : null) ?? null);
+      const changed = await db().update(deployments)
+        .set({ isCurrent: isDeployment(currentId), isPreviousProduction: isDeployment(previousId), updatedAt: o.now })
+        .where(and(eq(deployments.resourceId, app.id), or(
+          sql`${deployments.isCurrent} is distinct from ${isDeployment(currentId)}`,
+          sql`${deployments.isPreviousProduction} is distinct from ${isDeployment(previousId)}`,
+        ))).returning({ id: deployments.externalId });
+      const id = deployToMark({
+        appId: app.id, currentId, changedIds: changed.map((r) => r.id), createdAt: mine.find((r) => r.id === currentId)?.createdAt ?? null, state: o.afterDeploy, now: o.now,
+      });
+      if (id) marks.push({ appId: app.id, deploymentId: id });
+    }
+  } finally {
+    if (marks.length) {
+      try {
+        await mark(marks, o.now);
+      } catch (e) {
+        o.errors.push(`vercel/${o.label}: after-deploy security check not scheduled: ${safeError(e)}`);
+      }
+    }
+  }
+}
+
+async function taskVercel(now: Date, deadline: number, errors: string[], afterDeploy: AfterDeploy): Promise<void> {
   if (await backingOff(now)) return;
   const key = serverEnv().OPS_ENCRYPTION_KEY;
   const accs = await db().select().from(accounts).where(and(eq(accounts.provider, "vercel"), eq(accounts.status, "ok")));
@@ -230,15 +273,7 @@ async function taskVercel(now: Date, deadline: number, errors: string[]): Promis
         else failed.push(want.deploymentId); // stored, but not what the READY query looks for: don't fetch it again every minute
       }
       await saveMisses();
-      for (const app of teamApps) {
-        const { currentId, previousId } = pickFlags(ready.filter((r) => r.resourceId === app.id), current.get(app.externalId) ?? null);
-        await db().update(deployments)
-          .set({ isCurrent: isDeployment(currentId), isPreviousProduction: isDeployment(previousId), updatedAt: now })
-          .where(and(eq(deployments.resourceId, app.id), or(
-            sql`${deployments.isCurrent} is distinct from ${isDeployment(currentId)}`,
-            sql`${deployments.isPreviousProduction} is distinct from ${isDeployment(previousId)}`,
-          )));
-      }
+      await updateCurrentFlags(teamApps, ready, current, { now, afterDeploy, errors, label: team.name });
     }
   }
 }
@@ -259,9 +294,20 @@ export async function refreshAppSnapshots(now: Date): Promise<void> {
   // D7: an app whose linked (and still watched) database is paused, or was before the provider stopped answering, is degraded.
   const dbPaused = await appsWithPausedDatabase(apps.map((a) => a.id));
   const prev = new Map((await db().select().from(snapshots).where(inArray(snapshots.resourceId, apps.map((a) => a.id)))).map((s) => [s.resourceId, s]));
+  // Watchbell 1.2.1: a monitor on a host its app no longer has (lib/domain-move.ts) reads "Domain changed": the app is
+  // degraded, not down, until the monitor is updated.
+  const byId = new Map(apps.map((a) => [a.id, a]));
+  const moved = monitorMoves(mons.map((m) => ({ id: m.id, kind: m.kind, url: m.url, appId: m.resourceId, appName: byId.get(m.resourceId)?.name ?? "", appMeta: byId.get(m.resourceId)?.meta, lastError: m.lastError })), apps);
+  const stateOf = (m: (typeof mons)[number]): State => (moved.has(m.id) && m.state === "err" ? "warn" : m.state);
+  // Review T3 I2: a host Vercel says it doesn't serve (DEPLOYMENT_NOT_FOUND) is remembered in the app's pastDomains, so
+  // a timeout or 5xx in between doesn't flip the monitor back to MonitorDown.
+  const sticky = stickyPastDomains(mons.map((m) => ({ id: m.id, kind: m.kind, url: m.url, appId: m.resourceId, appName: byId.get(m.resourceId)?.name ?? "", appMeta: byId.get(m.resourceId)?.meta, lastError: m.lastError })), apps);
+  for (const [appId, pastDomains] of sticky) {
+    await db().update(resources).set({ meta: sql`${resources.meta} || ${JSON.stringify({ pastDomains })}::jsonb` }).where(eq(resources.id, appId));
+  }
   for (const app of apps) {
     const own = mons.filter((m) => m.resourceId === app.id);
-    const state: State = appState({ monitors: own.map((m) => m.state), building: building.has(app.id), dbPaused: dbPaused.has(app.id) });
+    const state: State = appState({ monitors: own.map(stateOf), building: building.has(app.id), dbPaused: dbPaused.has(app.id) });
     const worst = own.find((m) => m.state === "err") ?? own.find((m) => m.state === "warn");
     // A heartbeat (U3) has no response time, so the app's comes from an HTTP check.
     const data = { code: worst?.lastStatus ?? null, latencyMs: own.find((m) => m.kind !== "heartbeat")?.lastLatencyMs ?? null, dbPaused: dbPaused.has(app.id) };
@@ -390,12 +436,18 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
   const mark = (step: string) => console.info(`collector ${step} +${Date.now() - started.getTime()}ms`);
   try {
     mark("start");
-    const lastRun = await readLastRun();
+    const { lastRun, afterDeploy } = await readRunSettings();
     const force = trigger !== "cron_job_org" && trigger !== "builtin"; // a scheduled tick respects each task's own interval
     // Watchbell 1.2 (D11): the tasks of a section the owner turned off are not due (schedule.ts TASK_SECTION).
     // A protective task of a paused section (schedule.ts PROTECT_TASKS) runs in protect-only mode.
     const paused = await pausedSections();
-    const due = dueTasks(lastRun, started, force, paused);
+    // Watchbell 1.2.1: an app marked after a new production deployment brings the security task forward (early: the
+    // marked apps only, and not saved as the task's last run, so its 6-hourly slot still comes).
+    const { due, early } = withAfterDeploy(dueTasks(lastRun, started, force, paused), marksPending(afterDeploy), paused);
+    // Fix round 1 (review important 1): a 6-hourly slot that didn't finish both lists isn't recorded either, so it
+    // continues in the next minute runs.
+    let securityComplete = false;
+    const slotDone = (list: TaskName[]) => (early || !securityComplete ? list.filter((t) => t !== "security") : list);
     // I10: the tasks before `alerts` work to a deadline ALERTS_RESERVE_MS earlier, so the alert rules always get time.
     const post = due.filter((t) => POST_TASKS.includes(t));
     const workDeadline = post.includes("alerts") ? deadline - ALERTS_RESERVE_MS : deadline;
@@ -408,7 +460,7 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
         checkCount += await taskHeartbeats(now, heartbeatMaintenance(windows, now), force);
       }
       if (task === "checks") checkCount += await taskChecks(new Date(), workDeadline, errors, force, windows);
-      if (task === "vercel") await taskVercel(new Date(), workDeadline, errors);
+      if (task === "vercel") await taskVercel(new Date(), workDeadline, errors, parseAfterDeploy(afterDeploy));
       const dbTask = DB_TASKS[task];
       if (dbTask) await dbTask({ now: new Date(), deadline: workDeadline, errors, protectOnly: protectOnly(task, paused) });
       if (task === "cloudflare") await taskCloudflare(new Date(), workDeadline, errors);
@@ -419,16 +471,17 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
       if (task === "status") await taskStatus(new Date());
       if (task === "logs") await taskLogs(new Date(), workDeadline, errors);
       if (task === "pageviews") await taskPageViews(new Date(), workDeadline, errors);
+      if (task === "security") securityComplete = (await taskSecurity({ now: started, deadline: workDeadline, errors, paused, early })).complete;
     });
     done.push(...mainDone);
     mark("main done");
     // lastRun is saved first; the app and network state refreshes each catch their own failure (settleRun).
-    await settleRun({ lastRun, done, tried, started, errors });
+    await settleRun({ lastRun, done: slotDone(done), tried, started, errors });
     // Then the alert rules, on the states just refreshed, and the digest, against the full deadline (runPostTasks).
     mark("settled");
     const postDone = await runPostTasks(post, deadline, errors);
     mark("post done");
-    if (postDone.length) await writeLastRun({ ...lastRun, ...Object.fromEntries([...done, ...postDone].map((t) => [t, started.toISOString()])) });
+    if (postDone.length) await writeLastRun({ ...lastRun, ...Object.fromEntries(slotDone([...done, ...postDone]).map((t) => [t, started.toISOString()])) });
     done.push(...postDone);
   } catch (e) {
     errors.push(`run: ${safeError(e)}`);

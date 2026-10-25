@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { appSecurity, events } from "@/db/schema";
 import type { SecurityRow } from "@/lib/security/types";
-import { fakeDb, limitOf, payloadOf } from "./fake-db";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { fakeDb, limitOf, payloadOf, whereOf } from "./fake-db";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, check: vi.fn() }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
@@ -35,7 +36,7 @@ describe("runSecurityChecks", () => {
     ]);
     h.check.mockImplementation(async (host: string) => (host === "nova.example.com" ? vuln : { ...vuln, status: "ok", findings: [], version: "16.4.0" }));
     const r = await runSecurityChecks(Date.now() + 30_000);
-    expect(r).toEqual({ checked: 2, skipped: 0, failed: [] });
+    expect({ ...r, done: [...r.done].sort(), started: [...r.started].sort() }).toEqual({ checked: 2, skipped: 0, failed: [], done: ["a1", "a2"], listed: ["a1", "a2"], started: ["a1", "a2"] });
     expect(limitOf(f.queries[0])).toBe(200);
     expect(h.check.mock.calls.map((c) => [c[0], c[1]?.status ?? null])).toEqual([["nova.example.com", "ok"], ["acme-shop.vercel.app", null]]);
 
@@ -54,6 +55,17 @@ describe("runSecurityChecks", () => {
     });
   });
 
+  // Watchbell 1.2.1: the stored primary domain (the one production is served on) beats a monitor still on an old domain.
+  it("checks an app on its stored primary domain when it has one, else its monitor's host", async () => {
+    use([
+      [{ id: "a1", name: "shopfront", meta: { primaryDomain: "finance.example.com" }, sec: null }, { id: "a2", name: "acme-shop", meta: { teamId: "t" }, sec: null }],
+      [{ resourceId: "a1", url: "https://old-finance.example.net/" }, { resourceId: "a2", url: "https://shop.example.com/" }],
+    ]);
+    h.check.mockResolvedValue({ ...vuln, status: "ok", findings: [], version: "16.4.0" });
+    await runSecurityChecks(Date.now() + 30_000);
+    expect(h.check.mock.calls.map((c) => c[0]).sort()).toEqual(["finance.example.com", "shop.example.com"]);
+  });
+
   it("checks an app whose only monitor is a heartbeat on its vercel.app address, not an empty host (U3)", async () => {
     use([[{ id: "a1", name: "acme-shop", sec: null }], [{ resourceId: "a1", url: "heartbeat:backup-job" }]]);
     h.check.mockResolvedValue({ ...vuln, status: "ok", findings: [], version: "16.4.0" });
@@ -63,7 +75,7 @@ describe("runSecurityChecks", () => {
 
   it("skips what doesn't fit the deadline and writes nothing for it", async () => {
     const f = use([[{ id: "a1", name: "nova-wallet", sec: null }], []]);
-    expect(await runSecurityChecks(Date.now())).toEqual({ checked: 0, skipped: 1, failed: [] });
+    expect(await runSecurityChecks(Date.now())).toEqual({ checked: 0, skipped: 1, failed: [], done: [], listed: ["a1"], started: [] });
     expect(h.check).not.toHaveBeenCalled();
     expect(f.writes).toEqual([]);
   });
@@ -71,7 +83,8 @@ describe("runSecurityChecks", () => {
   it("counts an app the check gave up on (null) as skipped", async () => {
     const f = use([[{ id: "a1", name: "nova-wallet", sec: null }], []]);
     h.check.mockResolvedValue(null);
-    expect(await runSecurityChecks(Date.now() + 30_000)).toEqual({ checked: 0, skipped: 1, failed: [] });
+    // It started and ran out of time: an attempt (fix round 1), not done.
+    expect(await runSecurityChecks(Date.now() + 30_000)).toEqual({ checked: 0, skipped: 1, failed: [], done: [], listed: ["a1"], started: ["a1"] });
     expect(f.writes).toEqual([]);
   });
 
@@ -82,12 +95,46 @@ describe("runSecurityChecks", () => {
     expect(r.checked).toBe(1);
     expect(r.failed).toHaveLength(1);
     expect(r.failed[0]).toMatch(/^one: /);
+    expect(r.done.sort()).toEqual(["a1", "a2"]); // a failed check was tried: done for the after-deploy mark
   });
 
   it("does nothing, with a single query, when no app is watched", async () => {
     const f = use([[]]);
-    expect(await runSecurityChecks(Date.now() + 30_000)).toEqual({ checked: 0, skipped: 0, failed: [] });
+    expect(await runSecurityChecks(Date.now() + 30_000)).toEqual({ checked: 0, skipped: 0, failed: [], done: [], listed: [], started: [] });
     expect(f.queries).toHaveLength(1);
+  });
+
+  // Watchbell 1.2.1: the apps marked after a new production deployment are checked first; an early run checks only them.
+  const A1 = "11111111-1111-4111-8111-111111111111";
+  const A2 = "22222222-2222-4222-8222-222222222222";
+  it("checks the marked apps first, whatever their last check", async () => {
+    use([[{ id: A1, name: "old", sec: null }, { id: A2, name: "fresh", sec: prevRow }], []]);
+    h.check.mockResolvedValue(vuln);
+    const order: string[] = [];
+    h.check.mockImplementation(async (host: string) => { order.push(host); return vuln; });
+    const r = await runSecurityChecks(Date.now() + 30_000, { first: [A2] });
+    expect(order[0]).toBe("fresh.vercel.app");
+    expect(r.listed).toEqual([A2, A1]);
+  });
+
+  it("with `only`, reads and checks just those apps", async () => {
+    const f = use([[{ id: A2, name: "fresh", sec: prevRow }], []]);
+    h.check.mockResolvedValue(vuln);
+    const r = await runSecurityChecks(Date.now() + 30_000, { only: [A2] });
+    expect(r).toMatchObject({ checked: 1, done: [A2], listed: [A2] });
+    expect(new PgDialect().sqlToQuery(whereOf(f.queries[0])!.getSQL() as never).params).toContain(A2);
+    // Nothing to check: no query at all.
+    const g = use([]);
+    expect(await runSecurityChecks(Date.now() + 30_000, { only: [] })).toEqual({ checked: 0, skipped: 0, failed: [], done: [], listed: [], started: [] });
+    expect(g.queries).toHaveLength(0);
+  });
+
+  // Fix round 1: a slot that continues over several minute runs leaves out the apps it already tried.
+  it("with `skip`, leaves those apps out of the read", async () => {
+    const f = use([[{ id: A1, name: "old", sec: null }], []]);
+    h.check.mockResolvedValue(vuln);
+    expect(await runSecurityChecks(Date.now() + 30_000, { skip: [A2] })).toMatchObject({ listed: [A1] });
+    expect(new PgDialect().sqlToQuery(whereOf(f.queries[0])!.getSQL() as never).sql).toMatch(/not in/);
   });
 });
 

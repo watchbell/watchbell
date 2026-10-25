@@ -75,7 +75,7 @@ export default async function WelcomePage() {
             ))}
           </Card>
           <Card title="Not ready yet?">
-            <p className="text-[13px] text-ink-soft">You can come back to this page any time from Home. The rest of the console fills in as you connect accounts.</p>
+            <p className="text-[13px] text-ink-soft">You can do all of this later on Connections. Until your first account is connected, Watchbell opens on this page.</p>
             <Link href="/connections" className={`${buttonClass({ size: "sm" })} mt-2`}>Open connections</Link>
           </Card>
         </div>

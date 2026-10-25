@@ -22,7 +22,7 @@ const alert = (o: Partial<ProposalAlert>): ProposalAlert => ({
 const facts = (o: Partial<ProposalFacts> = {}): ProposalFacts => ({
   monitorKinds: new Map([[MON, "http"]]), deploys: new Map(), supabaseRefs: new Map(), neonSuspended: new Map(), ...o,
 });
-const off: AutoRun = { recheck: false, neon_wake: false, supabase_keepalive: false, supabase_restore: false, vercel_redeploy: false, vercel_rollback: false, github_bump_pr: false, domain_recheck: false, daily_rerun: false };
+const off: AutoRun = { recheck: false, neon_wake: false, supabase_keepalive: false, supabase_restore: false, vercel_redeploy: false, vercel_rollback: false, github_bump_pr: false, domain_recheck: false, daily_rerun: false, monitor_update_url: false };
 
 describe("proposalsFor", () => {
   it("MonitorDown on an HTTP monitor → recheck, in Workloads, aliased, no email, expires after the TTL", () => {
@@ -76,7 +76,7 @@ describe("proposalsFor", () => {
 describe("factNeeds", () => {
   it("asks only for what the alerts need", () => {
     const need = factNeeds([alert({}), alert({ ruleKey: "DeploymentFailed", subject: APP }), alert({ ruleKey: "CertExpiringSoon" }), alert({ ruleKey: "DatabasePaused", resourceKind: "supabase_project", resourceId: DB })], now);
-    expect(need).toEqual({ monitorIds: [MON], monitorApps: [APP], deployApps: [APP], supabaseIds: [DB], depApps: [] });
+    expect(need).toEqual({ monitorIds: [MON], monitorApps: [APP], deployApps: [APP], supabaseIds: [DB], depApps: [], frameworkApps: [] });
     // Down / slow apps need their deploys too (auto-rollback rule).
     expect(factNeeds([alert({})], now).deployApps).toEqual([APP]);
     expect(Object.values(factNeeds([alert({ ruleKey: "CertExpiringSoon" })], now)).flat()).toEqual([]);
@@ -139,6 +139,24 @@ describe("auto-rollback rule: a rollback proposal for a down or slow app right a
       expect(ps.map((p) => p.action)).toEqual(["recheck", "vercel_rollback"]);
       expect(ps[1]).toMatchObject({ targetRef: "dpl_prv00000001", risk: "risky", room: "workloads", ruleKey });
     }
+  });
+  // Watchbell 1.2.1: a monitor whose host the app no longer has is a moved domain, not a broken deploy.
+  it("never proposes a redeploy or a rollback for a monitor on a detached host, in the window or outside it", () => {
+    const moves = new Map([[MON, { from: "old.example.com", to: "new.example.com" }]]);
+    for (const at of [minAgo(90), minAgo(10)]) {
+      const f = { ...fresh(at), monitorMoves: moves };
+      expect(proposalsFor(alert({}), f, book, now).map((p) => p.action)).toEqual(["recheck"]);
+      expect(proposalsFor(alert({ ruleKey: "HighLatency" }), f, book, now).map((p) => p.action)).toEqual(["recheck"]);
+    }
+  });
+  it("MonitorDomainMoved → monitor_update_url (safe) for that monitor; nothing without a known move", () => {
+    const moved = alert({ ruleKey: "MonitorDomainMoved", severity: "warning", message: "old.example.com is no longer a domain of shortly; production is on new.example.com." });
+    const moves = new Map([[MON, { from: "old.example.com", to: "new.example.com" }]]);
+    const [p, ...rest] = proposalsFor(moved, { ...fresh(minAgo(90)), monitorMoves: moves }, book, now);
+    expect(rest).toEqual([]);
+    expect(p).toMatchObject({ action: "monitor_update_url", risk: "safe", room: "workloads", resourceKind: "app", resourceId: APP, targetRef: MON, title: "Point the app-a monitor at new.example.com" });
+    expect(proposalsFor(moved, facts(), book, now)).toEqual([]);
+    expect(factNeeds([moved], now).monitorIds).toEqual([MON]);
   });
   it("window math (a slow app): the default 30 min, or the setting's window; nothing older, nothing without a previous deployment", () => {
     const slow = alert({ ruleKey: "HighLatency" });

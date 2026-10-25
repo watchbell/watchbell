@@ -21,7 +21,7 @@ export const CATALOG_SOURCES: [string, string][] = [
   ["cron-job.org", "https://cron-job.org/en/faq/"],
 ];
 
-export type Adapter = "built" | "planned" | "none";
+export type Adapter = "built" | "none";
 
 export type FreeDb = {
   name: string; type: string; limits: string; sleep: string; card: string; asia: string; drizzle: string;

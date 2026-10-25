@@ -33,6 +33,11 @@ const row = (o: object = {}) => ({
   previewReadyAt: null, openedAt: min(10), fullName: "o/acme-shop", appName: "acme-shop", ...o,
 });
 const ok = <T>(data: T) => ({ ok: true as const, data });
+const REVIEW = {
+  manifest: "package.json", lockfile: "package-lock.json", tokenLogin: "owner",
+  files: [{ filename: "package.json" }, { filename: "package-lock.json" }],
+  commits: [{ sha: SHA, login: "owner", name: "Owner", email: "o@x", message: "Watchbell: update next", files: null }],
+};
 
 function deps(o: Partial<WatchDeps> = {}): WatchDeps & { saved: { set: Record<string, unknown>; text: string }[] } {
   const saved: { set: Record<string, unknown>; text: string }[] = [];
@@ -52,6 +57,7 @@ function deps(o: Partial<WatchDeps> = {}): WatchDeps & { saved: { set: Record<st
     probe: vi.fn().mockResolvedValue({ status: 200, ms: 120, authWall: false }),
     errorLogs: vi.fn().mockResolvedValue(0),
     merge: vi.fn().mockResolvedValue(ok({ sha: "e".repeat(40) })),
+    review: vi.fn().mockResolvedValue(REVIEW),
     save: vi.fn(async (_id, set, _p, text) => { saved.push({ set: set as Record<string, unknown>, text }); }),
     notify: vi.fn().mockResolvedValue(undefined),
     audit: vi.fn().mockResolvedValue(undefined),
@@ -64,6 +70,36 @@ const deadline = () => Date.now() + 50_000;
 beforeEach(() => vi.clearAllMocks());
 
 describe("watchDepPrs", () => {
+  // Watchbell 1.2.1 (audit M1): the allow-list runs right before the merge.
+  it("never merges a PR with a change outside package.json and its lockfile: stops with needs a look, stays open", async () => {
+    const d = deps({ review: vi.fn().mockResolvedValue({ ...REVIEW, files: [...REVIEW.files, { filename: "src/app/page.tsx" }] }) });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+    expect(d.merge).not.toHaveBeenCalled();
+    expect(d.review).toHaveBeenCalledWith("w", expect.objectContaining({ number: 12 }));
+    expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: "PR #12: needs a look ⚠️ — unexpected change in src/app/page.tsx" });
+    expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped", reason: "unexpected change in src/app/page.tsx" }));
+  });
+
+  // Owner (review round 1): when the scan recorded a lockfile, the merge waits for it.
+  it("waits for the recorded lockfile instead of merging package.json alone", async () => {
+    const d = deps({ review: vi.fn().mockResolvedValue({ ...REVIEW, lockfileRequired: true, files: [{ filename: "package.json" }] }) });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+    expect(d.merge).not.toHaveBeenCalled();
+    expect(d.saved.at(-1)).toMatchObject({ set: { stage: "checks" }, text: "PR #12: waiting for CI — waiting for the lockfile" });
+    const ok2 = deps({ review: vi.fn().mockResolvedValue({ ...REVIEW, lockfileRequired: true }) });
+    expect((await watchDepPrs(now, deadline(), ok2)).merged).toBe(1);
+  });
+
+  it("never merges a PR with someone else's commit, and waits when GitHub can't be read", async () => {
+    const d = deps({ review: vi.fn().mockResolvedValue({ ...REVIEW, commits: [...REVIEW.commits, { ...REVIEW.commits[0], sha: "c".repeat(40), login: "mallory" }] }) });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+    expect(d.saved.at(-1)?.text).toBe("PR #12: needs a look ⚠️ — unexpected commit ccccccc by mallory");
+    const w = deps({ review: vi.fn().mockResolvedValue(null) });
+    expect(await watchDepPrs(now, deadline(), w)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+    expect(w.merge).not.toHaveBeenCalled();
+    expect(w.saved).toEqual([]);
+  });
+
   it("pending → merged: green checks, READY preview, HTTP smoke ok, auto-rollback on → squash merge pinned to the SHA", async () => {
     const d = deps();
     expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 1, stopped: 0 });
@@ -74,6 +110,30 @@ describe("watchDepPrs", () => {
     expect(d.saved[0].set).toMatchObject({ stage: "merging", smokeMode: "http" });
     expect(d.notify).toHaveBeenCalledWith({ app: "app-a", number: 12, packages: ["next"], kind: "merged", windowMin: 30 });
     expect(d.audit).toHaveBeenCalledWith(`${ACTIONS_COPY.auditPrefix}PR #12 merged · next`, APP);
+  });
+
+  // Watchbell 1.2.1: the PR's recorded base (the app's production branch, deps-pr.ts prBase) is where it is merged; a
+  // Moderate fix is watched and reported like any other (the watcher never looks at severities).
+  it("merges into the recorded base branch (web-revamp), and a Moderate fix gets the same Telegram notice", async () => {
+    const d = deps({
+      rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp", packages: ["axios"], title: "Watchbell: update axios to 1.6.8 (security fix)" })]),
+      security: vi.fn().mockResolvedValue({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true }),
+      pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "web-revamp" })),
+    });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 1, stopped: 0 });
+    expect(d.merge).toHaveBeenCalledWith("w", "o/acme-shop", 12, "watchpost/deps-0a1b2c3d", "web-revamp", SHA, "Watchbell: update axios to 1.6.8 (security fix)");
+    expect(d.notify).toHaveBeenCalledWith({ app: "app-a", number: 12, packages: ["axios"], kind: "merged", windowMin: 30 });
+  });
+
+  it("never merges a PR whose base was changed on GitHub: stops with needs a look and tells Telegram", async () => {
+    const d = deps({
+      rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp" })]),
+      pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "main" })),
+    });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+    expect(d.merge).not.toHaveBeenCalled();
+    expect(d.saved.at(-1)?.text).toBe("PR #12: needs a look ⚠️ — the PR's base changed to main");
+    expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped", reason: "the PR's base changed to main" }));
   });
 
   it("still waiting for CI or the preview: only the stage is saved", async () => {

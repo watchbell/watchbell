@@ -8,10 +8,10 @@ const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, fac
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("./alert-facts-db", () => ({ loadFacts: async () => h.facts }));
 // Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
-const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
-vi.mock("./sections-db", async (orig) => ({ ...(await orig<typeof import("./sections-db")>()), pausedSections: async () => sec.paused }));
+const sec = vi.hoisted(() => ({ paused: new Set<string>(), gate: null as null | Promise<void> }));
+vi.mock("./sections-db", async (orig) => ({ ...(await orig<typeof import("./sections-db")>()), pausedSections: async () => { await sec.gate; return sec.paused; } }));
 
-import { evaluateAlerts, listFiring, listResolved, openAlertCount, rulesWithState, saveRule, silenceAlert } from "./alerts-db";
+import { evaluateAlerts, listFiring, listResolved, listShownFiring, openAlertCount, rulesWithState, saveRule, silenceAlert } from "./alerts-db";
 
 const now = new Date("2026-10-13T12:00:00Z");
 const facts = (o: Partial<Facts> = {}): Facts => ({
@@ -158,24 +158,41 @@ describe("evaluateAlerts inside a maintenance window (U5 / B3)", () => {
 });
 
 describe("openAlertCount", () => {
+  const groups = [
+    { ruleKey: "MonitorDown", provider: null, n: 2 },
+    { ruleKey: "DatabasePaused", provider: null, n: 1 },
+    { ruleKey: "CredentialExpiring", provider: "supabase", n: 1 },
+    { ruleKey: "CredentialExpiring", provider: "vercel", n: 1 },
+    { ruleKey: "CollectorStale", provider: null, n: 1 },
+  ];
+
   it("counts the open critical and warning alerts", async () => {
-    use([[{ n: 3 }]]);
-    expect(await openAlertCount()).toBe(3);
+    use([groups]);
+    expect(await openAlertCount()).toBe(6);
     use([[]]);
     expect(await openAlertCount()).toBe(0);
   });
 
-  it("leaves out the alerts of a paused section (D11)", async () => {
-    let f = use([[{ n: 3 }]]);
-    await openAlertCount();
-    expect(whereSql(f.queries[0]).sql).not.toContain("not (");
+  it("leaves out the alerts of a paused section (D11), an account alert by its provider", async () => {
     sec.paused = new Set(["database"]);
-    f = use([[{ n: 1 }]]);
+    use([groups]);
+    expect(await openAlertCount()).toBe(4);
+    sec.paused = new Set(["database", "hosting"]);
+    use([groups]);
     expect(await openAlertCount()).toBe(1);
-    const q = whereSql(f.queries[0]);
-    expect(q.sql).toContain("not (");
-    expect(q.params).toEqual(expect.arrayContaining(["DatabasePaused", "StorageAlmostFull", "supabase", "neon"]));
-    expect(q.params).not.toContain("MonitorDown");
+  });
+
+  // 1.2 review minor 4: the count doesn't wait for the section read (one round trip, not two in a row).
+  it("starts the count before the section state has come back", async () => {
+    let open!: () => void;
+    sec.gate = new Promise<void>((r) => { open = r; });
+    const f = use([groups]);
+    const pending = openAlertCount();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(f.queries).toHaveLength(1);
+    open();
+    expect(await pending).toBe(6);
+    sec.gate = null;
   });
 });
 
@@ -237,6 +254,17 @@ describe("alert page reads", () => {
     expect(limitOf(f.queries[0])).toBe(200);
     expect(whereSql(f.queries[0]).sql).not.toContain("not (");
     expect(rows).toEqual([expect.objectContaining({ id: "x1", resourceName: "web", resourceKind: "app" }), expect.objectContaining({ id: "x2", resourceName: null, resourceKind: null })]);
+  });
+
+  // 1.2 review minor 5: the API, MCP and the office leave out a turned-off section's alerts, like the bell.
+  it("listShownFiring leaves out the alerts of a paused section", async () => {
+    sec.paused = new Set(["database"]);
+    const f = use([[]]);
+    await listShownFiring();
+    const q = whereSql(f.queries[0]);
+    expect(q.sql).toContain("not (");
+    expect(q.params).toEqual(expect.arrayContaining(["DatabasePaused", "supabase"]));
+    expect(q.params).not.toContain("MonitorDown");
   });
 
   it("lists what resolved in the last 7 days, at most 50", async () => {

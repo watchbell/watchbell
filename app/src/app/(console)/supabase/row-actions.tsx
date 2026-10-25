@@ -11,7 +11,7 @@ import { useProviderAction } from "@/components/provider-action";
 import { RowMenu } from "@/components/row-menu";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { ActionResult } from "@/lib/action";
-import { pauseAction, restoreAction, setAutoRestore, setKeepActive } from "./actions";
+import { checkServicesAction, pauseAction, restoreAction, setAutoRestore, setKeepActive } from "./actions";
 import { MetricsKeyDialog } from "./metrics-key-dialog";
 
 // Stage 6 Supabase row controls (mockup supabase(), restoreDlg(), confirmFor()). Database names are always shown by
@@ -22,6 +22,14 @@ export type PauseChoice = { id: string; ref: string; alias: string; traffic: str
 
 const PAUSE_BODY = "Supabase stops the project in about 2 minutes. Apps that use this database get errors until it's restored (possible for 1 year). Pausing frees one of this account's 2 free slots. Nothing is deleted.";
 const RESTORE_BODY = "Supabase brings the project back in about 2 minutes. Apps that use it start working again after that.";
+
+// Check services (1.2.1): a read, so no dialog; the toast carries the answer (no names in it, only service names).
+function checkServices(id: string, projectRef: string, alias: string) {
+  const t = toast.loading(`Checking ${alias}'s services…`);
+  checkServicesAction(id, projectRef)
+    .then((r) => (r.ok ? toast.success(`${alias}: services healthy`, { id: t, description: r.message }) : toast.error(`${alias}: services`, { id: t, description: r.error })))
+    .catch(() => toast.error("Something went wrong. Try again.", { id: t }));
+}
 
 // The toast shows our own sentence (with the alias) on success, the server's sentence on failure.
 const said = (message: string) => (r: ActionResult): ActionResult => (r.ok ? { ok: true, message } : r);
@@ -35,7 +43,7 @@ export function ActiveRowMenu({ id, projectRef, alias, label, metrics, dashboard
     <>
       <RowMenu label={label} items={[
         ...(dashboard ? [{ label: "Open in Supabase", href: `https://supabase.com/dashboard/project/${encodeURIComponent(projectRef)}` }] : []),
-        { label: "Check services", later: 6 },
+        { label: "Check services", onSelect: () => checkServices(id, projectRef, alias) },
         ...(metrics ? [{ label: metrics.hasKey ? "Replace metrics key" : "Add metrics key", onSelect: () => setKeyOpen(true) }] : []),
         "---",
         {

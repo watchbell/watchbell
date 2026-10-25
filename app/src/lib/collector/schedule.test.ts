@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   activeTasks, PROTECT_TASKS, protectOnly, ALERTS_RESERVE_MS, BUDGET_MS, CATCH_UP_PER_RUN, checkTimeout, dueTasks, OFFSETS, POST_TASKS, recheckable, slotStart, TASK_SECTION, type TaskName, TASKS, taskFits,
+  TASK_ANY_SECTION, withAfterDeploy,
 } from "./schedule";
 
 const now = new Date("2026-10-12T10:00:01Z");
@@ -8,7 +9,7 @@ const ago = (s: number, from = now) => new Date(from.getTime() - s * 1000).toISO
 const at = (iso: string) => new Date(iso);
 
 const MINUTE = ["heartbeats", "checks", "vercel", "alerts"];
-const ORDER = ["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "neon", "firebase", "firebaseUsage", "extraDbs", "cloudflare", "domains", "tls", "rdap", "eol", "status", "logs", "pageviews", "alerts", "digest"];
+const ORDER = ["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "neon", "firebase", "firebaseUsage", "extraDbs", "cloudflare", "domains", "tls", "rdap", "eol", "status", "logs", "pageviews", "security", "alerts", "digest"];
 const SLOW = ORDER.filter((t) => !MINUTE.includes(t)) as TaskName[];
 // Every task ran in its current slot (or, for minute tasks, a second ago).
 const fresh = (when: Date) => Object.fromEntries(ORDER.map((t) => [t, MINUTE.includes(t) ? ago(1, when) : new Date(slotStart(t as TaskName, when)).toISOString()]));
@@ -31,6 +32,18 @@ describe("TASKS", () => {
     expect(Object.keys(TASKS)).toEqual(ORDER);
     expect(POST_TASKS).toEqual(["alerts", "digest"]);
     expect(TASKS).toMatchObject({ checks: 60, heartbeats: 60, vercel: 60, alerts: 60, status: 300, logs: 300, pageviews: 1800, digest: 300, supabaseUsage: 3600, cloudflare: 3600, domains: 21_600, eol: 86_400 });
+  });
+  // Watchbell 1.2.1 (owner 23 Oct): the security check (Next.js versions and the dependency scan) every 6 hours, last of
+  // the main tasks so it only takes the time the others leave.
+  it("runs the security check every 6 hours at 04:36, 10:36, 16:36 and 22:36 UTC, right before the alert rules", () => {
+    expect(TASKS.security).toBe(21_600);
+    expect(OFFSETS.security).toBe(276 * 60);
+    expect(ORDER.indexOf("security")).toBe(ORDER.indexOf("alerts") - 1);
+    const hourly = (Object.keys(TASKS) as TaskName[]).filter((t) => TASKS[t] === 3600 || TASKS[t] === 1800).map((t) => (OFFSETS[t]! / 60) % 60);
+    expect(hourly).not.toContain(36);
+    // Fix round 1: room for a Next.js check (3 s) and two repository scans (2 × 4 s), else deferred to the next run.
+    expect(taskFits("security", 20_000, 9_500)).toBe(false);
+    expect(taskFits("security", 20_000, 9_000)).toBe(true);
   });
   it("runs page views every 30 minutes at :27 and :57, in a minute no hourly task uses", () => {
     expect(TASKS.pageviews).toBe(1800);
@@ -110,11 +123,32 @@ describe("dueTasks: spreading the first runs and catch-ups", () => {
     const count = (t: string) => day2.filter((r) => r.due.includes(t as TaskName)).length;
     expect(Object.fromEntries(ORDER.map((t) => [t, count(t)]))).toEqual({
       checks: 1440, heartbeats: 1440, vercel: 1440, alerts: 1440, supabase: 288, neon: 288, firebase: 288, status: 288, logs: 288, pageviews: 48, digest: 288,
-      supabaseUsage: 24, firebaseUsage: 24, extraDbs: 24, cloudflare: 24, tls: 24, rdap: 24, domains: 4, eol: 1,
+      supabaseUsage: 24, firebaseUsage: 24, extraDbs: 24, cloudflare: 24, tls: 24, rdap: 24, domains: 4, eol: 1, security: 4,
     });
+    expect(day2.filter((r) => r.due.includes("security")).map((r) => r.at.toISOString().slice(11, 16))).toEqual(["04:36", "10:36", "16:36", "22:36"]);
     // eol at 03:46 UTC, domains at 01:28, 07:28, 13:28, 19:28 UTC.
     expect(day2.filter((r) => r.due.includes("eol")).map((r) => r.at.toISOString())).toEqual(["2026-10-12T03:46:01.000Z"]);
     expect(day2.filter((r) => r.due.includes("domains")).map((r) => r.at.toISOString().slice(11, 16))).toEqual(["01:28", "07:28", "13:28", "19:28"]);
+  });
+});
+
+// Watchbell 1.2.1: a new production deployment (marked by the Vercel task) starts the security task in the next run,
+// even outside its 6-hourly slot ("early": only the marked apps, and its slot is kept).
+describe("withAfterDeploy", () => {
+  const minute = ["heartbeats", "checks", "vercel", "alerts"] as TaskName[];
+  it("adds the security task before the alert rules when an app is marked and the task isn't due", () => {
+    expect(withAfterDeploy(minute, true)).toEqual({ due: ["heartbeats", "checks", "vercel", "security", "alerts"], early: true });
+    expect(withAfterDeploy(["checks", "alerts", "digest"], true).due).toEqual(["checks", "security", "alerts", "digest"]);
+    expect(withAfterDeploy(["checks"], true).due).toEqual(["checks", "security"]);
+  });
+  it("changes nothing without a mark, or when the 6-hourly run is due anyway (it checks the marked apps first)", () => {
+    expect(withAfterDeploy(minute, false)).toEqual({ due: minute, early: false });
+    const due = ["checks", "security", "alerts"] as TaskName[];
+    expect(withAfterDeploy(due, true)).toEqual({ due, early: false });
+  });
+  it("respects the sections: nothing while Hosting and DevOps are both off", () => {
+    expect(withAfterDeploy(minute, true, new Set(["hosting", "devops"] as const))).toEqual({ due: minute, early: false });
+    expect(withAfterDeploy(minute, true, new Set(["devops"] as const)).early).toBe(true);
   });
 });
 
@@ -182,6 +216,16 @@ describe("paused sections", () => {
   it("gives every task a section (or none for the collector's own work)", () => {
     expect(Object.keys(TASK_SECTION).sort()).toEqual([...ORDER].sort());
     expect(TASK_SECTION).toMatchObject({ checks: "hosting", heartbeats: "hosting", vercel: "hosting", cloudflare: "hosting", supabase: "database", extraDbs: "database", alerts: null, digest: null, status: null });
+  });
+
+  // Watchbell 1.2.1: the security task reads for two sections (the Next.js check: Hosting; the GitHub dependency scan:
+  // DevOps). It is paused only when both are off; with one off, the task skips that part (lib/data/security-task.ts).
+  it("pauses the security task only when Hosting and DevOps are both off", () => {
+    expect(TASK_ANY_SECTION).toEqual({ security: ["hosting", "devops"] });
+    expect(activeTasks(["security"], new Set(["hosting"] as const))).toEqual(["security"]);
+    expect(activeTasks(["security"], new Set(["devops"] as const))).toEqual(["security"]);
+    expect(activeTasks(["security"], new Set(["hosting", "devops"] as const))).toEqual([]);
+    expect(protectOnly("security", new Set(["hosting", "devops"] as const))).toBe(false);
   });
 
   it("leaves a paused section's tasks out of the run, and only theirs", () => {

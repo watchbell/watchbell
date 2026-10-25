@@ -1,6 +1,7 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, like, notLike, or } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { localSessions, localUsers, rateLimits } from "@/db/schema";
+import { BACKOFF_NAMES } from "@/lib/backoff";
 import { LIMITS, subjectKey } from "@/lib/rate-limit";
 import { hashPassword, newTemporaryPassword, temporaryPasswordExpiry } from "./password";
 
@@ -33,9 +34,13 @@ export async function resetLogin(conn: Db, rawEmail: string, now: Date = new Dat
     if (!user) return { ok: false, reason: "unknown-email" };
     await tx.delete(localSessions).where(eq(localSessions.userId, user.id));
     // A lockout someone else caused (failed sign-ins on this email) must not keep the person out of their recovery.
-    await tx
-      .delete(rateLimits)
-      .where(inArray(rateLimits.key, [subjectKey(LIMITS.passwordEmail, email), subjectKey(LIMITS.passwordChange, user.id)]));
+    // Behind a trusted proxy the back-off rows are keyed by email and network together (hashed), so they can't be
+    // picked out for one email (review m2): every password sign-in limit is cleared, for every account (the CLI says
+    // so). The known networks (password-known-net) and other users' password-change limits stay.
+    await tx.delete(rateLimits).where(or(
+      eq(rateLimits.key, subjectKey(LIMITS.passwordChange, user.id)),
+      and(like(rateLimits.key, "password-%"), notLike(rateLimits.key, `${BACKOFF_NAMES.knownNet}:%`), notLike(rateLimits.key, `${LIMITS.passwordChange.name}:%`)),
+    ));
     return { ok: true, email, password, expiresAt };
   });
 }

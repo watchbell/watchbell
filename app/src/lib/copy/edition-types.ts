@@ -162,3 +162,6 @@ export type WelcomeCopy = {
   free: [name: string, what: string][];
   alertsStep: { text: string; href: string | null };
 };
+
+// Uptime's subtitle, by runtime mode: cloud names its external schedulers, self-host (and demo) the built-in one.
+export type UptimeCopy = { sub: { cloud: string; selfhost: string } };

@@ -1,5 +1,7 @@
 # Install
 
+Bahasa Indonesia: [id/install.md](id/install.md)
+
 Watchbell runs on one machine: your laptop, a desktop that stays on, or a small server. It keeps its data in a local
 database folder (PGlite, Postgres compiled to WebAssembly), runs its own scheduler, and needs no cloud account to
 start.

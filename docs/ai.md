@@ -1,5 +1,7 @@
 # AI
 
+Bahasa Indonesia: [id/ai.md](id/ai.md)
+
 Watchbell has no AI of its own and no AI account behind it. Every AI feature uses **your own provider key**, so it
 costs nothing until you add one, and then it uses your provider's quota. Everything here is under **Manage › AI
 Gateway** (owner only).

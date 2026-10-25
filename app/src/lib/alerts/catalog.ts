@@ -6,7 +6,7 @@ export type RuleKey =
   | "MonitorDown" | "CollectorStale" | "HighLatency" | "DeploymentFailed" | "DatabasePaused" | "CertExpiringSoon" | "DomainExpiringSoon"
   | "StorageAlmostFull" | "NeonComputeHigh" | "FirestoreQuotaHigh" | "AutoPauseRisk" | "DnsProxiedToVercel" | "CredentialExpiring"
   | "ComputeHigh" | "DbQuotaHigh"
-  | "VulnerableDependency";
+  | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved";
 
 export type RuleDef = {
   key: RuleKey; severity: Severity; threshold: number | null; bounds: [number, number] | null; source: "own" | "api" | "test";
@@ -37,7 +37,13 @@ export const RULES: Record<RuleKey, RuleDef> = {
   CredentialExpiring: { key: "CredentialExpiring", severity: "warning", threshold: 14, bounds: [1, 60], source: "api", needs: null, sampled: false, condition: (n) => `Account credential expires in < ${num(n)} days` },
   // Stage 9 slice 5: the linked repository's lockfile has a high (warning) or critical / remote-code-execution advisory
   // (critical) in a non-dev package. One alert per app. A critical one raises the default warning to critical.
-  VulnerableDependency: { key: "VulnerableDependency", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "A dependency has a high or critical advisory (OSV.dev)" },
+  VulnerableDependency: { key: "VulnerableDependency", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "A dependency has a critical or high advisory, or a moderate one on a direct dependency (OSV.dev)" },
+  // Watchbell 1.2 (owner 23 Oct): the Security card's Next.js check (the version the live site runs, against OSV.dev) says
+  // "vulnerable". One alert per app. A critical advisory raises the default warning to critical.
+  FrameworkVulnerable: { key: "FrameworkVulnerable", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The app's Next.js version has a known advisory (OSV.dev)" },
+  // Watchbell 1.2.1: an HTTP monitor still checks a domain its app no longer has (the app moved to a new domain). Fires
+  // instead of MonitorDown for that monitor; the fix is Update monitor, never a redeploy.
+  MonitorDomainMoved: { key: "MonitorDomainMoved", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The monitor's domain is no longer one of the app's domains" },
 };
 
 export const RULE_KEYS = Object.keys(RULES) as RuleKey[];

@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { firestoreFailure, firestoreState, quotaDayStart } from "./firebase";
+import { FIRESTORE_SIZE_NOTE, FIRESTORE_USAGE_STORAGE, firestoreFailure, firestoreState, quotaDayStart } from "./firebase";
+
+// Review T4c Important 1: the size is never read (firestoreOps returns reads/writes/deletes only), so no wording may
+// promise it on Blaze.
+describe("Firestore size wording", () => {
+  it("says the size isn't read, without tying it to a plan", () => {
+    for (const t of [FIRESTORE_SIZE_NOTE, FIRESTORE_USAGE_STORAGE]) {
+      expect(t).toMatch(/isn't read|not read/);
+      expect(t).not.toMatch(/Blaze|billing/);
+    }
+  });
+});
 
 describe("firestoreState", () => {
   it("names each outcome of the health read", () => {

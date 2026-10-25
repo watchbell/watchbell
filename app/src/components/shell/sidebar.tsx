@@ -1,5 +1,6 @@
 "use client";
 
+import { BellMark } from "@/components/brand/bell-mark";
 import { IconChevronRight } from "@tabler/icons-react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -34,7 +35,7 @@ export function Sidebar({
       )}
     >
       <Link href="/" className="flex items-center gap-2.5 border-b border-line px-4 py-3.5 text-ink hover:no-underline">
-        <span className="grid size-7 place-items-center rounded-[7px] bg-brand font-mono text-xs font-semibold text-on-brand">WB</span>
+        <BellMark />
         <span>
           <b className="font-semibold">Watchbell</b>
           <small className="block text-xs text-ink-faint">Personal</small>

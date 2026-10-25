@@ -37,6 +37,12 @@ const SHAPES: Record<string, Shape[]> = {
     [/^(.+) returned no answer on (\d+) consecutive checks\.$/, (_, host, k) => `${host}: ${k} cek gagal berturut-turut (nggak ada jawaban).`],
     [/^(.+) returned (HTTP \d+) on (\d+) consecutive checks\.$/, (_, host, code, k) => `${host}: ${k} cek gagal berturut-turut (${code}).`],
     [/^(.+) answers again\.$/, (_, host) => `${host} udah jawab lagi.`],
+    [/^(\S+) moved to (\S+); MonitorDomainMoved takes over\.$/, (_, from, to) => `${from} pindah ke ${to}; MonitorDomainMoved yang ambil alih.`],
+  ],
+  // Watchbell 1.2.1: lib/alerts/evaluate.ts MonitorDomainMoved.
+  MonitorDomainMoved: [
+    [/^(\S+) is no longer a domain of (.+); production is on (\S+)\.$/, (_, from, app, to) => `${from} udah bukan domain ${app}; production sekarang di ${to}.`],
+    [/^The monitor checks (\S+), a domain of (.+)\.$/, (_, host, app) => `Monitor ngecek ${host}, domain ${app}.`],
   ],
   CollectorStale: [
     [/^The collector hasn't finished a run yet\.$/, () => "Collector belum pernah selesai jalan."],
@@ -89,9 +95,18 @@ const SHAPES: Record<string, Shape[]> = {
   // lib/deps/plan.ts alertMessage(): "2 vulnerable packages (1 critical, 1 high): next 15.0.0 → 15.0.5, +2 more." (may be
   // cut at 300 characters with "…").
   VulnerableDependency: [
+    [/^(.+) has no moderate, high or critical dependency advisories\.$/, (_, app) => `${app} nggak punya advisory dependency sedang, tinggi atau kritis.`],
+    // Before Watchbell 1.2.1 (Moderate didn't ring yet).
     [/^(.+) has no high or critical dependency advisories\.$/, (_, app) => `${app} nggak punya advisory dependency tinggi atau kritis.`],
     [/^(\d+) vulnerable packages? \(([^)]*)\): (.*)$/, (_, k, counts, rest) =>
       `${k} paket rentan (${counts.replace(/\b(critical|high|moderate|low|unknown)\b/g, (w) => DEP_SEVERITY[w])}): ${rest.replace(/ \(no fix yet\)/g, " (belum ada fix)").replace(/, \+(\d+) more\.$/, ", +$1 lagi.")}`],
+  ],
+  // lib/deps/framework.ts frameworkMessage(): "Next.js 16.3.8 has 2 known vulnerabilities (critical), fixed in 16.4.1."
+  FrameworkVulnerable: [
+    [/^(.+) runs Next\.js (.+) with no known advisories\.$/, (_, app, v) => `${app} pakai Next.js ${v} tanpa advisory yang diketahui.`],
+    // "…, fixed in 15.5.7 (one fix needs Next.js 16)." (review T1: the same-major version the update PR uses)
+    [/^Next\.js (.+) has (\d+) known vulnerabilit(?:y|ies) \((critical|high|moderate|low|unknown)\), (?:fixed in (\S+)(?: \((one fix needs|some fixes need) Next\.js (\d+)\))?|no fix yet)\.$/, (_, v, k, sev, fix, need, major) =>
+      `Next.js ${v} punya ${k} kerentanan yang diketahui (${DEP_SEVERITY[sev]}), ${fix ? `udah di-fix di ${fix}${need ? ` (${need === "one fix needs" ? "satu fix" : "sebagian fix"} butuh Next.js ${major})` : ""}` : "belum ada fix"}.`],
   ],
 };
 

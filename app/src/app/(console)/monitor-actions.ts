@@ -7,6 +7,7 @@ import { recordAction } from "@/lib/data/audit-db";
 import {
   checkMonitorNow, createHeartbeat, createMonitor, deleteMonitor, type Done, recordTestPing, rotateToken, setAppMonitorsPaused, setMonitorPaused, updateHeartbeat, updateMonitor,
 } from "@/lib/data/monitors-db";
+import { moveMonitorToDomain } from "@/lib/data/monitor-move-db";
 import { serverEnv } from "@/lib/env";
 import { pingUrl } from "@/lib/heartbeat";
 import { isUuid } from "@/lib/ids";
@@ -64,6 +65,14 @@ export async function editMonitor(id: string, form: MonitorForm): Promise<Result
     const p = parseMonitorForm(form);
     if (!p.ok) return { ok: false, error: "Check the highlighted fields.", fieldErrors: p.fieldErrors };
     return (await writeQuota(member)) ?? (await result(await updateMonitor(id, p.value), member));
+  }, deps, "local");
+}
+
+// Watchbell 1.2.1: Update monitor. The app moved to a new domain: the monitor checks the app's primary domain, same path.
+export async function updateMonitorDomain(id: string): Promise<Result> {
+  return runGuarded("operator", async (member): Promise<Result> => {
+    if (!isUuid(id)) return { ok: false, error: INVALID };
+    return (await writeQuota(member)) ?? (await result(await moveMonitorToDomain(id), member));
   }, deps, "local");
 }
 

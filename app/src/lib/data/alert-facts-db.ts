@@ -6,7 +6,9 @@ import type { Facts, LinkFact } from "@/lib/alerts/facts";
 import { dbFact, dnsFacts, domainFacts } from "@/lib/alerts/facts-map";
 import { lastCollectorRunAt, lastMinuteRunAt } from "@/lib/collector/last-run";
 import { computeFacts } from "@/lib/data/supabase-metrics-db";
+import { domainMove } from "@/lib/domain-move";
 import { loadAppDeps } from "@/lib/data/deps-db";
+import { frameworkFacts } from "@/lib/data/security-db";
 
 const TEN_MIN = 10 * 60_000;
 
@@ -22,9 +24,9 @@ export async function loadFacts(now: Date): Promise<Facts> {
   const watched = and(eq(resources.monitored, true), isNull(resources.goneAt));
   const [lastRun, lastAny, mons, apps, accs] = await Promise.all([
     lastMinuteRunAt(), lastCollectorRunAt(),
-    db().select({ m: monitors, appName: resources.name }).from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId))
+    db().select({ m: monitors, appName: resources.name, appMeta: resources.meta }).from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId))
       .where(and(watched, eq(monitors.paused, false), eq(monitors.ownerPaused, false))),
-    db().select({ id: resources.id, name: resources.name }).from(resources).where(and(watched, eq(resources.kind, "app"))),
+    db().select({ id: resources.id, name: resources.name, meta: resources.meta }).from(resources).where(and(watched, eq(resources.kind, "app"))),
     db().select({ id: accounts.id, provider: accounts.provider, label: accounts.label, expiresAt: accounts.expiresAt, status: accounts.status, lastError: accounts.lastError }).from(accounts),
   ]);
   const monIds = mons.map((r) => r.m.id);
@@ -50,10 +52,12 @@ export async function loadFacts(now: Date): Promise<Facts> {
   const compute = await computeFacts().catch(() => null);
   // Stage 9 slice 5: the scanned apps' open dependency advisories (null until the first scan: rule not evaluated).
   const deps = appIds.length ? await loadAppDeps(appIds).catch(() => null) : null;
+  // Watchbell 1.2: the apps' Next.js security checks (null until the first check: FrameworkVulnerable not evaluated).
+  const frameworks = appIds.length ? await frameworkFacts(appIds).catch(() => null) : null;
 
   return {
     now, lastMinuteRunAt: lastRun, lastAnyRunAt: lastAny,
-    monitors: mons.map(({ m, appName }) => {
+    monitors: mons.map(({ m, appName, appMeta }) => {
       const l = lat.find((x) => x.id === m.id);
       // A heartbeat (U3) is titled "{app} {name}" by the evaluator, which reads its state rather than a fail streak.
       const hb = m.kind === "heartbeat";
@@ -61,6 +65,8 @@ export async function loadFacts(now: Date): Promise<Facts> {
         id: m.id, appId: m.resourceId, appName, url: hb ? (m.name ?? "heartbeat") : m.url, kind: hb ? "heartbeat" as const : "http" as const,
         state: m.state, failStreak: m.failStreak, lastStatus: m.lastStatus, lastError: m.lastError,
         lastCheckedAt: m.lastCheckedAt, p95Last10: l?.p95 ?? null, checksLast10: l?.n ?? 0,
+        // 1.2.1: a host no watched project lists any more (lib/domain-move.ts) → MonitorDomainMoved, not MonitorDown.
+        movedTo: hb ? null : domainMove(m.url, { name: appName, meta: appMeta }, apps.filter((a) => a.id !== m.resourceId), { lastError: m.lastError })?.to ?? null,
       };
     }),
     apps: apps.map((a) => {
@@ -74,5 +80,6 @@ export async function loadFacts(now: Date): Promise<Facts> {
     links: linkRows,
     compute,
     deps: deps && deps.length ? deps : null,
+    frameworks: frameworks && frameworks.length ? frameworks : null,
   };
 }

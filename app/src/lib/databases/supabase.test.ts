@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoPauseRisk, freeSlots, lastTraffic, restoreDeadline, sizeDue, supabaseState, usesSlot } from "./supabase";
+import { autoPauseRisk, freeSlots, lastTraffic, restoreDeadline, servicesMessage, sizeDue, supabaseState, usesSlot } from "./supabase";
 
 const now = new Date("2026-10-12T12:00:00Z");
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
@@ -64,5 +64,26 @@ describe("sizeDue (D1: never keep a dormant project awake)", () => {
     expect(sizeDue({ status: "ACTIVE_HEALTHY", lastTrafficAt: daysAgo(2), sizeAt: null, now })).toBe(false);
     expect(sizeDue({ status: "ACTIVE_UNHEALTHY", lastTrafficAt: daysAgo(0.1), sizeAt: null, now })).toBe(false);
     expect(sizeDue({ status: "ACTIVE_HEALTHY", lastTrafficAt: null, sizeAt: null, now })).toBe(false);
+  });
+});
+
+// 1.2.1 (4c): Supabase → row menu → Check services, from the Management API's /health.
+describe("servicesMessage", () => {
+  it("all healthy", () => {
+    const list = ["auth", "rest", "realtime", "storage", "db"].map((name) => ({ name, status: "ACTIVE_HEALTHY", error: null }));
+    expect(servicesMessage(list)).toEqual({ ok: true, message: "All 5 services are healthy: Auth, REST, Realtime, Storage, Database." });
+  });
+
+  it("names the unhealthy ones first, with Supabase's error", () => {
+    const r = servicesMessage([
+      { name: "auth", status: "ACTIVE_HEALTHY", error: null },
+      { name: "storage", status: "UNHEALTHY", error: "timeout" },
+      { name: "realtime", status: "COMING_UP", error: null },
+    ]);
+    expect(r).toEqual({ ok: false, message: "Not healthy: Storage (timeout), Realtime (coming up). Healthy: Auth." });
+  });
+
+  it("an empty answer is not a clean bill of health", () => {
+    expect(servicesMessage([])).toEqual({ ok: false, message: "Supabase returned no service health for this project." });
   });
 });

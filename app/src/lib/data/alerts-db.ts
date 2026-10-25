@@ -1,7 +1,7 @@
 import "server-only";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { alertRules, alerts, providerStatus, resources, snapshots } from "@/db/schema";
+import { accounts, alertRules, alerts, providerStatus, resources, snapshots } from "@/db/schema";
 import { isRuleKey, RULE_KEYS, RULES, type RuleConfig, type RuleKey } from "@/lib/alerts/catalog";
 import { evaluate } from "@/lib/alerts/evaluate";
 import { type OpenAlert, type PlanContext, planAlerts } from "@/lib/alerts/lifecycle";
@@ -70,12 +70,18 @@ export async function evaluateAlerts(now: Date, opts: { only?: RuleKey[] } = {})
 }
 
 // The bell and the nav pill: what still needs attention (info alerts go to the digest only). The alerts of a paused
-// section (Manage › Sections) are left out until it is turned on again.
+// section (Manage › Sections) are left out until it is turned on again. The count per rule (and account provider, for
+// CredentialExpiring) is read beside the section state, not after it (1.2 review minor 4), and the paused ones are
+// dropped here with the same rule as activeAlertFilter (lib/sections.ts alertPaused).
 export async function openAlertCount(): Promise<number> {
-  const paused = await pausedSections();
-  const [r] = await db().select({ n: sql<number>`count(*)::int` }).from(alerts)
-    .where(and(isNull(alerts.resolvedAt), inArray(alerts.severity, ["critical", "warning"]), activeAlertFilter(paused)));
-  return r?.n ?? 0;
+  const [paused, rows] = await Promise.all([
+    pausedSections(),
+    db().select({ ruleKey: alerts.ruleKey, provider: accounts.provider, n: sql<number>`count(*)::int` }).from(alerts)
+      .leftJoin(accounts, eq(accounts.id, alerts.accountId))
+      .where(and(isNull(alerts.resolvedAt), inArray(alerts.severity, ["critical", "warning"])))
+      .groupBy(alerts.ruleKey, accounts.provider),
+  ]);
+  return rows.reduce((sum, r) => sum + (alertPaused(paused, r.ruleKey, r.provider) ? 0 : Number(r.n)), 0);
 }
 
 export type FiringRow = typeof alerts.$inferSelect & { resourceName: string | null; resourceKind: string | null };
@@ -89,6 +95,12 @@ export async function listFiring(paused: ReadonlySet<SectionId> = new Set()): Pr
     .leftJoin(resources, eq(resources.id, alerts.resourceId))
     .where(and(isNull(alerts.resolvedAt), activeAlertFilter(paused))).orderBy(SEV_ORDER, desc(alerts.startedAt)).limit(200);
   return rows.map(({ a, name, kind }) => ({ ...a, resourceName: name ?? null, resourceKind: kind ?? null }));
+}
+
+// The open alerts as the bell counts them: without a turned-off section's (Manage › Sections). The public API's
+// snapshot, MCP and the office read these (1.2 review minor 5).
+export async function listShownFiring(): Promise<FiringRow[]> {
+  return listFiring(await pausedSections());
 }
 
 // What resolved in the last 7 days, at most 50 (S7).

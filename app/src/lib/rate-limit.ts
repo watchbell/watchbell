@@ -40,7 +40,12 @@ export const LIMITS = {
   // Self-host password sign-in, failed attempts only. The IP is known only behind a trusted proxy
   // (src/lib/local-auth/client-ip.ts). Per email alone the bar is higher, so a stranger can't easily lock an owner out.
   // A success gives back its email and email+IP hits; the shared per-IP count is only ever added to (on failures).
-  passwordEmailIp: { name: "password-email-ip", max: 10, windowSeconds: 900 },
+  // 1.2.1 (review I1): the atomic guard next to the back-off (lib/backoff.ts): every attempt of one account subject
+  // (email + network, or email alone without a trusted proxy) counts up front, a success gives it back, so parallel
+  // guesses can't all pass a stale back-off read.
+  passwordBurst: { name: "password-burst", max: 10, windowSeconds: 900 },
+  // Review I2: the same atomic guard for one account across every network it hasn't signed in from.
+  passwordAccountBurst: { name: "password-account-burst", max: 60, windowSeconds: 900 },
   passwordEmail: { name: "password-email", max: 50, windowSeconds: 900 },
   passwordIp: { name: "password-ip", max: 30, windowSeconds: 900 },
   // Not a refusal: failures across all emails past this only log a warning (once per window).

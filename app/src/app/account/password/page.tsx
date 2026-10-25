@@ -1,3 +1,4 @@
+import { BellMark } from "@/components/brand/bell-mark";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -21,7 +22,7 @@ export default async function AccountPasswordPage() {
   return (
     <main className="grid min-h-screen place-items-center px-4 py-6">
       <div className="w-[400px] max-w-full rounded-xl border border-line bg-surface p-7">
-        <span className="mb-[18px] grid size-7 place-items-center rounded-[7px] bg-brand font-mono text-xs font-semibold text-on-brand">WB</span>
+        <BellMark className="mb-[18px]" />
         <h1 className="mb-1 text-xl">{forced ? "Choose your password" : "Change password"}</h1>
         <p className="mb-[18px] text-ink-soft">
           {forced ? "You signed in with a temporary password. Pick your own before you use the console." : `Signed in as ${member.email}.`}

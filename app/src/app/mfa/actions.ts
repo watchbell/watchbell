@@ -8,6 +8,7 @@ import { serverEnv } from "@/lib/env";
 import { acceptLocalCode, startLocalEnrollment } from "@/lib/local-auth/mfa";
 import { SESSION_COOKIE, setSessionCookie } from "@/lib/local-auth/session-cookie";
 import { replaceLocalSession } from "@/lib/local-auth/sessions-db";
+import { mfaFailed, mfaPassed, mfaWait } from "@/lib/mfa-backoff";
 import { isDemo, mode } from "@/lib/mode";
 import { LIMITS, minutesText } from "@/lib/rate-limit";
 import { limit } from "@/lib/rate-limit-db";
@@ -22,6 +23,12 @@ export type Enrollment = { ok: true; factorId: string; qr: string; secret: strin
 // The demo has no authenticator step (its session is already aal2); these never fall through to Supabase.
 const NO_MFA_IN_DEMO = "Two-step sign-in isn't used in the demo.";
 
+// Review m4 (cloud): only Supabase's "wrong code" counts as one; an expired challenge, a rate limit or a network error
+// is said plainly and never counts towards the back-off or the Telegram alert.
+const NOT_CHECKED: MfaFormState = { status: "error", message: "Couldn't check the code right now. Try again." };
+const cloudResult = (error: unknown): MfaFormState =>
+  !error ? { status: "done" } : (error as { code?: string }).code === "mfa_verification_failed" ? BAD_CODE : NOT_CHECKED;
+
 const BAD_CODE: MfaFormState = { status: "error", message: "That code didn't work. Check the 6 digits in your authenticator app and try again." };
 
 async function sessionOrSignIn() {
@@ -30,9 +37,20 @@ async function sessionOrSignIn() {
   return session;
 }
 
+// The 5-per-5-minutes window, then the back-off after wrong codes (1.2.1, audit L6: lib/mfa-backoff.ts).
 async function underLimit(userId: string): Promise<MfaFormState | null> {
+  const tooMany = (s: number): MfaFormState => ({ status: "error", message: `Too many codes tried. Try again in ${minutesText(s)}.` });
+  const wait = await mfaWait(userId);
+  if (wait > 0) return tooMany(wait);
   const d = await limit(LIMITS.mfaCode, userId);
-  return d.allowed ? null : { status: "error", message: `Too many codes tried. Try again in ${minutesText(d.retryAfter)}.` };
+  return d.allowed ? null : tooMany(d.retryAfter);
+}
+
+// A wrong code counts towards the back-off and the Telegram alert; a right one starts the user over.
+async function judged(userId: string, state: MfaFormState): Promise<MfaFormState> {
+  if (state.status === "done") await mfaPassed(userId);
+  else if (state === BAD_CODE) await mfaFailed(userId);
+  return state;
 }
 
 // Self-host: a code was accepted. The aal1 token ends and a new aal2 one replaces it in the cookie.
@@ -73,11 +91,10 @@ export async function confirmMfaEnrollment(_prev: MfaFormState, formData: FormDa
   if (!/^\d{6}$/.test(code) || !factorId) return BAD_CODE;
   const limited = await underLimit(session.userId);
   if (limited) return limited;
-  if (mode() === "selfhost") return finishLocal(session, "confirm", code);
+  if (mode() === "selfhost") return judged(session.userId, await finishLocal(session, "confirm", code));
   const supabase = await createClient();
   const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId, code });
-  if (error) return BAD_CODE;
-  return { status: "done" };
+  return judged(session.userId, cloudResult(error));
 }
 
 export async function verifyMfaCode(_prev: MfaFormState, formData: FormData): Promise<MfaFormState> {
@@ -89,13 +106,12 @@ export async function verifyMfaCode(_prev: MfaFormState, formData: FormData): Pr
   if (limited) return limited;
   if (mode() === "selfhost") {
     if ((await authProvider().hasVerifiedFactor(session.userId)) !== true) redirect("/mfa/setup");
-    return finishLocal(session, "verify", code);
+    return judged(session.userId, await finishLocal(session, "verify", code));
   }
   const supabase = await createClient();
   const { data } = await supabase.auth.mfa.listFactors();
   const factor = (data?.totp ?? []).find((f) => f.status === "verified");
   if (!factor) redirect("/mfa/setup");
   const { error } = await supabase.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
-  if (error) return BAD_CODE;
-  return { status: "done" };
+  return judged(session.userId, cloudResult(error));
 }

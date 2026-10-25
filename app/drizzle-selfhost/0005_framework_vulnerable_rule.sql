@@ -1,0 +1,2 @@
+-- Watchbell 1.2: the alert rule FrameworkVulnerable, the same seed row as the cloud migration 0056 (VulnerableDependency's channels, else the default).
+insert into ops.alert_rules (key, severity, threshold, channels) select 'FrameworkVulnerable', 'warning', null, coalesce((select channels from ops.alert_rules where key = 'VulnerableDependency'), '["telegram","email_digest"]'::jsonb) on conflict (key) do nothing;

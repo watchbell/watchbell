@@ -23,10 +23,11 @@ export type AutoPick = { ok: true; upgrades: Upgrade[] } | { ok: false; why: "se
 
 // The upgrades an automatic PR may carry: those whose advisories' worst severity is one the owner chose; every one of
 // them must stay in its major (from the installed version). Any that doesn't → the whole proposal waits for the owner.
-// Upgrades are direct packages only (upgradesFor leaves transitive ones out).
+// Upgrades are direct packages only (upgradesFor leaves transitive ones out). A moderate one counts only for a production
+// dependency (Watchbell 1.2.1, like the VulnerableDependency alert): a devDependency-only moderate fix waits for the owner.
 export function autoPick(upgrades: Upgrade[], installed: ReadonlyMap<string, string>, severities: readonly DepSeverity[]): AutoPick {
   if (!upgrades.length) return { ok: false, why: "nothing" };
-  const picked = upgrades.filter((u) => severities.includes(u.severity));
+  const picked = upgrades.filter((u) => severities.includes(u.severity) && !(u.severity === "moderate" && u.dev));
   if (!picked.length) return { ok: false, why: "severity" };
   for (const u of picked) {
     const from = installed.get(u.package);
@@ -58,9 +59,17 @@ export function prPackages(pr: OpenWatchpostPr): string[] | "all" {
   return m ? [m[1]] : "all";
 }
 
-// The open PR that already covers one of these packages, or null.
-export function overlappingPr(packages: string[], open: OpenWatchpostPr[]): OpenWatchpostPr | null {
+// The monorepo folder a Watchbell PR edits, from its title (bump.ts prTitle: "Watchbell: update next to 16.4.1 in
+// apps/web (security fix)", "Watchbell: update 2 vulnerable packages in apps/web (next, vite)"). Null: the repository
+// root, also for every PR opened before Watchbell 1.2.1 (their titles never name a folder).
+const TITLE_DIR = /^Watch(?:bell|post): update (?:\S+ (?:to|ke) \S+|\d+ vulnerable packages) in ((?:[A-Za-z0-9._-]+\/){0,3}[A-Za-z0-9._-]+) \(/;
+export const prDir = (title: string): string | null => TITLE_DIR.exec(title)?.[1] ?? null;
+
+// The open PR that already covers one of these packages, or null. dir (Watchbell 1.2.1, review T1): only PRs of the
+// same folder count, so two apps of one repository (apps/web, apps/admin) each get their own PR.
+export function overlappingPr(packages: string[], open: OpenWatchpostPr[], dir: string | null = null): OpenWatchpostPr | null {
   for (const pr of open) {
+    if (prDir(pr.title) !== dir) continue;
     const has = prPackages(pr);
     if (has === "all" || packages.some((p) => has.includes(p))) return pr;
   }

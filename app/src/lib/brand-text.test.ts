@@ -19,6 +19,7 @@ const KEPT: { re: RegExp; why: string; file?: string }[] = [
   { re: /^watchpost$/g, why: "the client id stored on AI notes and answers" },
   { re: /^WATCHPOST_$/g, why: "the legacy env prefix read as a fallback", file: "src/lib/brand-env.ts" },
   { re: /Watchpost console/g, why: "renames the console agent row stored before the rename", file: "src/private/ai/usage.ts" },
+  { re: /watchpost\[bot\]|watchpost-bot@users\.noreply\.github\.com|update package-lock\.json \(Watchpost\)/g, why: "the lockfile commit of the pre-rename workflow still running in owners' actions repos, accepted by the merge watcher", file: "src/lib/deps/pr-watch.ts" },
 ];
 
 function sourceFiles(dir: string): string[] {

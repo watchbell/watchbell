@@ -44,6 +44,74 @@ describe("chooseProductionDomain", () => {
   });
 });
 
+describe("chooseProductionDomain: the domain production is served on (1.2.1)", () => {
+  it("prefers the domain the others redirect to, then a production alias, over list order", () => {
+    // The shopfront move: the old domain redirects to the new one; a demo domain sits first in the list.
+    expect(chooseProductionDomain([
+      { name: "demo-finance.example.com", verified: true },
+      { name: "old-finance.example.net", verified: true, redirect: "finance.example.com" },
+      { name: "finance.example.com", verified: true },
+    ], "shopfront")).toBe("finance.example.com");
+    expect(chooseProductionDomain([
+      { name: "demo-finance.example.com", verified: true },
+      { name: "finance.example.com", verified: true },
+    ], "shopfront", ["shopfront.vercel.app", "finance.example.com"])).toBe("finance.example.com");
+  });
+  it("skips a custom-environment domain and, among equals, takes the shorter name", () => {
+    expect(chooseProductionDomain([
+      { name: "a.example.com", verified: true, customEnvironmentId: "env_demo" },
+      { name: "demo-web.example.com", verified: true },
+      { name: "web.example.com", verified: true },
+    ], "web")).toBe("web.example.com");
+  });
+});
+
+describe("listProjectDomains: every page or nothing (review T3 I1)", () => {
+  it("asks for 100 a page and follows pagination.next to the end", async () => {
+    const seen: string[] = [];
+    server.use(http.get("https://api.vercel.com/v9/projects/p1/domains", ({ request }) => {
+      const u = new URL(request.url);
+      seen.push(`${u.searchParams.get("limit")}:${u.searchParams.get("until") ?? "-"}`);
+      return u.searchParams.get("until")
+        ? HttpResponse.json({ domains: [{ name: "example.com", verified: true }], pagination: { next: null } })
+        : HttpResponse.json({ domains: [{ name: "pr-1.example.com", verified: true, gitBranch: "pr-1" }], pagination: { next: 1700 } });
+    }));
+    const r = await listProjectDomains(token, "team_a", "p1");
+    expect(seen).toEqual(["100:-", "100:1700"]);
+    expect(r.ok && r.data.map((d) => d.name)).toEqual(["pr-1.example.com", "example.com"]);
+  });
+  it("fails (so the stored domains are kept) when the list doesn't end within the page budget", async () => {
+    server.use(http.get("https://api.vercel.com/v9/projects/p1/domains", ({ request }) =>
+      HttpResponse.json({ domains: [{ name: `d${new URL(request.url).searchParams.get("until") ?? 0}.example.com` }], pagination: { next: Number(new URL(request.url).searchParams.get("until") ?? 0) + 1 } })));
+    expect(await listProjectDomains(token, "team_a", "p1")).toMatchObject({ ok: false, kind: "transient" });
+  });
+  it("fails when a later page fails, never returning the first page alone", async () => {
+    server.use(http.get("https://api.vercel.com/v9/projects/p1/domains", ({ request }) =>
+      new URL(request.url).searchParams.get("until")
+        ? new HttpResponse(null, { status: 500 })
+        : HttpResponse.json({ domains: [{ name: "a.example.com" }], pagination: { next: 5 } })));
+    expect(await listProjectDomains(token, "team_a", "p1")).toMatchObject({ ok: false });
+  });
+});
+
+describe("listProjectDomains", () => {
+  it("passes the custom environment through", async () => {
+    server.use(http.get("https://api.vercel.com/v9/projects/p1/domains", () => HttpResponse.json({ domains: [{ name: "x.example.com", verified: false, customEnvironmentId: "env_1" }] })));
+    expect(await listProjectDomains(token, "team_a", "p1")).toEqual({ ok: true, data: [{ name: "x.example.com", redirect: null, verified: false, gitBranch: null, customEnvironmentId: "env_1" }] });
+  });
+});
+
+describe("listProjects: production aliases (1.2.1)", () => {
+  it("reads targets.production.alias, empty when missing", async () => {
+    server.use(http.get("https://api.vercel.com/v10/projects", () => HttpResponse.json({
+      projects: [{ ...project("p1", "one", { id: "dpl_1", readyState: "READY" }), targets: { production: { id: "dpl_1", readyState: "READY", alias: ["one.example.com"] } } }, project("p2", "two")],
+      pagination: { next: null },
+    })));
+    const r = await listProjects(token, team);
+    expect(r.ok && r.data.map((p) => p.productionAliases)).toEqual([["one.example.com"], []]);
+  });
+});
+
 describe("listProjects", () => {
   it("follows pagination and passes teamId", async () => {
     const seen: string[] = [];
@@ -142,7 +210,7 @@ describe("discoverVercel", () => {
     expect(r).toEqual({
       ok: true,
       data: {
-        apps: [{ externalId: "p1", name: "one", meta: { teamId: "team_a", teamSlug: "acme-team", teamName: "Acme' projects", framework: "nextjs", productionBranch: "main", createdAt: new Date(1_760_000_000_000).toISOString(), repo: null, repoType: null, functionRegions: [] } }],
+        apps: [{ externalId: "p1", name: "one", meta: { teamId: "team_a", teamSlug: "acme-team", teamName: "Acme' projects", framework: "nextjs", productionBranch: "main", createdAt: new Date(1_760_000_000_000).toISOString(), repo: null, repoType: null, functionRegions: [], rootDirectory: null } }],
         skippedTeams: ["perpus"],
         skippedTeamIds: ["team_b"],
       },
@@ -183,8 +251,8 @@ describe("listProjectDomains and domainConfig", () => {
       return HttpResponse.json({ domains: [{ name: "app.example.com", verified: true }, { name: "www.example.com", redirect: "app.example.com", verified: true }] });
     }));
     expect(await listProjectDomains(token, "team_a", "prj_1")).toEqual({ ok: true, data: [
-      { name: "app.example.com", redirect: null, verified: true, gitBranch: null },
-      { name: "www.example.com", redirect: "app.example.com", verified: true, gitBranch: null },
+      { name: "app.example.com", redirect: null, verified: true, gitBranch: null, customEnvironmentId: null },
+      { name: "www.example.com", redirect: "app.example.com", verified: true, gitBranch: null, customEnvironmentId: null },
     ] });
   });
   it("reads misconfigured, configuredBy and the recommended IPs", async () => {
@@ -205,6 +273,31 @@ describe("listProjects extras (P2)", () => {
     const r = await listProjects(token, team);
     expect(r.ok && r.data[0].repo).toEqual({ type: "github", org: "acme", repo: "web" });
     expect(r.ok && r.data[0].functionRegions).toEqual(["sin1"]);
+  });
+
+  // Watchbell 1.2: the Root Directory (a monorepo's "apps/web") goes to resources.meta.rootDirectory through the sync.
+  it("reads the Root Directory, cleaned; the root and anything odd are null", async () => {
+    server.use(http.get("https://api.vercel.com/v10/projects", () => HttpResponse.json({ projects: [
+      { ...project("prj_1", "web"), rootDirectory: "apps/web" },
+      { ...project("prj_2", "site"), rootDirectory: "./apps/site/" },
+      { ...project("prj_3", "root"), rootDirectory: null },
+      { ...project("prj_4", "odd"), rootDirectory: "../x" },
+      { ...project("prj_5", "weird"), rootDirectory: 42 },
+    ] })));
+    const r = await listProjects(token, team);
+    expect(r.ok && r.data.map((p) => p.rootDirectory)).toEqual(["apps/web", "apps/site", null, null, null]);
+    // review T1 minor 4: a Root Directory that can't be used is kept as text, so it isn't silently the root
+    expect(r.ok && r.data.map((p) => p.rootDirectoryUnsupported)).toEqual([null, null, null, "../x", null]);
+  });
+
+  it("discovery puts an unusable Root Directory into meta.rootDirectoryUnsupported (only when there is one)", async () => {
+    server.use(
+      http.get("https://api.vercel.com/v2/teams", () => HttpResponse.json({ teams: [team] })),
+      http.get("https://api.vercel.com/v10/projects", () => HttpResponse.json({ projects: [{ ...project("p1", "web"), rootDirectory: "my app" }, { ...project("p2", "site"), rootDirectory: "apps/site" }] })),
+    );
+    const r = await discoverVercel(token);
+    expect(r.ok && r.data.apps.map((a) => [a.meta.rootDirectory, a.meta.rootDirectoryUnsupported])).toEqual([[null, "my app"], ["apps/site", undefined]]);
+    expect(r.ok && Object.hasOwn(r.data.apps[1].meta, "rootDirectoryUnsupported")).toBe(false);
   });
 });
 

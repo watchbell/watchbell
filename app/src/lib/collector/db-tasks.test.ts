@@ -28,7 +28,7 @@ vi.mock("@/lib/providers/google", async (orig) => ({
 }));
 vi.mock("@/lib/providers/firebase", async (orig) => ({ ...(await orig<typeof import("@/lib/providers/firebase")>()), firestorePing: h.firestorePing, authUserCount: h.authUserCount }));
 
-import { appsWithPausedDatabase, taskDatabasesDaily, taskFirebase, taskNeon, taskSupabase, taskSupabaseUsage } from "./db-tasks";
+import { appsWithPausedDatabase, firestoreCheckNow, taskDatabasesDaily, taskFirebase, taskNeon, taskSupabase, taskSupabaseUsage } from "./db-tasks";
 
 const now = new Date("2026-10-12T02:12:00Z");
 const acc = { id: "acc1", provider: "supabase", label: "utama", credentialCiphertext: "c", credentialIv: "i", status: "ok" };
@@ -247,6 +247,43 @@ describe("taskFirebase", () => {
     await taskFirebase(ctx());
     const s = payloadOf(f.writes.find((w) => w.table === snapshots)!.calls);
     expect(s).toMatchObject({ state: "err", data: { pingKind: "scope", pingReason: "PERMISSION_DENIED" } });
+  });
+});
+
+// 1.2.1 (4c): Firebase → row menu → Run health check runs taskFirebase's read for one project now.
+describe("firestoreCheckNow", () => {
+  const fsRes = { ...res("f1", "nova-wallet", "nova-wallet"), kind: "firestore" };
+  const fbAcc = { ...acc, provider: "firebase" };
+
+  it("pings the project and writes the state like the 5-minute task", async () => {
+    const f = fakeDb([[{ r: fsRes, s: snap("f1", "ok"), a: fbAcc }]]);
+    h.current = f;
+    h.googleAccessToken.mockResolvedValue({ ok: true, data: "tok" });
+    h.firestorePing.mockResolvedValue({ ok: true, data: { reachable: true, noDatabase: false, latencyMs: 84 } });
+    expect(await firestoreCheckNow("f1", now)).toEqual({ ok: true, state: "ok", label: "Reachable · 84 ms" });
+    expect(h.firestorePing).toHaveBeenCalledWith("tok", "nova-wallet", expect.anything());
+    const s = payloadOf(f.writes.find((w) => w.table === snapshots)!.calls);
+    expect(s).toMatchObject({ state: "ok", data: { latencyMs: 84, pingError: null } });
+  });
+
+  it("a failed read is stored with its reason and answered with the page's label", async () => {
+    const f = fakeDb([[{ r: fsRes, s: snap("f1", "ok"), a: fbAcc }]]);
+    h.current = f;
+    h.googleAccessToken.mockResolvedValue({ ok: true, data: "tok" });
+    h.firestorePing.mockResolvedValue({ ok: false, kind: "scope", status: 403, reason: "PERMISSION_DENIED", error: "denied" });
+    expect(await firestoreCheckNow("f1", now)).toEqual({ ok: true, state: "err", label: "No access: needs datastore.viewer" });
+    expect(payloadOf(f.writes.find((w) => w.table === snapshots)!.calls)).toMatchObject({ data: { pingReason: "PERMISSION_DENIED" } });
+  });
+
+  it("an unwatched project or a token failure writes nothing", async () => {
+    h.current = fakeDb([[]]);
+    expect(await firestoreCheckNow("f1", now)).toEqual({ ok: false, error: "This project isn't watched any more." });
+    const f = fakeDb([[{ r: fsRes, s: null, a: fbAcc }]]);
+    h.current = f;
+    h.googleAccessToken.mockResolvedValue({ ok: false, kind: "auth", error: "Google refused the service account." });
+    expect(await firestoreCheckNow("f1", now)).toEqual({ ok: false, error: "Google refused the service account." });
+    expect(h.firestorePing).not.toHaveBeenCalled();
+    expect(f.writes).toEqual([]);
   });
 });
 

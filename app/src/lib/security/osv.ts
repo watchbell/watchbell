@@ -107,7 +107,7 @@ export async function queryOsv(
     try {
       res = await (opts.fetch ?? fetch)(OSV_URL, {
         method: "POST",
-        headers: { "content-type": "application/json", "user-agent": "OpsConsole-Security/1.0 (+https://west-solutions.web.id)" },
+        headers: { "content-type": "application/json", "user-agent": "OpsConsole-Security/1.0 (+https://watchbell.west-solutions.web.id)" },
         body: JSON.stringify({ package: { name: "next", ecosystem: "npm" }, version, ...(token ? { page_token: token } : {}) }),
         redirect: "error",
         cache: "no-store",

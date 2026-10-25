@@ -1,5 +1,7 @@
 # Connect providers
 
+Bahasa Indonesia: [id/providers.md](id/providers.md)
+
 Watchbell reads your providers with tokens you create in each provider's dashboard. All of them are optional: connect
 only what you use.
 

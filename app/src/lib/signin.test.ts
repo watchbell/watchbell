@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { memoryLimiter } from "./memory-limit";
 import { requestSignIn } from "./signin";
 
 const siteUrl = "https://console.example.com";
@@ -8,6 +9,20 @@ const ok = async () => ({ error: null });
 const unavailable = { status: "error", message: "We couldn't send the email right now. Try again in a minute." };
 
 describe("requestSignIn", () => {
+  // Watchbell 1.2.1 (audit M2): the in-memory per-IP count runs before the first database write.
+  it("refuses past the in-memory per-IP limit without touching the database or Supabase", async () => {
+    const memory = memoryLimiter({ max: 2, windowMs: 900_000 });
+    const limit = vi.fn(async () => ({ allowed: true, retryAfter: 900 }));
+    const signInWithOtp = vi.fn().mockResolvedValue({ error: null });
+    for (let i = 0; i < 2; i++) expect((await requestSignIn("a@example.com", { ...base, limit, peek: limit, memory, signInWithOtp })).status).toBe("sent");
+    const calls = limit.mock.calls.length;
+    const r = await requestSignIn("a@example.com", { ...base, limit, peek: limit, memory, signInWithOtp });
+    expect(r).toMatchObject({ status: "error", message: expect.stringContaining("Too many sign-in attempts") });
+    expect(limit.mock.calls.length).toBe(calls);
+    expect(signInWithOtp).toHaveBeenCalledTimes(2);
+    expect((await requestSignIn("a@example.com", { ...base, ip: "5.6.7.8", limit, peek: limit, memory, signInWithOtp })).status).toBe("sent");
+  });
+
   it("rejects an invalid email before anything else", async () => {
     const signInWithOtp = vi.fn();
     expect(await requestSignIn("not-an-email", { ...base, signInWithOtp })).toEqual({ status: "error", message: "Enter a valid email address.", field: true });

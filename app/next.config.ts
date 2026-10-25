@@ -8,20 +8,25 @@ const ext = existsSync("./src/private/registry.ts") ? "./src/private/registry.ts
 // The console is never meant to sit inside another site's frame, and it serves nothing that should be sniffed.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
-  { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "same-origin" },
+  // Watchbell 1.2.1 (audit hardening list 3): no camera, microphone, location, payment or USB for any page, and a
+  // browsing context of its own (Google Drive's OAuth is a full-page redirect, never a popup).
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=()" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
 ];
 
 // Kantor Virtual (owner 14 Oct, private edition only): the office HTML is framed by the console itself (/office and the
 // top bar's drawer), so it alone may sit in a SAME-ORIGIN frame, and only when the file is there (the open source edition
 // has none and frames nothing). Listed after the catch-all: for the same key the last match wins (Next headers docs).
-// It holds no data; it fetches /api/office/state, which needs the owner's session.
-const OFFICE_FRAME_PATH = "/office/kantor-virtual.html";
+// It holds no data; it fetches /api/office/state, which needs the owner's session. The path is shared with the CSP
+// (src/lib/security/static-html.ts).
 const sameOriginFrame = [
   { key: "X-Frame-Options", value: "SAMEORIGIN" },
-  { key: "Content-Security-Policy", value: "frame-ancestors 'self'" },
 ];
+// Same path as OFFICE_FRAME_PATH in src/lib/security/static-html.ts (kept literal: the export tests load this file with plain
+// Node, which can't resolve an extensionless TypeScript import; src/lib/security/static-html-config.test.ts checks they match).
+const OFFICE_FRAME_PATH = "/office/kantor-virtual.html";
 const officeFrame = existsSync(`./public${OFFICE_FRAME_PATH}`) ? [{ source: OFFICE_FRAME_PATH, headers: sameOriginFrame }] : [];
 
 // The npm package (scripts/export/pack.mjs, from the public export only) builds with WATCHBELL_STANDALONE=1: Next's
@@ -34,6 +39,7 @@ const standalone = process.env.WATCHBELL_STANDALONE === "1";
 const appRoot = path.resolve(/*turbopackIgnore: true*/ ".");
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false, // 1.2.1: no X-Powered-By: Next.js
   ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: appRoot, experimental: { isrFlushToDisk: false } } : {}),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }, ...officeFrame];

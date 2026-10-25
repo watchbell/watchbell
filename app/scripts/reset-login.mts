@@ -115,6 +115,7 @@ async function main(): Promise<number> {
     console.log(`Temporary password (shown only now): ${r.password}`);
     console.log(`It works until ${r.expiresAt.toISOString()} (7 days). Their sessions were ended and their authenticator removed:`);
     console.log("at the next sign-in they choose a new password and, if their role needs one, set up an authenticator again.");
+    console.log("Every account's sign-in wait (failed passwords) was cleared too.");
     return 0;
   } catch (e) {
     // Never print e.message: drizzle appends the SQL and its bound params (email, password hash). The SQLSTATE alone is safe.

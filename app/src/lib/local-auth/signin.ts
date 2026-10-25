@@ -4,8 +4,11 @@ import { db } from "@/db/client";
 import { localUsers, members } from "@/db/schema";
 import { mfaStep } from "@/lib/mfa";
 import { safeNext } from "@/lib/paths";
+import { ACCOUNT_BACKOFF, BACKOFF_NAMES, failureAlertDue } from "@/lib/backoff";
+import { backoffClear, backoffFail, backoffWait, knownNetwork, rememberNetwork } from "@/lib/backoff-db";
+import { notifyAuthFailures } from "@/lib/data/auth-alert";
 import { type Limit, LIMITS } from "@/lib/rate-limit";
-import { hitLimit, limit, peekLimit, refundLimit } from "@/lib/rate-limit-db";
+import { hitLimit, refundLimit } from "@/lib/rate-limit-db";
 import { dummyVerify, TEMP_PASSWORD_EXPIRED, verifyPassword } from "./password";
 import { createLocalSession, revokeLocalSession } from "./sessions-db";
 
@@ -36,12 +39,16 @@ async function nextStop(user: { id: string; totpConfirmedAt: Date | null; mustCh
   return user.mustChangePassword ? "/account/password" : safeNext(next);
 }
 
-type Counted = { l: Limit; subject: string; windowStart: Date };
+// Watchbell 1.2.1 (audit L5): exponential back-off (lib/backoff.ts) instead of hard 15-minute windows. With a trusted
+// proxy the subjects are the email from this network and the network itself, so failures from another network never
+// lock the owner out; without one only the email is known (the docs recommend WATCHBELL_TRUSTED_PROXY_HOPS).
+// Review I2: per account across every network as well (ACCOUNT_BACKOFF: 50 free failures a day), skipped by a network
+// that signed in to that account before. Its day count is also the Telegram alert's count.
 
-// Called after a wrong password (or unknown email): the shared per-IP count, and a warning (once per window) when
+// Called after a wrong password (or unknown email): the per-network back-off, and a warning (once per window) when
 // failures across every email pile up, which on an install without a trusted proxy is the only sign of a spray.
 async function recordFailure(ip: string | null): Promise<void> {
-  if (ip) await limit(LIMITS.passwordIp, ip);
+  if (ip) await backoffFail(BACKOFF_NAMES.ip, ip);
   const all = await hitLimit(LIMITS.passwordFailuresAll, "all");
   if (all.count === LIMITS.passwordFailuresAll.max + 1) {
     console.warn("many failed sign-ins; consider a trusted proxy / firewall in front of Watchbell");
@@ -62,18 +69,24 @@ export async function passwordSignIn(input: {
   const password = input.password;
   if (!email || !password || email.length > MAX_EMAIL || password.length > MAX_PASSWORD) return { ok: false, message: WRONG };
 
-  // Every applicable limit is looked at first, so a refused attempt adds to none of them.
-  const subjects: [Limit, string][] = [[LIMITS.passwordEmail, email]];
-  if (input.ip) subjects.unshift([LIMITS.passwordEmailIp, `${email} ${input.ip}`]);
-  const peeked: [Limit, string][] = input.ip ? [[LIMITS.passwordIp, input.ip], ...subjects] : subjects;
-  for (const [l, subject] of peeked) {
-    const d = await peekLimit(l, subject);
-    if (!d.allowed) return lockedOut(d.retryAfter);
+  // Every back-off is looked at first, so a refused attempt adds to none of them.
+  const account: [string, string] = input.ip ? [BACKOFF_NAMES.accountIp, `${email} ${input.ip}`] : [BACKOFF_NAMES.account, email];
+  const checked: [string, string][] = input.ip ? [account, [BACKOFF_NAMES.ip, input.ip]] : [account];
+  for (const [name, subject] of checked) {
+    const wait = await backoffWait(name, subject);
+    if (wait > 0) return lockedOut(wait);
   }
-  // The email counters are bumped before the (slow) password check, so parallel guesses can't all pass a stale count;
-  // a success gives them back. A guess that loses that race is refused and gives back what it took.
-  const counted: Counted[] = [];
-  for (const [l, subject] of subjects) {
+  const stranger = input.ip !== null && !(await knownNetwork(email, input.ip));
+  if (stranger) {
+    const wait = await backoffWait(BACKOFF_NAMES.accountAll, email, new Date(), ACCOUNT_BACKOFF);
+    if (wait > 0) return lockedOut(wait);
+  }
+  // Review I1: the back-off reads above can be stale for parallel guesses, so every attempt is also counted atomically
+  // up front (the account subject, and the network), and refused past the cap; a success gives both back.
+  const counted: { l: Limit; subject: string; windowStart: Date }[] = [];
+  const caps: [Limit, string][] = input.ip ? [[LIMITS.passwordBurst, account[1]], [LIMITS.passwordIp, input.ip]] : [[LIMITS.passwordBurst, account[1]]];
+  if (stranger) caps.push([LIMITS.passwordAccountBurst, email]);
+  for (const [l, subject] of caps) {
     const d = await hitLimit(l, subject);
     counted.push({ l, subject, windowStart: d.windowStart });
     if (!d.allowed) {
@@ -81,6 +94,7 @@ export async function passwordSignIn(input: {
       return lockedOut(d.retryAfter);
     }
   }
+  await backoffFail(account[0], account[1]);
 
   const [user] = await db()
     .select({
@@ -97,14 +111,19 @@ export async function passwordSignIn(input: {
     // Same work as a real check, so an unknown email doesn't answer faster.
     await dummyVerify();
     await recordFailure(input.ip);
+    await backoffFail(BACKOFF_NAMES.accountAll, email); // unknown emails alike, so the wait doesn't reveal who exists
     return { ok: false, message: WRONG };
   }
   if (!(await verifyPassword(password, user.passwordHash))) {
     await recordFailure(input.ip);
+    const today = await backoffFail(BACKOFF_NAMES.accountAll, email);
+    if (failureAlertDue(today)) await notifyAuthFailures("password", email, today);
     return { ok: false, message: WRONG };
   }
 
+  await backoffClear(account[0], account[1]);
   for (const c of counted) await refundLimit(c.l, c.subject, c.windowStart);
+  if (input.ip) await rememberNetwork(email, input.ip);
   // An expired temporary password: said only after the right password, so it tells a guesser nothing.
   if (user.tempPasswordExpiresAt && user.tempPasswordExpiresAt.getTime() <= Date.now()) return { ok: false, message: TEMP_PASSWORD_EXPIRED };
   if (input.presentedToken) await revokeLocalSession(input.presentedToken);

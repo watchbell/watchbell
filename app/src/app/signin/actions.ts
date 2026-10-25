@@ -9,7 +9,7 @@ import { SESSION_COOKIE, setSessionCookie } from "@/lib/local-auth/session-cooki
 import { passwordSignIn, type PasswordSignInState } from "@/lib/local-auth/signin";
 import { isDemo, mode, usesLocalAuth } from "@/lib/mode";
 import { limit, peekLimit } from "@/lib/rate-limit-db";
-import { requestSignIn, type SignInState } from "@/lib/signin";
+import { requestSignIn, type SignInState, signinIpMemory } from "@/lib/signin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function sendSignInLink(_prev: SignInState, formData: FormData): Promise<SignInState> {
@@ -23,6 +23,7 @@ export async function sendSignInLink(_prev: SignInState, formData: FormData): Pr
     ip: clientIp(await headers()),
     limit,
     peek: peekLimit,
+    memory: signinIpMemory,
   });
 }
 

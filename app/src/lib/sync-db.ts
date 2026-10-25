@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accounts, monitors, resources } from "@/db/schema";
 import { credentialProblem, statusAfterTest } from "@/lib/accounts";
@@ -13,7 +13,8 @@ import { discoverNeon } from "@/lib/providers/neon";
 import { listProjects as listSupabaseProjects } from "@/lib/providers/supabase";
 import { discoverTurso } from "@/lib/providers/turso";
 import { listUpstashRedis, parseUpstashCred } from "@/lib/providers/upstash";
-import { discoverVercel, productionHost, tokenExpiry } from "@/lib/providers/vercel";
+import { appDomainsMeta } from "@/lib/domain-move";
+import { discoverVercel, listProjectDomains, type ProjectDomain, productionHost, tokenExpiry } from "@/lib/providers/vercel";
 import { activeCount, withMonitorLock } from "@/lib/data/monitors-db";
 import { MAX_MONITORS, overLimitText, resumeIds } from "@/lib/monitors";
 import { badgeOf, isFresh, planSync, type SyncBadge, type SyncKind, syncKind, syncRowSub } from "@/lib/sync";
@@ -63,7 +64,8 @@ export async function syncMonitors(accountId: string, token: string | null): Pro
   const fresh: { appId: string; url: string }[] = [];
   for (const app of watched.filter((a) => !existing.has(a.id))) {
     const teamId = String(app.meta.teamId ?? "");
-    const host = token ? await productionHost(token, teamId, app.externalId, app.name) : null;
+    const stored = typeof app.meta.primaryDomain === "string" && app.meta.primaryDomain ? app.meta.primaryDomain : null;
+    const host = stored ? { ok: true as const, data: stored } : token ? await productionHost(token, teamId, app.externalId, app.name) : null;
     fresh.push({ appId: app.id, url: `https://${host?.ok ? host.data : `${app.name}.vercel.app`}/` });
   }
   if (!resume.length && !fresh.length) return 0;
@@ -87,6 +89,31 @@ export async function syncMonitors(accountId: string, token: string | null): Pro
     }
     return over.size;
   });
+}
+
+// Watchbell 1.2.1: the project's domains and the one production is served on, merged into the app's meta (Sync and the
+// collector's 6-hourly `domains` task), so a monitor still on an old domain reads as moved, not down (lib/domain-move.ts).
+export async function saveAppDomains(appId: string, appName: string, meta: Record<string, unknown>, list: ProjectDomain[]): Promise<void> {
+  const aliases = Array.isArray(meta.productionAliases) ? meta.productionAliases.filter((x): x is string => typeof x === "string") : [];
+  const patch = appDomainsMeta(list, appName, aliases, meta); // meta: the old domains become pastDomains when they go
+  await db().update(resources).set({ meta: sql`${resources.meta} || ${JSON.stringify(patch)}::jsonb` }).where(eq(resources.id, appId));
+}
+
+// The stored domain keys survive a Sync's meta rewrite (discovery doesn't read domains); refreshAppDomains renews them.
+export function keepDomainKeys(old: Record<string, unknown> | undefined): Record<string, unknown> {
+  return old && typeof old.primaryDomain === "string" ? { domains: old.domains, primaryDomain: old.primaryDomain, pastDomains: old.pastDomains ?? [] } : {};
+}
+
+// Reads every watched app's domains after a Vercel Sync (outside the transaction: network calls). A failed read keeps
+// what was stored; the collector's next `domains` run tries again.
+export async function refreshAppDomains(accountId: string, token: string): Promise<void> {
+  const apps = await db().select({ id: resources.id, name: resources.name, externalId: resources.externalId, meta: resources.meta, monitored: resources.monitored, goneAt: resources.goneAt })
+    .from(resources).where(and(eq(resources.accountId, accountId), eq(resources.kind, "app")));
+  for (const app of apps.filter((a) => a.monitored && !a.goneAt)) {
+    const list = await listProjectDomains(token, String(app.meta.teamId ?? ""), app.externalId);
+    if (list.ok) await saveAppDomains(app.id, app.name, app.meta, list.data);
+    else if (list.kind === "auth" || list.status === 429) return;
+  }
 }
 
 // Zones are what a Cloudflare Sync lists. Like apps: matched on the zone id, new ones watched only with "Watch new
@@ -188,14 +215,15 @@ export async function syncAccount(accountId: string): Promise<{ ok: true; rows: 
 
   const existing = (await db().select({ id: resources.id, externalId: resources.externalId, monitored: resources.monitored, meta: resources.meta })
     .from(resources).where(and(eq(resources.accountId, accountId), eq(resources.kind, kind))))
-    .map((r) => ({ id: r.id, externalId: r.externalId, monitored: r.monitored, teamId: typeof r.meta.teamId === "string" ? r.meta.teamId : null }));
+    .map((r) => ({ id: r.id, externalId: r.externalId, monitored: r.monitored, teamId: typeof r.meta.teamId === "string" ? r.meta.teamId : null, meta: r.meta }));
+  const oldMeta = new Map(existing.map((r) => [r.id, r.meta]));
   const plan = planSync(existing, found.found, { watchNew: account.watchNew, keepTeamIds: found.skippedTeamIds });
   // A network call: keep it out of the transaction, which holds the only pooled connection.
   const expiry = account.provider === "vercel" ? await tokenExpiry(token) : null;
   const now = new Date();
   await db().transaction(async (tx) => {
     for (const u of plan.update) {
-      await tx.update(resources).set({ name: u.name, meta: u.meta, lastSeenAt: now, goneAt: null, updatedAt: now }).where(eq(resources.id, u.id));
+      await tx.update(resources).set({ name: u.name, meta: { ...u.meta, ...keepDomainKeys(oldMeta.get(u.id)) }, lastSeenAt: now, goneAt: null, updatedAt: now }).where(eq(resources.id, u.id));
     }
     if (plan.insert.length) {
       await tx.insert(resources).values(plan.insert.map((i) => ({ accountId, kind, externalId: i.externalId, name: i.name, meta: i.meta, monitored: i.monitored })))
@@ -207,6 +235,7 @@ export async function syncAccount(accountId: string): Promise<{ ok: true; rows: 
       ...(expiry?.ok ? { expiresAt: expiry.data } : {}),
     }).where(eq(accounts.id, accountId));
   });
+  if (account.provider === "vercel") await refreshAppDomains(accountId, token);
   const over = account.provider === "vercel" ? await syncMonitors(accountId, token) : 0;
   return { ok: true, rows: await listSyncRows(accountId, kind), skippedTeams: found.skippedTeams, overLimit: overLimitText(over) };
 }

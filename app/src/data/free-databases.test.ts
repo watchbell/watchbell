@@ -30,7 +30,7 @@ describe("free databases catalog (spec §5, mockup catalog())", () => {
   });
   it("marks the six providers the console monitors as built, Turso, Upstash and D1 included (spec §18 stage 8)", () => {
     expect(FREE_DBS.filter((d) => d.adapter === "built").map((d) => d.name)).toEqual(["Supabase", "Neon", "Firebase Firestore", "Turso", "Upstash Redis", "Cloudflare D1"]);
-    expect(FREE_DBS.filter((d) => d.adapter === "planned")).toEqual([]);
+    expect(FREE_DBS.every((d) => d.adapter === "built" || d.adapter === "none")).toBe(true);
     expect(FREE_DBS.filter(canMonitor)).toHaveLength(6);
   });
   it("names only providers it lists in the picks, and keeps the not-free list apart", () => {

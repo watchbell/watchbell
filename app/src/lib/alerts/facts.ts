@@ -1,11 +1,15 @@
 // What the rules look at, read once per evaluation (lib/data/alert-facts-db.ts). `dbs`, `domains` and `dns` are null
 // until stages 3 and 4 deliver them: the rules that need them are then not evaluated at all (S1).
 import type { ComputeFact } from "@/lib/databases/compute-metrics";
+import type { Finding, SecurityStatus } from "@/lib/security/types";
 import type { State } from "@/lib/status";
 
 export type MonitorFact = {
   id: string; appId: string; appName: string; url: string; kind: "http" | "heartbeat"; state: State; failStreak: number;
   lastStatus: number | null; lastError?: string | null; lastCheckedAt: Date | null; p95Last10: number | null; checksLast10: number;
+  // Watchbell 1.2.1: an HTTP monitor whose host is no longer a domain of its app (lib/domain-move.ts): the app's
+  // primary domain. MonitorDomainMoved fires and MonitorDown is suppressed while it is set.
+  movedTo?: string | null;
 };
 export type AppFact = { id: string; name: string; latestProduction: { state: string; sha: string | null; createdAt: Date } | null };
 export type AccountFact = { id: string; provider: string; label: string; expiresAt: Date | null; status: "ok" | "error"; lastError: string | null };
@@ -21,11 +25,15 @@ export type DomainFact = { id: string; name: string; tlsNotAfter: Date | null; e
 export type DnsFact = { id: string; resourceId: string; name: string; proxied: boolean; pointsToVercel: boolean };
 export type LinkFact = { appId: string; dbId: string };
 // Stage 9 slice 5: a scanned app's open dependency advisories (lib/data/deps-db.ts loadAppDeps). error: the last scan
-// failed, so its rows may be stale (the rule then holds: unknown).
+// failed, so its rows may be stale (the rule then holds: unknown). direct (Watchbell 1.2.1): package.json lists it, so a
+// moderate advisory rings too.
 export type DepFact = {
   appId: string; error: string | null;
-  vulns: { package: string; installedVersion: string; fixedVersion: string | null; severity: "critical" | "high" | "moderate" | "low" | "unknown"; summary: string; dev: boolean }[];
+  vulns: { package: string; installedVersion: string; fixedVersion: string | null; severity: "critical" | "high" | "moderate" | "low" | "unknown"; summary: string; dev: boolean; direct?: boolean }[];
 };
+
+// Watchbell 1.2: a watched app's last Next.js security check (ops.app_security, lib/data/security-db.ts frameworkFacts).
+export type FrameworkFact = { appId: string; version: string | null; status: SecurityStatus; findings: Finding[] };
 
 export type Facts = {
   now: Date; lastMinuteRunAt: Date | null;
@@ -36,4 +44,6 @@ export type Facts = {
   compute?: ComputeFact[] | null;
   // Absent or null: no app has been scanned yet, so VulnerableDependency isn't evaluated.
   deps?: DepFact[] | null;
+  // Absent or null: no app has a Next.js security check yet, so FrameworkVulnerable isn't evaluated.
+  frameworks?: FrameworkFact[] | null;
 };

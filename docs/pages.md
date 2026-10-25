@@ -1,5 +1,7 @@
 # Pages
 
+Bahasa Indonesia: [id/pages.md](id/pages.md)
+
 The left menu groups the pages into sections, the way the console does: Home, Hosting, Database, DevOps and Manage.
 Home, Hosting and Manage are there from the start. Database appears by itself when you connect Supabase, Neon,
 Firebase, Turso or Upstash, or once a database is watched; DevOps when you connect GitHub. An owner can turn Hosting,
@@ -44,12 +46,21 @@ isn't your app.
 **Applications.** Your Vercel projects that you chose to watch, with their database, domain and uptime. Open one for:
 
 - Details: status, response time, page views, 5xx responses, uptime, security advisories for its dependencies, and its
-  GitHub repository and Actions status when GitHub is connected.
+  GitHub repository and Actions status when GitHub is connected. The Security card shows the Next.js version the live
+  site runs and its known advisories, checked every 6 hours and right after each new production deployment; a vulnerable
+  version raises the FrameworkVulnerable alert and, with a linked repository, an update pull request proposal (see
+  [Auto-actions](auto-actions.md#which-alerts-propose-what)). In a monorepo, the Dependencies card scans the Vercel
+  project's Root Directory (for example `apps/web/package-lock.json`), and Scan now scans that app's folder. "None
+  known" only appears after a successful scan; otherwise the card says **Not scanned** and why (no linked repository,
+  DevOps is off, no lockfile or package.json, or the scan failed).
 - Metrics, Deployments and Logs tabs for that app.
-- Actions for operators and owners: redeploy, roll back, check now.
+- Actions for operators and owners: redeploy, roll back, check now. The row menu of the Applications list has Redeploy
+  (the same confirm) and View logs (the app's Logs tab) too.
 
 **Deployments.** Recent deployments of the watched apps, read from the Vercel API. Vercel's free Hobby plan can only
-roll back to the previous production deployment.
+roll back to the previous production deployment. **View build logs** (operators and owners: a button on a building or
+failed deployment, in the row menu of a ready one) opens the newest build's log in a side drawer, read from Vercel when
+you open it (the last 2,000 lines, not stored), with error lines highlighted and a "Jump to first error" link.
 
 **Domains.** Every domain of a watched app: DNS from Cloudflare, configuration from Vercel, registration expiry from
 RDAP, and certificate expiry from Watchbell's own TLS check. Warns when a domain is proxied through Cloudflare in front
@@ -62,7 +73,12 @@ deleted from here.
 **Uptime.** HTTP checks (every minute) and heartbeats. A heartbeat waits for your own job to call its ping address,
 `<SITE_URL>/api/ping/<token>` (add `/start` or `/fail` to report those states), and alerts when a ping is late. Also
 maintenance windows (one-off or weekly): checks keep running inside a window but open no alerts and don't count
-against uptime.
+against uptime. When an app moves to a new domain, a check still on the old one reads **Domain changed: old → new**
+(here and on the app page) instead of Down, and Owners and Operators get an **Update monitor** button that points the
+check at the new domain and keeps its path. It does so only when the old domain was listed on the Vercel project
+before, or Vercel itself answers that no deployment serves it; a check on another server stays a normal Down.
+Watchbell learns an app's domains every 6 hours, or right away when you press Sync; the one production is served on is
+the app's Domain.
 
 **Logs** (not for viewers). Two tabs: the last hour of request logs from Vercel, and stored errors. Vercel's free plan
 keeps only a short history, so the collector copies warnings and errors every 5 minutes and keeps them for 7 days.
@@ -72,14 +88,17 @@ keeps only a short history, so the collector copies warnings and errors every 5 
 **Supabase.** Each project's status, region and Postgres version from the Management API, which doesn't touch your
 database. Database size is read once a day, and only while the project is already active. Per project (owner only):
 **Keep active** warns from day 5 without API traffic and sends one keep-alive query a day so a free project isn't
-paused; **Auto-restore** brings a paused project back when its account has a free slot.
+paused; **Auto-restore** brings a paused project back when its account has a free slot. **Check services** in the row
+menu reads the project's service health (Auth, REST, Realtime, Storage, Database) from the Management API at once.
 
 **Neon.** Compute state, CU-hours, storage and transfer from the Neon API. Reading them doesn't wake the compute and
 Watchbell never connects to the database. Operators can wake a suspended compute.
 
-**Firebase.** Firestore usage of each project. Firestore has no running or stopped state, so every 5 minutes the
-collector reads one health document (288 of the 50,000 free daily reads). The stored data size isn't readable on the
-free Spark plan.
+**Firebase.** Each project's Firestore health and Auth users. Firestore has no running or stopped state, so every 5
+minutes the collector reads one health document (288 of the 50,000 free daily reads); **Run health check** in the row
+menu does that read at once. Reads, writes and deletes today come from Cloud Monitoring, which needs billing (Blaze):
+on the free Spark plan the row says they aren't available; on Blaze they are read every hour. The stored data size
+isn't read on any plan; the Open usage page link shows it (and the day's usage) in the Firebase console.
 
 **Turso.** Databases, rows read and written and storage this month from the Turso Platform API, read hourly. The free
 limits are per organization, so the meters show the organization's total.
@@ -121,8 +140,9 @@ everything in an account and you tick what to watch. A banner at the top lists c
 
 - Firing: what is wrong now, and what resolved in the last 7 days. Operators can silence an alert for a while.
 - Rules: the built-in rules (an app down or slow, a failed deployment, a paused or nearly full database, a domain or
-  certificate about to expire, an expiring token, a vulnerable dependency, the collector not running, and more), with
-  their thresholds. Rules run after every collector run, and unknown data never opens or resolves an alert.
+  certificate about to expire, an expiring token, a vulnerable dependency or Next.js version, the collector not running,
+  and more), with their thresholds. Rules run after every collector run, and unknown data never opens or resolves an
+  alert.
 - Notifications: where alerts go. See [Notifications](notifications.md).
 
 **Auto-actions** (owner only). Fixes Watchbell proposes for firing alerts, waiting for your approval, and a history of
@@ -133,7 +153,7 @@ holds. Home and Manage are always on. Database or DevOps with nothing connected 
 the line says what to connect. Turning Hosting, Database or DevOps off (after a confirm step; for Hosting it says that
 all uptime checks and heartbeats stop) hides it from the menu and pauses its collector tasks, its alert rules, its
 notifications and new auto-action proposals. Its data is kept, its pages still open from a link, and its firing
-alerts stay as they are (left out of the bell and the Alerts page) until you turn it on again; notices that waited go
+alerts stay as they are (left out of the bell, the Alerts page and the API) until you turn it on again; notices that waited go
 out on the next run. Keep active and Auto-restore keep running while Database is off, so a kept Supabase project is
 never paused because of the switch.
 
@@ -141,13 +161,15 @@ never paused because of the switch.
 
 - Collector: how often each collector task runs, and the database keep-alive notes.
 - Free tier budget: the free plan limits the meters compare against. Correct them here when a provider changes its
-  free plan.
+  free plan. Supabase slots, Neon CU-hours, QStash and cron-job.org show what Watchbell reads; Vercel's monthly usage
+  and the Web Analytics event count aren't read, so those rows say "not read" (see Usage in the Vercel dashboard).
 - Users: members and their roles (see [Add more people](first-run.md#add-more-people)).
 - Retention: how long Watchbell keeps its own history (events, checks, rollups). Nothing is ever deleted at a
   provider.
-- Status page: a public page at `/s/<address>` with the names you choose, the current state, 90-day bars and
-  maintenance notices, plus uptime badges for READMEs. It never shows addresses, error text or provider names. Off
-  until you publish it.
+- Status page: a public page at `/s/<address>` with one line at the top that says whether everything is running (or
+  which service has a problem), the names you choose, the current state, 90-day bars and maintenance notices. The
+  uptime badges for READMEs are listed here, not on the public page. It never shows addresses, error text or provider
+  names. Off until you publish it; an unknown or unpublished address shows a plain "No status page here".
 - Lockfile: an optional GitHub Actions workflow in a small repository of your own that builds `package-lock.json`
   for update pull requests (see [Auto-actions](auto-actions.md#automatic-security-fixes)).
 - Auto-actions: which safe actions may run without asking, auto-rollback, and automatic security fixes.

@@ -5,7 +5,7 @@ import { hashKey } from "@/private/keys/key";
 const h = vi.hoisted(() => ({ authLookup: vi.fn() }));
 vi.mock("@/private/keys/keys-db", () => ({ authLookup: h.authLookup }));
 
-import { authenticateApiKey } from "./api-key";
+import { authenticateApiKey, KEY_FAILURES_PER_IP, keyFailures } from "./api-key";
 
 const KEY = `wp_${"k".repeat(40)}`;
 const req = (headers: Record<string, string> = { authorization: `Bearer ${KEY}` }) => new Request("https://ops.example.com/api/v1/me", { headers });
@@ -17,6 +17,42 @@ const body = async (r: Response) => (await r.json()) as { error: { type: string;
 beforeEach(() => {
   h.authLookup.mockReset();
   h.authLookup.mockResolvedValue(row());
+  keyFailures.reset();
+});
+
+// Watchbell 1.2.1 (audit M2): failed keys per IP, in memory, before the database.
+describe("authenticateApiKey: failed keys per IP", () => {
+  const from = (ip: string, authorization = `Bearer ${KEY}`) => new Request("https://ops.example.com/api/v1/me", { headers: { authorization, "x-real-ip": ip } });
+  it("past the limit an IP gets 429 with Retry-After and no lookup; other IPs and known keys from them go on", async () => {
+    h.authLookup.mockResolvedValue(null);
+    for (let i = 0; i < KEY_FAILURES_PER_IP.max; i++) {
+      const r = await authenticateApiKey(from("203.0.113.9", `Bearer wb_${String(i).padStart(40, "x")}`), "any");
+      if (!r.ok) expect(r.response.status).toBe(401);
+    }
+    const calls = h.authLookup.mock.calls.length;
+    const r = await authenticateApiKey(from("203.0.113.9"), "any");
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.response.status).toBe(429);
+      expect(Number(r.response.headers.get("retry-after"))).toBeGreaterThan(0);
+    }
+    expect(h.authLookup.mock.calls.length).toBe(calls);
+    h.authLookup.mockResolvedValue(row());
+    expect((await authenticateApiKey(from("198.51.100.7"), "any")).ok).toBe(true);
+  });
+
+  // Review m1: a client retrying one revoked key counts once and doesn't reach the database again for a minute.
+  it("the same failing key counts once per IP and is answered without a lookup; valid keys from that IP go on", async () => {
+    h.authLookup.mockResolvedValue(null);
+    for (let i = 0; i < KEY_FAILURES_PER_IP.max * 2; i++) expect((await authenticateApiKey(from("203.0.113.9"), "any")).ok).toBe(false);
+    expect(h.authLookup).toHaveBeenCalledTimes(1);
+    h.authLookup.mockResolvedValue(row());
+    expect((await authenticateApiKey(from("203.0.113.9", `Bearer wb_${"v".repeat(40)}`), "any")).ok).toBe(true);
+  });
+
+  it("a known key is never counted as a failure", async () => {
+    for (let i = 0; i < KEY_FAILURES_PER_IP.max + 5; i++) expect((await authenticateApiKey(from("203.0.113.9"), "any")).ok).toBe(true);
+  });
 });
 
 describe("authenticateApiKey", () => {

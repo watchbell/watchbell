@@ -1,7 +1,7 @@
 import type {
   EnvCopy,
   ActionsCopy, AiCopy, AskCopy, AssistCopy, BannerCopy, ConnectCopy, DepsCopy, DevOnlyCopy, KeysCopy, McpCopy, OpenApiCopy,
-  PlaygroundCopy, ProvidersCopy, SnippetsCopy, UsageCopy, WelcomeCopy, WhyCopy,
+  PlaygroundCopy, ProvidersCopy, SnippetsCopy, UptimeCopy, UsageCopy, WelcomeCopy, WhyCopy,
 } from "./edition-types";
 
 // The open source edition's wording (exported as edition.ts): the same names and shapes as the private edition's
@@ -193,4 +193,11 @@ export const WELCOME_COPY: WelcomeCopy = {
     ["Telegram", "Alerts (optional)"], ["Google Drive", "Monthly backups (optional)"],
   ],
   alertsStep: { text: "Set up alerts", href: "/alerts" },
+};
+
+export const UPTIME_COPY: UptimeCopy = {
+  sub: {
+    cloud: "HTTP checks run every minute; heartbeats wait for your own jobs to ping. cron-job.org calls the collector, and Upstash QStash checks every 5 minutes that it is still running.",
+    selfhost: "HTTP checks run every minute; heartbeats wait for your own jobs to ping. Watchbell's built-in scheduler runs them while Watchbell is running.",
+  },
 };

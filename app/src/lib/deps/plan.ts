@@ -153,20 +153,24 @@ export function countBySeverity(vulns: { severity: DepSeverity }[]): Counts {
 
 export const isRce = (summary: string): boolean => /\bRCE\b|remote code execution/i.test(summary);
 
-// critical: a critical advisory, or one whose summary reads as remote code execution; warning: a high one; else none.
-// Development-only packages (npm's lockfile marks them) don't ring: they never reach production.
-export function alertLevel(vulns: { severity: DepSeverity; summary: string; dev: boolean }[]): "critical" | "warning" | null {
-  const live = vulns.filter((v) => !v.dev);
+// critical: a critical advisory, or one whose summary reads as remote code execution; warning: a high one, or (Watchbell
+// 1.2.1, owner 1a: Moderate is treated like High) a moderate one on a direct dependency; else none. Low and unknown are
+// shown on the app page only. Development-only packages (npm's lockfile marks them) don't ring: they never reach
+// production.
+type Ringable = { severity: DepSeverity; summary: string; dev: boolean; direct?: boolean };
+const rings = (v: Ringable): boolean => !v.dev && (rank(v.severity) <= rank("high") || isRce(v.summary) || (v.severity === "moderate" && v.direct === true));
+export function alertLevel(vulns: Ringable[]): "critical" | "warning" | null {
+  const live = vulns.filter(rings);
   if (live.some((v) => v.severity === "critical" || isRce(v.summary))) return "critical";
-  return live.some((v) => v.severity === "high") ? "warning" : null;
+  return live.length ? "warning" : null;
 }
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 // "2 vulnerable packages (1 critical, 1 high): next 15.0.0 → 15.0.5, lodash 4.17.20 → 4.17.21." The ringing ones
-// (not dev, high or worse) first, worst first; at most 4 named; ≤ 300 characters.
-export function alertMessage(vulns: { package: string; installedVersion: string; fixedVersion: string | null; severity: DepSeverity; summary: string; dev: boolean }[]): string {
-  const ringing = vulns.filter((v) => !v.dev && (rank(v.severity) <= rank("high") || isRce(v.summary)));
+// (not dev; high or worse, or moderate on a direct package) first, worst first; at most 4 named; ≤ 300 characters.
+export function alertMessage(vulns: (Ringable & { package: string; installedVersion: string; fixedVersion: string | null })[]): string {
+  const ringing = vulns.filter(rings);
   const sorted = [...ringing].sort((a, b) => rank(a.severity) - rank(b.severity) || (a.package < b.package ? -1 : 1));
   const names: string[] = [];
   for (const v of sorted) {
@@ -182,11 +186,17 @@ export function alertMessage(vulns: { package: string; installedVersion: string;
 
 // The upgrades that fix an app's open advisories, per direct package: the highest fixed version any of its advisories
 // names (above the installed one). Packages without a fix, or only reached through another package, are left out.
-export type Upgrade = { package: string; to: string; vulnIds: string[]; cves: string[]; severity: DepSeverity };
-export function upgradesFor(vulns: Pick<OpenVuln, "package" | "installedVersion" | "fixedVersion" | "vulnId" | "aliases" | "severity" | "direct">[]): Upgrade[] {
+// companionOf (Watchbell 1.2.1): a package updated only to stay in step with another one (eslint-config-next with next);
+// it has no advisory of its own, and the PR lists it as "updated to match".
+// dev (fix round 1): every advisory row of the package is a devDependency (absent: at least one production copy, or
+// unknown), so an automatic PR leaves a moderate one out (auto-policy.ts autoPick).
+export type Upgrade = { package: string; to: string; vulnIds: string[]; cves: string[]; severity: DepSeverity; companionOf?: string; dev?: true };
+export function upgradesFor(vulns: (Pick<OpenVuln, "package" | "installedVersion" | "fixedVersion" | "vulnId" | "aliases" | "severity" | "direct"> & { dev?: boolean })[]): Upgrade[] {
   const by = new Map<string, Upgrade>();
+  const prod = new Set<string>();
   for (const v of vulns) {
     if (!v.direct || !v.fixedVersion || compareVersions(v.fixedVersion, v.installedVersion) <= 0) continue;
+    if (v.dev !== true) prod.add(v.package);
     const u = by.get(v.package) ?? { package: v.package, to: v.fixedVersion, vulnIds: [], cves: [], severity: v.severity };
     if (compareVersions(v.fixedVersion, u.to) > 0) u.to = v.fixedVersion;
     if (!u.vulnIds.includes(v.vulnId)) u.vulnIds.push(v.vulnId);
@@ -194,5 +204,6 @@ export function upgradesFor(vulns: Pick<OpenVuln, "package" | "installedVersion"
     if (rank(v.severity) < rank(u.severity)) u.severity = v.severity;
     by.set(v.package, u);
   }
+  for (const u of by.values()) if (!prod.has(u.package)) u.dev = true;
   return [...by.values()].sort((a, b) => rank(a.severity) - rank(b.severity) || (a.package < b.package ? -1 : 1));
 }

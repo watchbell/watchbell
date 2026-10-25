@@ -136,7 +136,7 @@ export function resetsState(before: MonitorValues, after: MonitorValues): boolea
 // The saved error of a check that got an answer but failed it (a missing keyword, a wrong JSON value, a body that didn't
 // arrive). null for the plain cases the status already explains ("HTTP 502", no answer), so those keep their wording.
 export function bodyFailure(m: { lastStatus: number | null; lastError?: string | null }): string | null {
-  return m.lastStatus !== null && m.lastError && !/^HTTP \d{3}$/.test(m.lastError) ? m.lastError : null;
+  return m.lastStatus !== null && m.lastError && !/^HTTP \d{3}( · DEPLOYMENT_NOT_FOUND)?$/.test(m.lastError) ? m.lastError : null;
 }
 
 // Check now → toast. (A monitor checked in the last 50 s isn't fetched at all: lastResultMessage answers instead.)

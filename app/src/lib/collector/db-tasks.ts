@@ -238,6 +238,30 @@ export async function taskNeon(ctx: Ctx): Promise<void> {
   }
 }
 
+// pingKind and pingReason let the page name the failure (needs datastore.viewer, API off, quota) from one rule.
+const pingPatch = (p: Awaited<ReturnType<typeof firestorePing>>): Record<string, unknown> =>
+  p.ok ? { latencyMs: p.data.latencyMs, pingError: null, pingReason: null, pingKind: null } : { pingError: p.error, pingReason: p.reason ?? null, pingKind: p.kind };
+
+// 1.2.1 (4c): Firebase → row menu → Run health check: taskFirebase's read for one watched project, now. It writes the
+// state and its event the same way, so the Health column and alerts follow.
+export async function firestoreCheckNow(resourceId: string, now = new Date()): Promise<{ ok: true; state: State; label: string } | { ok: false; error: string }> {
+  const [row] = await db().select({ r: resources, s: snapshots, a: accounts }).from(resources)
+    .innerJoin(accounts, eq(accounts.id, resources.accountId))
+    .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
+    .where(and(eq(resources.id, resourceId), eq(resources.kind, "firestore"), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .limit(1);
+  if (!row) return { ok: false, error: "This project isn't watched any more." };
+  const credential = openOrNull({ ciphertext: row.a.credentialCiphertext, iv: row.a.credentialIv }, serverEnv().OPS_ENCRYPTION_KEY);
+  const sa = credential ? parseServiceAccount(credential) : null;
+  if (!sa) return { ok: false, error: "The service account can't be read. Reconnect it in Connections." };
+  const token = await googleAccessToken(sa, { timeoutMs: CALL_MS });
+  if (!token.ok) return { ok: false, error: token.error };
+  const p = await firestorePing(token.data, row.r.externalId, { timeoutMs: CALL_MS });
+  const st = firestoreState(p);
+  await saveEvents([await writeState({ r: row.r, s: row.s }, { ...st, patch: pingPatch(p) }, now)]);
+  return { ok: true, ...st };
+}
+
 // Every 5 min: one Firestore document read per project (288 a day of the 50k).
 export async function taskFirebase(ctx: Ctx): Promise<void> {
   for (const { acc, credential } of await accountsOf("firebase")) {
@@ -255,9 +279,7 @@ export async function taskFirebase(ctx: Ctx): Promise<void> {
       if (!p) continue; // not started: the run ran out of time
       const st = firestoreState(p);
       if (st.state === "unknown" && !p.ok) ctx.errors.push(`firebase/${it.r.name}: ${p.error}`);
-      // pingKind and pingReason let the page name the failure (needs datastore.viewer, API off, quota) from one rule.
-      const patch = p.ok ? { latencyMs: p.data.latencyMs, pingError: null, pingReason: null, pingKind: null } : { pingError: p.error, pingReason: p.reason ?? null, pingKind: p.kind };
-      evs.push(await writeState(it, { ...st, patch }, ctx.now));
+      evs.push(await writeState(it, { ...st, patch: pingPatch(p) }, ctx.now));
     }
     await saveEvents(evs);
     finish(skipped);

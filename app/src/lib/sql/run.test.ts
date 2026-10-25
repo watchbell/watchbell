@@ -162,6 +162,13 @@ describe("verifyReadOnly (the save test)", () => {
     expect(f.close).toHaveBeenCalled();
   });
 
+  // Watchbell 1.2.1 (audit L1): reading server files, running server programs and signalling backends count too.
+  it("checks the server-file, server-program and signal roles", () => {
+    for (const r of ["pg_read_server_files", "pg_write_server_files", "pg_execute_server_program", "pg_signal_backend", "pg_write_all_data"]) {
+      expect(PRIVILEGE_SQL).toContain(`pg_has_role('${r}', 'MEMBER')`);
+    }
+  });
+
   it("refuses when CREATE TEMP TABLE works inside BEGIN READ ONLY", async () => {
     const r = await verifyReadOnly(DSN, { connect: driver({ probe: "works" }).connect });
     expect(r).toMatchObject({ ok: false, canWrite: true, error: expect.stringContaining(CAN_WRITE) });

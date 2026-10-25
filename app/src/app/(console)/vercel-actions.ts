@@ -2,11 +2,14 @@
 
 import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
-import { finish } from "@/lib/data/provider-action-db";
-import { DPL, GONE_DEPLOYMENT, LIVE, live, NOT_PREVIEW, NOT_STAGED, prepare, PREVIEW_ROLLED_BACK, redeployAs, ref, refuse, rollbackAs, RUNNING, write } from "@/lib/data/vercel-action";
+import { currentDeploymentId, deploymentOfApp } from "@/lib/data/deployments-db";
+import { finish, loadTarget } from "@/lib/data/provider-action-db";
+import { DPL, GONE, GONE_DEPLOYMENT, LIVE, live, NOT_PREVIEW, NOT_STAGED, prepare, PREVIEW_ROLLED_BACK, redeployAs, ref, refuse, rollbackAs, RUNNING, write } from "@/lib/data/vercel-action";
 import { isUuid } from "@/lib/ids";
 import { INVALID } from "@/lib/provider-actions";
 import { cancelDeployment, getDeployment, promote, promotePreview, runningProductionBuild } from "@/lib/providers/vercel";
+import { buildLogs } from "@/lib/providers/vercel-build-logs";
+import { type BuildLog, DEMO_BUILD_LOG } from "@/lib/view/build-logs";
 import { deployRole } from "@/lib/view/deploy-actions";
 
 // Stage 6 (spec §12, plan A1–A6): the console's Vercel writes. Each one is a public endpoint, so each re-checks the role
@@ -22,6 +25,32 @@ export async function redeployAction(appId: string, expectedCurrentId: string): 
     if (!isUuid(appId) || typeof expectedCurrentId !== "string" || !DPL.test(expectedCurrentId)) return { ok: false, error: INVALID };
     return redeployAs(member, appId, expectedCurrentId);
   }, deps);
+}
+
+// 1.2.1 (4c): Applications → row menu → Redeploy. The list carries no deployment ids, so the console's current
+// production deployment is the one the dialog meant; redeployAs then checks it against Vercel's live state as above.
+export async function redeployCurrentAction(appId: string): Promise<ActionResult> {
+  return runGuarded("operator", async (member) => {
+    if (!isUuid(appId)) return { ok: false, error: INVALID };
+    const current = await currentDeploymentId(appId);
+    if (!current) return { ok: false, error: "No current production deployment" };
+    return redeployAs(member, appId, current);
+  }, deps);
+}
+
+// Task 4 (owner 24 Oct): a deployment's build log for the drawer. Operator+ (viewers don't get the button and are
+// refused here); only a deployment of this watched app; read with the app's team id and the stored token on the server,
+// newest build, last 2,000 lines, not cached. A read, so no quota and no audit. Demo: a canned log, no provider call.
+export async function buildLogsAction(appId: string, deploymentId: string): Promise<ActionResult<BuildLog>> {
+  return runGuarded<BuildLog>("operator", async () => {
+    if (!isUuid(appId) || typeof deploymentId !== "string" || !DPL.test(deploymentId)) return { ok: false, error: INVALID };
+    if (!(await deploymentOfApp(appId, deploymentId))) return { ok: false, error: INVALID };
+    const t = await loadTarget(appId, "app");
+    const teamId = t?.resource.meta.teamId;
+    if (!t || typeof teamId !== "string" || !teamId) return { ok: false, error: GONE };
+    const r = await buildLogs(t.token, teamId, deploymentId);
+    return r.ok ? { ok: true, data: r.data } : { ok: false, error: `Couldn't read the build log: ${r.error}` };
+  }, deps, async () => ({ ok: true, data: DEMO_BUILD_LOG }));
 }
 
 // Roll back to the previous production deployment, the only one Hobby allows (guards in rollbackAs).

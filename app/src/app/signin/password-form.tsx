@@ -22,7 +22,11 @@ export function PasswordSignInForm({ next }: { next?: string }) {
       <Button type="submit" variant="primary" className="w-full justify-center" disabled={pending}>
         {pending ? "Signing in…" : "Sign in"}
       </Button>
-      <p className="mt-4 text-[12.5px] text-ink-faint">Forgot your password? Ask an owner of this console.</p>
+      <p className="mt-4 text-[12.5px] text-ink-faint">
+        Forgot your password? Ask an owner to reset it. If you are the owner, stop Watchbell and run{" "}
+        <code className="font-mono text-ink-soft">watchbell reset-login you@example.com</code> on the machine it runs on (from an
+        installer: <code className="font-mono text-ink-soft">npm run reset-login -- you@example.com</code> in its app folder).
+      </p>
     </form>
   );
 }

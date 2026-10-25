@@ -208,6 +208,20 @@ describe("MFA actions in the cloud (unchanged)", () => {
   });
 });
 
+// Review m4: only a wrong code counts towards the back-off and the alert; Supabase's other errors don't.
+describe("MFA actions in the cloud: what counts as a wrong code", () => {
+  const counted = async () => (await db.execute(sql`select count(*)::int as n from ops.rate_limits where key like 'mfa-code-backoff:%'`)).rows;
+  it("mfa_verification_failed is a wrong code and counts; an expired challenge or a Supabase hiccup doesn't", async () => {
+    await db.execute(sql`delete from ops.rate_limits`);
+    h.supabase.challengeAndVerify = async () => ({ error: { code: "mfa_challenge_expired", status: 422 } });
+    expect(await verifyMfaCode(IDLE, form({ code: "654321" }))).toEqual({ status: "error", message: "Couldn't check the code right now. Try again." });
+    expect(await counted()).toEqual([{ n: 0 }]);
+    h.supabase.challengeAndVerify = async () => ({ error: { code: "mfa_verification_failed", status: 422 } });
+    expect(await verifyMfaCode(IDLE, form({ code: "654321" }))).toMatchObject({ status: "error", message: expect.stringContaining("didn't work") });
+    expect(await counted()).toEqual([{ n: 1 }]);
+  });
+});
+
 describe("MFA actions in the demo", () => {
   const NO_MFA = "Two-step sign-in isn't used in the demo.";
   beforeEach(() => {

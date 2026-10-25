@@ -11,11 +11,13 @@ import { PlainTable } from "@/components/plain-table";
 import { RefreshButton } from "@/components/refresh-button";
 import { type ListRow, rowClass, td, tdWrap } from "@/components/table";
 import { requirePageMember } from "@/lib/auth";
+import { UPTIME_COPY } from "@/lib/copy/edition";
 import { listWindows } from "@/lib/data/maintenance-db";
 import { appOptions, listMonitors, type MonitorRow } from "@/lib/data/monitors-db";
 import { publicMonitorIds } from "@/lib/data/public-status-db";
 import { durationLabel } from "@/lib/heartbeat";
 import { activeFor, windowText } from "@/lib/maintenance";
+import { isCloud } from "@/lib/mode";
 import { zoneSentence } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { pct } from "@/lib/view/format";
@@ -24,6 +26,7 @@ import { summaryCounts, type SummaryCounts, uptimeBars } from "@/lib/view/uptime
 import { MaintenanceDialog, type TargetOptions } from "./maintenance-dialog";
 import { MaintenanceMenu } from "./maintenance-menu";
 import { MonitorDialog } from "./monitor-dialog";
+import { DomainMoved } from "./domain-moved";
 import { MonitorMenu } from "./monitor-menu";
 import { Masked, MaskedText } from "@/components/alias";
 
@@ -70,7 +73,11 @@ export default async function UptimePage() {
               {pub.has(m.id) && <span title="Shown on the public status page"><Tag>Public</Tag></span>}
             </span>
           </td>
-          <td className={td}><Status state={s.state}>{s.label}</Status></td>
+          <td className={td}>
+            {m.move && !m.appGone && s.state === "warn"
+              ? <DomainMoved monitorId={m.id} from={m.move.from} to={m.move.to} canAct={act} />
+              : <Status state={s.state}>{s.label}</Status>}
+          </td>
           <td className={td}><UptimeBars bars={uptimeBars(m.days, now)} /></td>
           <td className={cn(td, mono)}>{pct(m.uptime30)}</td>
           <td className={cn(td, mono)}>{hb || m.state === "err" || m.lastLatencyMs === null ? "—" : `${m.lastLatencyMs} ms`}</td>
@@ -114,7 +121,7 @@ export default async function UptimePage() {
       <PageHeader
         crumbs={[{ label: "Hosting" }, { label: "Uptime" }]}
         title="Uptime"
-        sub="HTTP checks run every minute; heartbeats wait for your own jobs to ping. cron-job.org calls the collector, and Upstash QStash checks every 5 minutes that it is still running."
+        sub={isCloud() ? UPTIME_COPY.sub.cloud : UPTIME_COPY.sub.selfhost}
         actions={act ? <><RefreshButton /><MaintenanceDialog mode="add" options={options} /><MonitorDialog mode="add" apps={apps} /></> : undefined}
       />
       <div className="grid grid-cols-1 gap-4 min-[721px]:grid-cols-2 min-[1281px]:grid-cols-5">

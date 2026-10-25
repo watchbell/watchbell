@@ -11,9 +11,16 @@ import { ACTIONS, type AutoRun, type DecideBody, type Proposal, type ProposalAct
 //   DatabasePaused (Supabase)        → supabase_restore
 //   AutoPauseRisk (Supabase)         → supabase_keepalive
 //   VulnerableDependency (an app)    → github_bump_pr (Stage 9 slice 5), when a direct package of the app's linked
-//                                      repository has a known fixed version (the target is the repository id)
+//                                      repository has a known fixed version (the target is the repository id); next
+//                                      doesn't count once FrameworkVulnerable asked for it (fixableApps, review T1)
+//   FrameworkVulnerable (an app)     → github_bump_pr updating next (Watchbell 1.2), when the app is linked to a
+//                                      repository and its Next.js advisories have a fixed version; not when a firing
+//                                      VulnerableDependency of the same app already updates next (frameworkFixes)
 //   MonitorDown / HighLatency (HTTP) → recheck (a heartbeat can't be checked from here); and neon_wake when the app's
-//                                      linked database (uses_db) is a Neon compute that is suspended and can be woken
+//                                      linked database (uses_db) is a Neon compute that is suspended and can be woken;
+//                                      never vercel_redeploy / vercel_rollback for a monitor on a host the app no longer
+//                                      has (monitorMoves, Watchbell 1.2.1: a moved domain isn't a broken deploy)
+//   MonitorDomainMoved (HTTP)        → monitor_update_url (Watchbell 1.2.1): the monitor on the app's new domain, same path
 //   anything else, or a silenced alert → nothing
 // Text: display names / aliases as the office alarms show them (apps app-a, databases db-a), scrubbed, never an email,
 // at most 200 characters. A pending proposal expires after PROPOSAL_TTL_MS, or as soon as its alert is no longer firing.
@@ -45,6 +52,10 @@ export type ProposalFacts = {
   neonSuspended: ReadonlyMap<string, SuspendedNeon>; // app id → its linked, suspended Neon compute
   dailyHeartbeatId?: string | null; // owner 19 Oct: the monitor id of the console's own daily-job heartbeat (DAILY_HEARTBEAT_TOKEN), null when not set up
   fixableRepos?: ReadonlyMap<string, string>; // Stage 9 slice 5: app id → its linked repository, when an update PR can fix something
+  frameworkFixes?: ReadonlyMap<string, { repoId: string; from: string; to: string }>; // Watchbell 1.2: app id → its repository and the Next.js versions
+  // Watchbell 1.2.1: monitor id → its host and the app's primary domain, for an HTTP monitor whose host no watched project
+  // lists any more (lib/domain-move.ts, from the monitor's URL host and the apps' stored domains).
+  monitorMoves?: ReadonlyMap<string, { from: string; to: string }>;
 };
 
 export type ProposalDraft = {
@@ -81,6 +92,7 @@ const TITLES: Record<ProposalAction, (name: string) => string> = {
   github_bump_pr: (n) => `Open a PR updating vulnerable packages in ${n}`,
   domain_recheck: (n) => `Re-check the certificate of ${n}`,
   daily_rerun: () => "Rerun the daily job",
+  monitor_update_url: (n) => `Point the ${n} monitor at its new domain`,
 };
 
 export const proposalTitle = (action: ProposalAction, name: string | null): string => clip(TITLES[action](name ?? "this resource"));
@@ -125,6 +137,14 @@ function picks(a: ProposalAlert, f: ProposalFacts, now: Date): Pick1[] {
       const repo = app ? f.fixableRepos?.get(app) : undefined;
       return app && repo && UUID.test(repo) ? [{ action: "github_bump_pr", resourceKind: "app", resourceId: app, targetRef: repo }] : [];
     }
+    // Watchbell 1.2: the run reads the proposal's rule and updates next to the version that clears the app's advisories.
+    case "FrameworkVulnerable": {
+      const fix = app ? f.frameworkFixes?.get(app) : undefined;
+      return app && fix && UUID.test(fix.repoId) ? [{ action: "github_bump_pr", resourceKind: "app", resourceId: app, targetRef: fix.repoId }] : [];
+    }
+    case "MonitorDomainMoved":
+      return app && UUID.test(a.subject) && f.monitorMoves?.has(a.subject)
+        ? [{ action: "monitor_update_url", resourceKind: "app", resourceId: app, targetRef: a.subject }] : [];
     case "MonitorDown": case "HighLatency": {
       const out: Pick1[] = [];
       if (app && UUID.test(a.subject) && f.monitorKinds.get(a.subject) === "http") out.push({ action: "recheck", resourceKind: "app", resourceId: app, targetRef: a.subject });
@@ -135,6 +155,8 @@ function picks(a: ProposalAlert, f: ProposalFacts, now: Date): Pick1[] {
       const neon = app ? f.neonSuspended.get(app) : undefined;
       if (neon && EP.test(neon.endpointId)) out.push({ action: "neon_wake", room: "databases", resourceKind: neon.resourceKind, resourceId: neon.resourceId, targetRef: neon.endpointId });
       // Auto-rollback rule (owner 16 Oct): the app broke within the first minutes of a new production deploy.
+      // Watchbell 1.2.1: a monitor on a host the app no longer has says nothing about the deploy: no redeploy, no rollback.
+      if (f.monitorMoves?.has(a.subject)) return out;
       const d = app ? f.deploys.get(app) : undefined;
       if (app && freshDeploy(d, f.rollbackWindowMs ?? ROLLBACK_WINDOW_MS_DEFAULT, now)) {
         out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d!.previousId! });
@@ -166,6 +188,16 @@ export function bumpReason(a: ProposalAlert, name: string | null, book: AliasBoo
   return clip(list ? `${head}: ${list}` : `${head}.`);
 }
 
+// FrameworkVulnerable's update PR: "Open a PR updating Next.js in app-t" / "Next.js 16.3.8 in app-t has known
+// vulnerabilities: the PR updates next (and eslint-config-next when listed) to 16.4.1."
+export const frameworkTitle = (name: string | null): string => clip(`Open a PR updating Next.js in ${name ?? "this app"}`);
+export function frameworkReason(fix: { from: string; to: string } | undefined, name: string | null): string {
+  const app = name ?? "this app";
+  return clip(fix
+    ? `Next.js ${fix.from} in ${app} has known vulnerabilities: the PR updates next (and eslint-config-next when listed) to ${fix.to}.`
+    : `Next.js in ${app} has known vulnerabilities with a fixed version.`);
+}
+
 // The proposals for one alert (none for a silenced one).
 export function proposalsFor(a: ProposalAlert, f: ProposalFacts, book: AliasBook, now: Date): ProposalDraft[] {
   if (silenced(a, now)) return [];
@@ -174,9 +206,12 @@ export function proposalsFor(a: ProposalAlert, f: ProposalFacts, book: AliasBook
     const room = p.room ?? areaForAlert(a);
     // A Neon wake for an app's alert names the database, not the app.
     const name = p.action === "neon_wake" ? shownName(p.resourceKind, p.resourceId, null, book) : shownName(a.resourceKind, a.resourceId, a.resourceName, book);
+    const fw = a.ruleKey === "FrameworkVulnerable" && p.action === "github_bump_pr";
+    const move = p.action === "monitor_update_url" ? f.monitorMoves?.get(p.targetRef) : undefined;
     return {
-      alertId: a.id, ruleKey: a.ruleKey, room, action: p.action, risk: ACTIONS[p.action].risk, title: proposalTitle(p.action, name),
-      reason: p.action === "github_bump_pr" ? bumpReason(a, name, book) : alertReason,
+      alertId: a.id, ruleKey: a.ruleKey, room, action: p.action, risk: ACTIONS[p.action].risk,
+      title: fw ? frameworkTitle(name) : move ? clip(`Point the ${name ?? "app's"} monitor at ${move.to}`) : proposalTitle(p.action, name),
+      reason: fw ? frameworkReason(p.resourceId ? f.frameworkFixes?.get(p.resourceId) : undefined, name) : p.action === "github_bump_pr" ? bumpReason(a, name, book) : alertReason,
       resourceKind: p.resourceKind, resourceId: p.resourceId, resourceName: name, targetRef: p.targetRef, proposedBy: proposedBy(room),
       expiresAt: new Date(now.getTime() + PROPOSAL_TTL_MS),
     };
@@ -184,17 +219,21 @@ export function proposalsFor(a: ProposalAlert, f: ProposalFacts, book: AliasBook
 }
 
 // The alert kinds that need facts read: which monitors, apps and Supabase projects.
-export function factNeeds(alerts: ProposalAlert[], now: Date): { monitorIds: string[]; deployApps: string[]; supabaseIds: string[]; monitorApps: string[]; depApps: string[] } {
+export function factNeeds(alerts: ProposalAlert[], now: Date): {
+  monitorIds: string[]; deployApps: string[]; supabaseIds: string[]; monitorApps: string[]; depApps: string[]; frameworkApps: string[];
+} {
   const live = alerts.filter((a) => !silenced(a, now));
   const uniq = (xs: (string | null)[]) => [...new Set(xs.filter((x): x is string => !!x && UUID.test(x)))];
   const monitorAlerts = live.filter((a) => (a.ruleKey === "MonitorDown" || a.ruleKey === "HighLatency") && a.resourceKind === "app");
+  const movedAlerts = live.filter((a) => a.ruleKey === "MonitorDomainMoved" && a.resourceKind === "app"); // Watchbell 1.2.1
   return {
-    monitorIds: uniq(monitorAlerts.map((a) => a.subject)),
+    monitorIds: uniq([...monitorAlerts, ...movedAlerts].map((a) => a.subject)),
     monitorApps: uniq(monitorAlerts.map((a) => a.resourceId)),
     // DeploymentFailed, and the down / slow apps (auto-rollback rule: was the live deploy new?).
     deployApps: uniq(live.filter((a) => (a.ruleKey === "DeploymentFailed" || a.ruleKey === "MonitorDown" || a.ruleKey === "HighLatency") && a.resourceKind === "app").map((a) => a.resourceId)),
     supabaseIds: uniq(live.filter((a) => (a.ruleKey === "DatabasePaused" || a.ruleKey === "AutoPauseRisk") && a.resourceKind === "supabase_project").map((a) => a.resourceId)),
     depApps: uniq(live.filter((a) => a.ruleKey === "VulnerableDependency" && a.resourceKind === "app").map((a) => a.resourceId)),
+    frameworkApps: uniq(live.filter((a) => a.ruleKey === "FrameworkVulnerable" && a.resourceKind === "app").map((a) => a.resourceId)),
   };
 }
 

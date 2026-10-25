@@ -31,6 +31,17 @@ describe("VulnerableDependency", () => {
     expect(one([v()], "OSV.dev answered HTTP 503")[0].status).toBe("unknown");
   });
 
+  // Watchbell 1.2.1 (owner 1a): Moderate is treated like High on a direct production dependency.
+  it("a moderate advisory on a direct production dependency fires at warning; a dev or transitive one never does", () => {
+    const one = (deps: DepFact["vulns"]) => evaluate(facts([{ appId: APP, error: null, vulns: deps }]), [rule]).observations[0];
+    const fired = one([v({ package: "axios", installedVersion: "1.6.0", fixedVersion: "1.6.8", severity: "moderate", direct: true })]);
+    expect(fired).toMatchObject({ status: "firing", message: "1 vulnerable package (1 moderate): axios 1.6.0 → 1.6.8." });
+    expect(fired.severity).toBeUndefined(); // the rule's own warning, like high
+    expect(one([v({ severity: "moderate", direct: true, dev: true })])).toMatchObject({ status: "ok", message: "acme-shop has no moderate, high or critical dependency advisories." });
+    expect(one([v({ severity: "moderate", direct: false })]).status).toBe("ok");
+    expect(one([v({ severity: "low", direct: true }), v({ severity: "unknown", direct: true })]).status).toBe("ok");
+  });
+
   it("an app that isn't watched gets no observation", () => {
     expect(evaluate(facts([{ appId: "33333333-3333-4333-8333-333333333333", error: null, vulns: [v()] }]), [rule]).observations).toEqual([]);
   });

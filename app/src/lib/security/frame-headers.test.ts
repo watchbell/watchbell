@@ -33,20 +33,32 @@ describe("frame headers (next.config.ts)", () => {
     it.each(["/", "/office", "/api/office/state", "/settings", "/office/other.html"])("%s may not be framed at all", async (p) => {
       const h = await effective(p, withOffice);
       expect(h.get("X-Frame-Options")).toBe("DENY");
-      expect(h.get("Content-Security-Policy")).toBe("frame-ancestors 'none'");
+      expect(h.get("Content-Security-Policy")).toBeUndefined(); // the proxy's enforced CSP carries frame-ancestors (1.2.1)
     });
   });
 
   it("the office HTML may be framed by the console itself, nobody else", async () => {
     const h = await effective("/office/kantor-virtual.html", true);
     expect(h.get("X-Frame-Options")).toBe("SAMEORIGIN");
-    expect(h.get("Content-Security-Policy")).toBe("frame-ancestors 'self'");
+    expect(h.get("Content-Security-Policy")).toBeUndefined();
     expect(h.get("X-Content-Type-Options")).toBe("nosniff");
   });
 
   it("without the office HTML (the open source edition) no path gets the same-origin exception", async () => {
     const h = await effective("/office/kantor-virtual.html", false);
     expect(h.get("X-Frame-Options")).toBe("DENY");
-    expect(h.get("Content-Security-Policy")).toBe("frame-ancestors 'none'");
+    expect(h.get("Content-Security-Policy")).toBeUndefined(); // the proxy's enforced CSP carries frame-ancestors (1.2.1)
+  });
+
+  // Watchbell 1.2.1 (audit hardening list 3): no X-Powered-By, no powerful browser features, a separate browsing context.
+  it.each(["/", "/s/acme", "/api/v1/me", "/office/kantor-virtual.html"])("%s gets Permissions-Policy and COOP", async (p) => {
+    const h = await effective(p, true);
+    expect(h.get("Permissions-Policy")).toBe("camera=(), microphone=(), geolocation=(), payment=(), usb=()");
+    expect(h.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
+  });
+
+  it("doesn't send X-Powered-By", async () => {
+    vi.resetModules();
+    expect((await import("../../../next.config")).default.poweredByHeader).toBe(false);
   });
 });

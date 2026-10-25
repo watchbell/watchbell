@@ -14,6 +14,7 @@ import type { Severity } from "@/lib/security/types";
 import { ago } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { DEPS_COPY } from "@/lib/copy/edition";
+import { depsCoverage, NOT_SCANNED_TEXT } from "@/lib/deps/coverage";
 import { DepsScanButton } from "./deps-scan-button";
 
 // Details → Dependencies (Stage 9 slice 5): the linked repository's lockfile against OSV.dev (and Dependabot when the
@@ -25,17 +26,23 @@ const KV = "grid grid-cols-[170px_minmax(0,1fr)] gap-x-4 gap-y-2.5 max-[720px]:g
 const mono = "font-mono text-[12.5px]";
 const UPPER: Record<DepSeverity, Severity> = { critical: "CRITICAL", high: "HIGH", moderate: "MODERATE", low: "LOW", unknown: "UNKNOWN" };
 
-export function DependenciesCard({ app, view, canAct, owner, now }: { app: { id: string; name: string }; view: AppDepsView; canAct: boolean; owner: boolean; now: Date }) {
+export function DependenciesCard({ app, view, canAct, owner, now, devopsOff = false }: { app: { id: string; name: string }; view: AppDepsView; canAct: boolean; owner: boolean; now: Date; devopsOff?: boolean }) {
   const { repo, scan, vulns } = view;
+  // "None known" only after a successful scan; otherwise "Not scanned" and why (1.2.1, owner 24 Oct).
+  const cover = depsCoverage(view, devopsOff);
   const counts = countBySeverity(vulns);
   const fixable = upgradesFor(vulns).length;
   return (
-    <Card title="Dependencies" meta={<><Src kind="api">OSV.dev</Src>{canAct && repo && <DepsScanButton appId={app.id} appName={app.name} />}</>} flush>
+    <Card title="Dependencies" meta={<><Src kind="api">OSV.dev</Src>{canAct && repo && !devopsOff && <DepsScanButton appId={app.id} appName={app.name} />}</>} flush>
       <div className="px-[18px] pb-4 pt-2">
-        {!repo ? (
-          <p className="text-ink-soft">Link a repository (Repository card below) to scan its lockfile for known vulnerabilities.</p>
-        ) : !scan?.scannedAt ? (
-          <p className="text-ink-soft">Not scanned yet. The daily run scans linked repositories; Scan now does it at once.</p>
+        {!cover.scanned || !scan?.scannedAt ? (
+          <>
+            <p className="flex items-start gap-1.5 text-ink-soft">
+              {!cover.scanned && cover.reason === "failed" && <StateIcon state="warn" />}
+              <span><span className="font-medium text-ink">Not scanned:</span> {NOT_SCANNED_TEXT[cover.scanned ? "not-yet" : cover.reason]}{!cover.scanned && cover.reason === "failed" && scan?.error && <> {scan.error}</>}</span>
+            </p>
+            {scan?.scannedAt && <p className="mt-2 text-[12.5px] text-ink-faint">Last tried {ago(scan.scannedAt, now)}.{scan.note && <> {scan.note}</>}</p>}
+          </>
         ) : (
           <>
             <dl className={KV}>
@@ -50,11 +57,12 @@ export function DependenciesCard({ app, view, canAct, owner, now }: { app: { id:
                 )}
               </dd>
               <dt>Lockfile</dt>
-              <dd>{scan.lockfilePath ? <><span className={mono}>{scan.lockfilePath}</span><span className="text-ink-faint"> · {scan.packageCount} packages</span></> : <span className="text-ink-faint">None at the repository root</span>}</dd>
+              <dd>{scan.lockfilePath ? <><span className={mono}>{scan.lockfilePath}</span><span className="text-ink-faint"> · {scan.packageCount} packages</span></> : <span className="text-ink-faint">None found</span>}</dd>
               <dt>Last scan</dt><dd>{ago(scan.scannedAt, now)}</dd>
             </dl>
             {scan.error && <p className="mt-3 flex items-start gap-1.5 text-ink-soft"><StateIcon state="warn" /><span>The last scan failed: {scan.error} The list below is from the scan before.</span></p>}
             {scan.note && <p className="mt-2 text-[12.5px] text-ink-faint">{scan.note}</p>}
+            {cover.paused && <p className="mt-2 text-[12.5px] text-ink-faint">Scans pause while DevOps is off (Manage › Sections); this is the last scan.</p>}
             {view.prs && view.prs.length > 0 && (
               <ul className="mt-2 flex flex-col gap-0.5 text-[13px]">
                 {view.prs.map((p) => (
@@ -74,7 +82,7 @@ export function DependenciesCard({ app, view, canAct, owner, now }: { app: { id:
           </>
         )}
       </div>
-      {vulns.length > 0 && (
+      {cover.scanned && vulns.length > 0 && (
         <PlainTable
           head={["Package", "Version", "Severity", "Advisory"]}
           rows={vulns.map((v) => {

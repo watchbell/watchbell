@@ -4,7 +4,6 @@ import { Banner, buttonClass, Card, EmptyState, PageHeader, Progress } from "@/c
 import { ListFilter } from "@/components/list-filter";
 import { AutoRefresh } from "@/components/live";
 import { AccountChip, Resource } from "@/components/resource";
-import { RowMenu } from "@/components/row-menu";
 import { Src } from "@/components/sources";
 import { Status } from "@/components/status";
 import { rowClass, td, tdWrap } from "@/components/table";
@@ -18,7 +17,9 @@ import { CreateButton, DisconnectGoogleCreateButton } from "@/components/create/
 import { PendingCreates } from "@/components/create/pending-creates";
 import { CREATE_CALLBACK_TEXT } from "@/lib/create/connect-text";
 import { createGrantConnected } from "@/lib/data/create-db";
+import { FIRESTORE_SIZE_NOTE } from "@/lib/databases/firebase";
 import { outboundLinks } from "@/lib/demo/links";
+import { FirestoreRowMenu } from "./row-menu";
 
 // Stage 6 create requests: Firebase's create runs a few long-running Google operations (polled) after approval.
 export const maxDuration = 60;
@@ -53,8 +54,8 @@ export default async function FirebasePage({ searchParams }: { searchParams: Pro
       {googleNote && <Banner tone={googleNote.tone === "ok" ? "info" : "danger"} title={googleNote.tone === "ok" ? "Google connected" : "Google wasn't connected"}>{googleNote.text}</Banner>}
       {/* Stage 6 create requests: new Firebase projects waiting for the owner's approval. */}
       <PendingCreates member={member} types={["firebase_project"]} focus={create ?? null} />
-      <Banner tone="info" title="Stored data size (1 GiB free) isn't readable on the Spark plan">
-        Cloud Monitoring has the number, but on Spark it answers that billing (Blaze) is required. Use the link to the Firebase console usage page for it. Reads, writes, and deletes today come from Cloud Monitoring (since midnight Pacific time, when the free quota resets). The console checks that it can read them when you connect the account.
+      <Banner tone="info" title="Firestore usage isn't readable on the Spark plan">
+        Reads, writes, and deletes today come from Cloud Monitoring, which answers that billing (Blaze) is required on Spark, so on Spark those columns say so. On Blaze they are read every hour (since midnight Pacific time, when the free quota resets). {FIRESTORE_SIZE_NOTE}
       </Banner>
       <Card flush>
         {view.length === 0 ? (
@@ -66,8 +67,8 @@ export default async function FirebasePage({ searchParams }: { searchParams: Pro
           <ListFilter
             placeholder="Filter by name"
             groups={[...new Set(view.map((v) => v.account))].sort()}
-            head={["Project", "Account", <span key="h">Health<Src kind="own" /></span>, <span key="r">Reads today<Src kind="test" /></span>,
-              <span key="w">Writes today<Src kind="test" /></span>, <span key="d">Deletes today<Src kind="test" /></span>,
+            head={["Project", "Account", <span key="h">Health<Src kind="own" /></span>, <span key="r">Reads today<Src kind="api">API · hourly</Src></span>,
+              <span key="w">Writes today<Src kind="api">API · hourly</Src></span>, <span key="d">Deletes today<Src kind="api">API · hourly</Src></span>,
               <span key="u">Auth users<Src kind="api">API · daily</Src></span>, "Used by", ""]}
             rows={view.map((v) => ({
               key: v.id, state: v.health.state, group: v.account,
@@ -90,13 +91,12 @@ export default async function FirebasePage({ searchParams }: { searchParams: Pro
                   <td className={td}>{v.usedBy.length ? v.usedBy.map((u) => <div key={u.id}><Resource kind="app" name={u.name} href={`/apps/${u.id}`} /></div>) : <span className={faint}>Not linked</span>}</td>
                   <td className={td}>
                     {act && (
-                      <RowMenu label={actionsLabel(v.alias)} items={[
+                      <FirestoreRowMenu id={v.id} alias={v.alias} label={actionsLabel(v.alias)} links={[
                         // Demo: the project is made up, so there is no Firebase console to open (lib/demo/links.ts).
                         ...(links ? [
                           { label: "Open Firebase console", href: `https://console.firebase.google.com/project/${encodeURIComponent(v.projectId)}/overview` },
                           { label: "Open usage page", href: `https://console.firebase.google.com/project/${encodeURIComponent(v.projectId)}/firestore/databases/-default-/usage` },
                         ] : []),
-                        { label: "Run health check", later: 6 },
                       ]} />
                     )}
                   </td>

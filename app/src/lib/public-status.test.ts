@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { badgeKey, badgeSvg, MAX_ON_PAGE, parseSlug, parseStatusPageForm, publicState } from "./public-status";
+import { badgeKey, badgeSvg, MAX_ON_PAGE, overallLine, parseSlug, parseStatusPageForm, type PublicState, publicState } from "./public-status";
 
 describe("parseSlug and badgeKey", () => {
   it("accepts short lowercase slugs only", () => {
@@ -91,5 +91,41 @@ describe("parseStatusPageForm", () => {
   });
   it("survives junk", () => {
     for (const junk of [null, undefined, "x", 7, [], { monitors: "x" }, { monitors: [null, 3] }]) expect(parseStatusPageForm(junk).ok).toBe(false);
+  });
+});
+
+// 1.2.1 (UI audit P1): one line at the top answers "is it working?" before a visitor reads any row.
+describe("overallLine", () => {
+  const m = (name: string, state: PublicState) => ({ name, state });
+
+  it("says nothing for an empty page", () => {
+    expect(overallLine([])).toBeNull();
+  });
+
+  it("all running", () => {
+    expect(overallLine([m("Shop", "ok"), m("Blog", "ok"), m("API", "ok")])).toEqual({ state: "ok", text: "All 3 services are running." });
+    expect(overallLine([m("Shop", "ok")])).toEqual({ state: "ok", text: "Shop is running." });
+  });
+
+  it("names the one service with a problem", () => {
+    expect(overallLine([m("Shop", "ok"), m("API", "err")])).toEqual({ state: "err", text: "API is down." });
+    expect(overallLine([m("Shop", "warn"), m("API", "ok")])).toEqual({ state: "warn", text: "Shop is degraded." });
+  });
+
+  it("counts several problems, worst state first, and names at most three", () => {
+    expect(overallLine([m("Shop", "warn"), m("API", "err"), m("Blog", "ok")])).toEqual({ state: "err", text: "2 services have problems: Shop and API." });
+    expect(overallLine([m("A", "warn"), m("B", "warn"), m("C", "warn"), m("D", "warn"), m("E", "warn"), m("F", "ok")]))
+      .toEqual({ state: "warn", text: "5 services have problems: A, B, C and 2 more." });
+  });
+
+  it("maintenance when nothing is broken; a problem outranks it", () => {
+    expect(overallLine([m("Shop", "maint"), m("API", "ok")])).toEqual({ state: "maint", text: "Shop is in planned maintenance." });
+    expect(overallLine([m("Shop", "maint"), m("API", "maint")])).toEqual({ state: "maint", text: "2 services are in planned maintenance: Shop and API." });
+    expect(overallLine([m("Shop", "maint"), m("API", "err")])).toEqual({ state: "err", text: "API is down." });
+  });
+
+  it("services without recent data are named, not counted as running", () => {
+    expect(overallLine([m("Shop", "ok"), m("API", "ok"), m("Blog", "unknown")])).toEqual({ state: "unknown", text: "2 of 3 services are running. No recent data for Blog." });
+    expect(overallLine([m("Shop", "unknown"), m("API", "unknown")])).toEqual({ state: "unknown", text: "No recent data for Shop and API." });
   });
 });

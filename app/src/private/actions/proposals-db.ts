@@ -10,6 +10,7 @@ import { pausedSections } from "@/lib/data/sections-db";
 import { alertPaused, type SectionId } from "@/lib/sections";
 import { tokenFromSetting } from "@/lib/heartbeat";
 import { tokenHash } from "@/lib/heartbeat-token";
+import { type DomainMove, monitorMoves, storedDomains } from "@/lib/domain-move";
 import { neonData, readData, supabaseData } from "@/lib/databases/snapshot-data";
 import { type AliasBook, EMPTY_BOOK } from "@/lib/view/display-name";
 import { actionProposals } from "@/private/db/schema";
@@ -24,7 +25,7 @@ import {
 import { AUTO_ROLLBACK_GAP_MS, AUTO_ROLLBACK_RULES, autoRollbackDecision, autoRollbackReason, deployRef, type RollbackCheck } from "./auto-rollback";
 import { notifyAutoRollback, notifyNewProposals, notifyProposalResult } from "./proposals-notify";
 import { type Runner, runProposalAction, type RunTarget } from "./proposals-run";
-import { autoBumpReady } from "@/lib/data/deps-pr";
+import { autoBumpReady, frameworkFixes, type FrameworkFix } from "@/lib/data/deps-pr";
 import { type AutoRollback, readAutoRollback, readAutoRun, readAutoSecurity } from "./proposals-settings";
 import type { Proposal } from "./proposals-types";
 
@@ -48,8 +49,11 @@ type RunRow = ProposalRow & { resourceId: string | null; targetRef: string | nul
 // ---- facts for the firing alerts (only what they need; nothing read when no alert needs it) ----
 export async function readProposalFacts(alerts: ProposalAlert[], now: Date, rollbackWindowMs?: number): Promise<ProposalFacts> {
   const need = factNeeds(alerts, now);
-  const [mons, deps, refs, neon, fixable, dailyHb] = await Promise.all([
-    need.monitorIds.length ? db().select({ id: monitors.id, kind: monitors.kind }).from(monitors).where(inArray(monitors.id, need.monitorIds)) : [],
+  const [mons, deps, refs, neon, fixable, dailyHb, framework] = await Promise.all([
+    need.monitorIds.length
+      ? db().select({ id: monitors.id, kind: monitors.kind, url: monitors.url, lastError: monitors.lastError, appId: monitors.resourceId, appName: resources.name, appMeta: resources.meta })
+        .from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId)).where(inArray(monitors.id, need.monitorIds))
+      : [],
     need.deployApps.length
       ? db().select({ app: deployments.resourceId, id: deployments.externalId, isCurrent: deployments.isCurrent, isPrevious: deployments.isPreviousProduction, readyAt: deployments.readyAt, createdAt: deployments.createdAtProvider })
         .from(deployments).where(and(inArray(deployments.resourceId, need.deployApps), or(eq(deployments.isCurrent, true), eq(deployments.isPreviousProduction, true))))
@@ -59,9 +63,20 @@ export async function readProposalFacts(alerts: ProposalAlert[], now: Date, roll
         .where(and(inArray(resources.id, need.supabaseIds), eq(resources.kind, "supabase_project"), sql`${resources.goneAt} is null`))
       : [],
     need.monitorApps.length ? suspendedNeon(need.monitorApps) : new Map<string, SuspendedNeon>(),
-    need.depApps.length ? fixableApps(need.depApps).catch(() => new Map<string, string>()) : new Map<string, string>(),
+    need.depApps.length
+      ? frameworkAskedApps(alerts, need.depApps).catch(() => new Set<string>()).then((asked) => fixableApps(need.depApps, asked)).catch(() => new Map<string, string>())
+      : new Map<string, string>(),
     need.monitorIds.length ? dailyHeartbeatId(need.monitorIds) : null,
+    need.frameworkApps.length ? frameworkFixes(need.frameworkApps, need.depApps).catch(() => new Map<string, FrameworkFix>()) : new Map<string, FrameworkFix>(),
   ]);
+  // Watchbell 1.2.1: which of these monitors check a host their app no longer has (no redeploy for those; Update monitor).
+  // The other watched apps are read only when one of these apps has stored domains.
+  const withDomains = mons.some((m) => storedDomains(m.appMeta) !== null);
+  const watchedApps = withDomains
+    ? await db().select({ id: resources.id, name: resources.name, meta: resources.meta }).from(resources)
+      .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt))).limit(500)
+    : [];
+  const moves = withDomains ? monitorMoves(mons, watchedApps) : new Map<string, DomainMove>();
   const deploys = new Map<string, { currentId: string | null; previousId: string | null; liveAt: Date | null }>();
   for (const d of deps) {
     const cur = deploys.get(d.app) ?? { currentId: null, previousId: null, liveAt: null };
@@ -77,7 +92,23 @@ export async function readProposalFacts(alerts: ProposalAlert[], now: Date, roll
     neonSuspended: neon,
     fixableRepos: fixable,
     dailyHeartbeatId: dailyHb,
+    frameworkFixes: framework,
+    monitorMoves: moves,
   };
+}
+
+// Review T1 minor 1: the apps (among these) whose firing FrameworkVulnerable alert already has an update-PR proposal that
+// is pending, approved, running or done: their VulnerableDependency proposal leaves next out (fixableApps), so the owner
+// isn't asked twice for the same package. Nothing read when no such alert fires.
+export async function frameworkAskedApps(alerts: ProposalAlert[], appIds: string[]): Promise<Set<string>> {
+  const apps = new Set(appIds);
+  const ids = alerts.filter((a) => a.ruleKey === "FrameworkVulnerable" && a.resourceKind === "app" && a.resourceId && apps.has(a.resourceId)).map((a) => a.id);
+  if (!ids.length) return new Set();
+  const rows = await db().selectDistinct({ resourceId: actionProposals.resourceId }).from(actionProposals).where(and(
+    eq(actionProposals.ruleKey, "FrameworkVulnerable"), eq(actionProposals.action, "github_bump_pr"), inArray(actionProposals.status, ["pending", "approved", "running", "done"]),
+    inArray(actionProposals.alertId, ids), inArray(actionProposals.resourceId, [...apps]),
+  )).limit(ids.length);
+  return new Set(rows.flatMap((r) => (r.resourceId ? [r.resourceId] : [])));
 }
 
 // Owner 19 Oct: which of these monitors is the console's own daily-job heartbeat: the one whose stored hash is the hash
@@ -174,7 +205,7 @@ const EXEC: ExecDeps = { run: (t, who) => runProposalAction(t, who), book: () =>
 export async function executeProposal(id: string, who: Runner["member"], now: Date, deps: ExecDeps = EXEC): Promise<Proposal | null> {
   const row = await claimProposal(id, now);
   if (!row) return null;
-  const r = await deps.run({ action: row.action, resourceId: row.resourceId, targetRef: row.targetRef, proposalId: row.id }, who);
+  const r = await deps.run({ action: row.action, resourceId: row.resourceId, targetRef: row.targetRef, proposalId: row.id, ruleKey: row.ruleKey ?? null }, who);
   const book = await deps.book().catch(() => EMPTY_BOOK);
   const done = await finishProposal(id, r.ok, resultSentence(r, book), new Date());
   return done ? toProposal(done) : null;
@@ -451,7 +482,10 @@ async function autoBumps(created: RunRow[], left: () => number, deps: StepDeps):
   for (const row of rows) {
     if (left() < 15_000) break;
     try {
-      const ready = await deps.bumpReady(row.targetRef!, setting.severities);
+      // Watchbell 1.2: a FrameworkVulnerable proposal is judged on the app's Next.js check, not the scan.
+      const ready = row.ruleKey === "FrameworkVulnerable" && row.resourceId
+        ? await deps.bumpReady(row.targetRef!, setting.severities, { appId: row.resourceId })
+        : await deps.bumpReady(row.targetRef!, setting.severities);
       if (!ready.ok) {
         console.log(`${ACTIONS_COPY.logTag}/auto-security: waits for the owner (${ready.why})`);
         continue;
@@ -504,7 +538,10 @@ export async function runProposalsStep(now: Date, ctx: { deadline?: number } = {
     const rollback = needs.deployApps.length && deps.autoRollback ? await deps.autoRollback().catch(() => null) : null;
     const facts = await deps.facts(alerts, now, rollback ? rollback.windowMin * 60_000 : undefined);
     const b = await book();
-    created.push(...(await deps.create(alerts.flatMap((a) => proposalsFor(a, facts, b, now)))));
+    // Watchbell 1.2: an update PR needs GitHub, so none is proposed while DevOps is off, also for FrameworkVulnerable
+    // (a Hosting rule: its alert keeps firing and notifying).
+    const drafts = alerts.flatMap((a) => proposalsFor(a, facts, b, now)).filter((d) => !(d.action === "github_bump_pr" && paused.has("devops")));
+    created.push(...(await deps.create(drafts)));
   }
   // The officers' log check (log-proposals.ts): at most every 5 minutes, only with time left; a failure stays here.
   if (left() > 10_000 && !paused.has("hosting")) {

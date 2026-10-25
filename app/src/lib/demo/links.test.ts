@@ -31,7 +31,7 @@ describe("links out of the console", () => {
 
   it("a deployment row offers Visit only when its server parent allows links out", () => {
     const d = { appId: "a1", appName: "acme-shop", externalId: "dpl_1", sha: "abc1234", url: "acme-shop-git-main-x1y2z3a4b.example" };
-    const out = (visit: boolean) => renderToStaticMarkup(h(DeployRowActions, { d: { ...d, visit }, actions: [], logs: false }));
+    const out = (visit: boolean) => renderToStaticMarkup(h(DeployRowActions, { d: { ...d, visit }, actions: [], logs: null }));
     expect(out(true)).toContain('href="https://acme-shop-git-main-x1y2z3a4b.example"');
     expect(out(false)).not.toContain("href=");
     expect(out(false)).not.toContain("Visit");

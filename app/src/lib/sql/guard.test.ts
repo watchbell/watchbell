@@ -155,3 +155,25 @@ describe("sqlFingerprint", () => {
     expect(a).not.toContain("example");
   });
 });
+
+// Watchbell 1.2.1 (audit L1): U&"…" names hid denied functions (their \XXXX escapes weren't decoded), and quoted names
+// weren't checked against the denied words ("analyze" in EXPLAIN's options).
+describe("guardSql: unicode escapes and quoted names (audit L1)", () => {
+  it("refuses U&\"…\" names and U&'…' strings outright", () => {
+    no(`select U&"\\0073et_config"('statement_timeout','0',true)`, /U&/);
+    no(`select U&"\\0064blink"('x','y')`, /U&/);
+    no(`select u&"\\0070g_read_file"('/etc/passwd')`, /U&/);
+    no(`select U&"\\006co_import"('/tmp/x')`, /U&/);
+    no(`select U&'\\0041' as a`, /U&/);
+    no(`select U&"a" UESCAPE '!' from t`, /U&/);
+  });
+
+  it("checks quoted names against the denied words and functions (case-folded)", () => {
+    no(`explain ("analyze") select 1`, /EXPLAIN ANALYZE/);
+    no(`explain ("ANALYZE", buffers) select 1`, /EXPLAIN ANALYZE/);
+    no(`select "Set_Config"('statement_timeout','0',true)`, /set_config/i);
+    no(`select "pg_read_file"('x')`, /pg_read_file/);
+    no(`select "dblink"('a','b')`, /dblink/);
+    ok(`select "update", "Name", "user id" from t`); // a quoted name is never a keyword outside EXPLAIN's options
+  });
+});

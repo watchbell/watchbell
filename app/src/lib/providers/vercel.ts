@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cleanRootDir, unusableRootDir } from "@/lib/deps/root-dir";
 
 export type VercelFailure = { ok: false; kind: "auth" | "transient" | "format"; error: string; status?: number; retryAfterS?: number };
 export type Result<T> = { ok: true; data: T } | VercelFailure;
@@ -10,6 +11,13 @@ export type VercelTeam = { id: string; slug: string; name: string };
 export type DeploymentState = "ready" | "building" | "error" | "canceled";
 export type VercelProject = { id: string; name: string; team: VercelTeam; framework: string | null; createdAt: Date; productionBranch: string | null; currentDeploymentId: string | null;
   repo: { type: string; org: string; repo: string } | null; functionRegions: string[];
+  // Watchbell 1.2: the project's Root Directory in its repository ("apps/web"), null at the root.
+  rootDirectory: string | null;
+  // Watchbell 1.2.1 (review T1): a Root Directory Vercel has that Watchbell can't use ("my app", too deep), as text for
+  // the Dependencies card and the PR refusal; null otherwise.
+  rootDirectoryUnsupported: string | null;
+  // Watchbell 1.2.1: targets.production.alias, the names production is served on (chooseProductionDomain).
+  productionAliases: string[];
 };
 export type VercelDeployment = {
   id: string; projectId: string; state: DeploymentState; rawState: string; target: "production" | "preview";
@@ -18,7 +26,7 @@ export type VercelDeployment = {
 };
 export type DiscoveredApp = {
   externalId: string; name: string;
-  meta: { teamId: string; teamSlug: string; teamName: string; framework: string | null; productionBranch: string | null; createdAt: string; repo: string | null; repoType: string | null; functionRegions: string[] };
+  meta: { teamId: string; teamSlug: string; teamName: string; framework: string | null; productionBranch: string | null; createdAt: string; repo: string | null; repoType: string | null; functionRegions: string[]; rootDirectory: string | null; rootDirectoryUnsupported?: string; productionAliases?: string[] };
 };
 
 const BASE = "https://api.vercel.com";
@@ -94,13 +102,26 @@ export function mapDeploymentState(raw: string): DeploymentState {
   return "building";
 }
 
+// The domain Vercel serves production on (1.2.1, the shopfront move). Usable: verified, no redirect, no preview
+// branch, no custom environment. Among those: the one other listed domains redirect to (an old domain moved to it),
+// then a custom domain over vercel.app, then one the production deployment carries as an alias, then the shorter name
+// (a "demo-" or "www." variant loses), then list order. None usable: <name>.vercel.app.
 export function chooseProductionDomain(
-  domains: { name: string; redirect?: string | null; verified?: boolean; gitBranch?: string | null }[],
+  domains: { name: string; redirect?: string | null; verified?: boolean; gitBranch?: string | null; customEnvironmentId?: string | null }[],
   projectName: string,
+  productionAliases: string[] = [],
 ): string {
-  const usable = domains.filter((d) => d.verified !== false && !d.redirect && !d.gitBranch);
-  const custom = usable.find((d) => !d.name.endsWith(".vercel.app"));
-  return (custom ?? usable[0])?.name ?? `${projectName}.vercel.app`;
+  const usable = domains.filter((d) => d.verified !== false && !d.redirect && !d.gitBranch && !d.customEnvironmentId);
+  const aliases = new Set(productionAliases.map((a) => a.toLowerCase()));
+  const score = (name: string) => [
+    domains.some((d) => d.redirect?.toLowerCase() === name.toLowerCase()) ? 0 : 1,
+    name.endsWith(".vercel.app") ? 1 : 0,
+    aliases.has(name.toLowerCase()) ? 0 : 1,
+    name.length,
+  ];
+  const ranked = usable.map((d, i) => ({ name: d.name, key: [...score(d.name), i] }))
+    .sort((a, b) => { for (let k = 0; k < a.key.length; k++) if (a.key[k] !== b.key[k]) return a.key[k] - b.key[k]; return 0; });
+  return ranked[0]?.name ?? `${projectName}.vercel.app`;
 }
 
 const teamsSchema = z.object({ teams: z.array(z.object({ id: z.string(), slug: z.string(), name: z.string().nullish() })) });
@@ -124,7 +145,10 @@ export async function tokenExpiry(token: string, opts: VercelOpts = {}): Promise
 // deployment and stops auto-assigning it until a promote, so after a succeeded roll back the live one is its target,
 // whatever was built since (stage 6, A9). After a succeeded promote its target is live until a production deployment
 // created later (auto-assigned again) takes over. Unfinished or unknown alias requests change nothing.
-const productionTargetSchema = z.object({ id: z.string(), readyState: z.string().nullish(), createdAt: z.number().nullish().catch(null) }).nullish();
+const productionTargetSchema = z.object({
+  id: z.string(), readyState: z.string().nullish(), createdAt: z.number().nullish().catch(null),
+  alias: z.array(z.string()).nullish().catch(null), // 1.2.1: the names the production deployment is served on
+}).nullish();
 const aliasRequestSchema = z.object({
   type: z.string(), jobStatus: z.string(), toDeploymentId: z.string(), requestedAt: z.number(),
 }).nullish().catch(null);
@@ -146,6 +170,7 @@ const projectSchema = z.object({
   resourceConfig: z.object({ functionDefaultRegions: z.array(z.string()).nullish() }).nullish(),
   targets: z.object({ production: productionTargetSchema }).nullish(),
   lastAliasRequest: aliasRequestSchema,
+  rootDirectory: z.string().nullish().catch(null),
 });
 const projectsPage = z.object({ projects: z.array(projectSchema), pagination: z.object({ next: z.number().nullish() }).nullish() });
 
@@ -168,6 +193,9 @@ export async function listProjects(token: string, team: VercelTeam, opts: Vercel
         // regions fill the app page's "Function region" when Vercel returns them on the list.
         repo: x.link?.type && x.link.org && x.link.repo ? { type: x.link.type, org: x.link.org, repo: x.link.repo } : null,
         functionRegions: x.resourceConfig?.functionDefaultRegions ?? [],
+        rootDirectory: cleanRootDir(x.rootDirectory),
+        rootDirectoryUnsupported: unusableRootDir(x.rootDirectory),
+        productionAliases: x.targets?.production?.alias ?? [],
       });
     }
     until = p.data.pagination?.next;
@@ -302,22 +330,36 @@ export async function cancelDeployment(token: string, teamId: string, deployment
 }
 
 const domainsSchema = z.object({
-  domains: z.array(z.object({ name: z.string(), redirect: z.string().nullish(), verified: z.boolean().optional(), gitBranch: z.string().nullish() })),
+  domains: z.array(z.object({
+    name: z.string(), redirect: z.string().nullish(), verified: z.boolean().optional(), gitBranch: z.string().nullish(),
+    customEnvironmentId: z.string().nullish().catch(null),
+  })),
+  pagination: z.object({ next: z.number().nullish() }).nullish(),
 });
 
-export type ProjectDomain = { name: string; redirect: string | null; verified: boolean; gitBranch: string | null };
+export type ProjectDomain = { name: string; redirect: string | null; verified: boolean; gitBranch: string | null; customEnvironmentId: string | null };
 
+// Every page (100 a page, newest first, following pagination.next like listProjects) or a failure: a partial list
+// would make a listed domain look gone (pastDomains) and move the primary domain (review T3 I1). A list that doesn't
+// end within MAX_PAGES is a failure too, so callers keep what they stored.
 export async function listProjectDomains(token: string, teamId: string, projectId: string, opts: VercelOpts = {}): Promise<Result<ProjectDomain[]>> {
-  const r = await get(`/v9/projects/${encodeURIComponent(projectId)}/domains?teamId=${encodeURIComponent(teamId)}`, token, opts);
-  if (!r.ok) return r;
-  const p = domainsSchema.safeParse(r.data);
-  if (!p.success) return format("the domain list");
-  return { ok: true, data: p.data.domains.map((d) => ({ name: d.name, redirect: d.redirect ?? null, verified: d.verified !== false, gitBranch: d.gitBranch ?? null })) };
+  const out: ProjectDomain[] = [];
+  let until: number | null | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const r = await get(`/v9/projects/${encodeURIComponent(projectId)}/domains?teamId=${encodeURIComponent(teamId)}&limit=100${until ? `&until=${until}` : ""}`, token, opts);
+    if (!r.ok) return r;
+    const p = domainsSchema.safeParse(r.data);
+    if (!p.success) return format("the domain list");
+    for (const d of p.data.domains) out.push({ name: d.name, redirect: d.redirect ?? null, verified: d.verified !== false, gitBranch: d.gitBranch ?? null, customEnvironmentId: d.customEnvironmentId ?? null });
+    until = p.data.pagination?.next;
+    if (!until) return { ok: true, data: out };
+  }
+  return { ok: false, kind: "transient", error: `The project has more than ${MAX_PAGES * 100} domains; Watchbell kept the domains it had.` };
 }
 
-export async function productionHost(token: string, teamId: string, projectId: string, projectName: string, opts: VercelOpts = {}): Promise<Result<string>> {
+export async function productionHost(token: string, teamId: string, projectId: string, projectName: string, opts: VercelOpts = {}, productionAliases: string[] = []): Promise<Result<string>> {
   const r = await listProjectDomains(token, teamId, projectId, opts);
-  return r.ok ? { ok: true, data: chooseProductionDomain(r.data, projectName) } : r;
+  return r.ok ? { ok: true, data: chooseProductionDomain(r.data, projectName, productionAliases) } : r;
 }
 
 const configSchema = z.object({
@@ -359,7 +401,9 @@ export async function discoverVercel(token: string, opts: VercelOpts = {}): Prom
       apps.push({
         externalId: p.id, name: p.name,
         meta: { teamId: team.id, teamSlug: team.slug, teamName: team.name, framework: p.framework, productionBranch: p.productionBranch, createdAt: p.createdAt.toISOString(),
-          repo: p.repo ? `${p.repo.org}/${p.repo.repo}` : null, repoType: p.repo?.type ?? null, functionRegions: p.functionRegions },
+          repo: p.repo ? `${p.repo.org}/${p.repo.repo}` : null, repoType: p.repo?.type ?? null, functionRegions: p.functionRegions,
+          rootDirectory: p.rootDirectory, ...(p.rootDirectoryUnsupported ? { rootDirectoryUnsupported: p.rootDirectoryUnsupported } : {}),
+          ...(p.productionAliases.length ? { productionAliases: p.productionAliases } : {}) },
       });
     }
   }

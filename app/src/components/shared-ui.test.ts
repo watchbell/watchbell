@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Sparkline, UptimeBars } from "@/components/charts";
 import { NoApps, NoDeployments, NoEvents, NoMonitors } from "@/components/empty-states";
-import { LaterButton, Tag } from "@/components/kit";
+import { Tag } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { holdCount, holdRefresh, holdWhile } from "@/components/live";
 import { Pager } from "@/components/pager";
@@ -158,13 +158,6 @@ describe("empty states and kit additions", () => {
   });
   it("Tag renders the label chip", () => {
     expect(html(h(Tag, null, "Production"))).toContain("Production");
-  });
-  it("LaterButton is disabled and names its stage in the tooltip", () => {
-    const out = html(h(LaterButton, { label: "Redeploy", stage: 3 }));
-    expect(out).toContain('title="Arrives in stage 3"');
-    expect(out).toContain('disabled=""');
-    expect(out).toContain('aria-label="Redeploy, arrives in stage 3"');
-    expect(out).toContain("Redeploy");
   });
 });
 

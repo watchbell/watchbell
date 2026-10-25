@@ -53,7 +53,6 @@ export default async function CatalogPage() {
                   <div className="flex items-center gap-1.5">
                     {d.adapter === "built" && owner && <Link href="/connections" className={buttonClass({ size: "sm" })}>Connect</Link>}
                     {d.adapter === "built" && !owner && <Tag>Supported</Tag>}
-                    {d.adapter === "planned" && <Tag>Adapter planned</Tag>}
                     {d.adapter !== "built" && (
                       <a href={d.url} target="_blank" rel="noopener noreferrer" className={buttonClass({ size: "sm" })}>Pricing <IconExternalLink size={13} aria-hidden /></a>
                     )}

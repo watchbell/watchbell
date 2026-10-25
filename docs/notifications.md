@@ -1,5 +1,7 @@
 # Notifications
 
+Bahasa Indonesia: [id/notifications.md](id/notifications.md)
+
 Watchbell can send alerts to Telegram, to a Discord channel and as a daily email. All three are free and optional, and
 they are set up on **Alerts › Notifications** (owner only; everyone else sees their status).
 
@@ -101,6 +103,8 @@ These are built in and can't be changed. They explain why a message may not arri
 
 - While **CollectorStale** fires (the collector stopped running), no other alert is sent, because the data is stale.
 - A paused database mutes **MonitorDown** and **HighLatency** for the apps linked to it.
+- A check on a domain its app no longer has raises **MonitorDomainMoved** (a warning) instead of **MonitorDown**, and
+  no redeploy is proposed for it: the app moved, it isn't down.
 - An alert resolves only after 2 good checks in a row, so a flapping site doesn't page you twice.
 - An alert in a maintenance window doesn't open at all (see [Pages › Uptime](pages.md#hosting)).
 - A silenced alert sends nothing until the silence ends.

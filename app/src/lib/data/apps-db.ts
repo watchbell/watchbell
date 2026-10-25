@@ -1,9 +1,11 @@
 import "server-only";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accounts, appSecurity, deployments, monitors, resources, snapshots } from "@/db/schema";
 import type { SecurityRow } from "@/lib/security/types";
 import type { State } from "@/lib/status";
+import { storedDomains } from "@/lib/domain-move";
+import { type DomainFlag, type DomainLines, appDomainLines } from "@/lib/view/app-domains";
 import { appDomain } from "@/lib/view/format";
 import { type PageViewsView, pageViewsOf, pageViewsUnavailable } from "@/lib/view/pageviews";
 import { type DayCount, lastDays, UPTIME_DAYS, uptimePct } from "@/lib/view/uptime";
@@ -14,7 +16,7 @@ import { type DeployLite, toDeployLite } from "./deployments-db";
 import { recordEvents } from "./events-write";
 import { listRawWindows } from "./maintenance-db";
 import { type AppResponse, appResponse, monitorDays } from "./metrics-db";
-import { type MonitorLite, toMonitorLite } from "./monitors-db";
+import { type MonitorLite, movesOf, toMonitorLite } from "./monitors-db";
 import { toSecurityRow } from "./security-db";
 
 export type AppSummary = {
@@ -23,6 +25,8 @@ export type AppSummary = {
   // From Sync's project data (the next Sync fills them in): the Vercel team slug and Git repository for "Open in", and
   // the function regions for Details.
   teamSlug: string | null; repo: string | null; repoType: string | null; functionRegions: string[];
+  // 1.2.1: every domain the app has on Vercel (primary, attached, former) for the Details card.
+  domainLines: DomainLines;
   // Each monitor carries `maintUntil` (U5): the end of the maintenance window it is inside now, else null.
   monitors: (MonitorLite & { maintUntil: Date | null })[]; lastDeploy: DeployLite | null; uptime30: number | null; response: AppResponse;
   days: Map<string, Map<string, DayCount>>;
@@ -55,18 +59,32 @@ export async function listApps(now: Date, onlyId?: string): Promise<AppSummary[]
     .where(and(inArray(deployments.resourceId, ids), eq(deployments.target, "production")))
     .orderBy(deployments.resourceId, desc(deployments.createdAtProvider));
   const days = await monitorDays(mons.map((m) => m.id), now);
+  // Watchbell 1.2.1: monitors still on a domain their app no longer has ("Domain changed", Update monitor).
+  const appRow = new Map(apps.map((a) => [a.r.id, a.r]));
+  const moves = await movesOf(mons.map((m) => ({ id: m.id, kind: m.kind, url: m.url, appId: m.appId, appName: appRow.get(m.appId)?.name ?? "", appMeta: appRow.get(m.appId)?.meta, lastError: m.lastError })));
+  // 1.2.1: redirect / verified flags of each app's domain rows (the names themselves are on the app: storedDomains).
+  const flags = new Map<string, Record<string, DomainFlag>>();
+  for (const d of await db().select({ parentId: resources.parentId, name: resources.name, meta: resources.meta }).from(resources)
+    .where(and(eq(resources.kind, "domain"), inArray(resources.parentId, ids), isNull(resources.goneAt)))) {
+    if (!d.parentId) continue;
+    const m = flags.get(d.parentId) ?? {};
+    m[d.name.toLowerCase()] = { redirect: str(d.meta.redirect), verified: d.meta.verified !== false };
+    flags.set(d.parentId, m);
+  }
   const response = await appResponse(ids, now);
   const dbs = await linkedDatabases(ids);
   // U5 / review I1: one read of the maintenance windows (at most 20 rows), so every page built on listApps (Overview,
   // Applications, the app page, Topology) shows a monitor inside a window as Uptime does.
   const windows = mons.length ? await listRawWindows() : [];
   return apps.map(({ r, s, sec, accStatus }) => {
-    const own = mons.filter((m) => m.appId === r.id).map((m) => ({ ...m, maintUntil: activeFor(windows, { monitorId: m.id, appId: m.appId }, now)?.end ?? null }));
+    const own = mons.filter((m) => m.appId === r.id).map((m) => ({ ...m, maintUntil: activeFor(windows, { monitorId: m.id, appId: m.appId }, now)?.end ?? null, move: moves.get(m.id) ?? null }));
     const created = str(r.meta.createdAt);
     const dep = latest.find((d) => d.resourceId === r.id);
     return {
       id: r.id, name: r.name, gone: r.goneAt !== null, state: s?.state ?? "unknown", stateSince: s?.stateSince ?? null,
-      domain: appDomain(r.name, own.map((m) => m.url)),
+      // 1.2.1: the domain production is served on (Sync / the domains task), else the first monitor's host as before.
+      domain: storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url)),
+      domainLines: appDomainLines(r.meta, flags.get(r.id) ?? {}, storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url))),
       framework: str(r.meta.framework), productionBranch: str(r.meta.productionBranch),
       createdAt: created ? new Date(created) : null, teamName: str(r.meta.teamName),
       teamSlug: str(r.meta.teamSlug), repo: str(r.meta.repo), repoType: str(r.meta.repoType),

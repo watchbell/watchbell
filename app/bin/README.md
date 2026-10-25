@@ -115,8 +115,8 @@ watchbell.service`, `Start-ScheduledTask Watchbell`, or `launchctl kickstart gui
 
 ## More
 
-Features, screenshots and the full documentation: https://github.com/watchbell/watchbell. Report security problems
-privately as described in the repository's security policy.
+The full documentation: https://watchbell.west-solutions.web.id/docs. Features, screenshots and the source: https://github.com/watchbell/watchbell.
+Report security problems privately as described in the repository's security policy.
 
 ## License
 

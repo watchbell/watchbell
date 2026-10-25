@@ -10,7 +10,7 @@ import {
 } from "./proposals-settings";
 
 const ACTOR = { userId: "user-1" };
-const ALL_ON = { recheck: true, neon_wake: true, supabase_keepalive: true, supabase_restore: true, vercel_redeploy: true, vercel_rollback: true, github_bump_pr: true, domain_recheck: true, daily_rerun: false };
+const ALL_ON = { recheck: true, neon_wake: true, supabase_keepalive: true, supabase_restore: true, vercel_redeploy: true, vercel_rollback: true, github_bump_pr: true, domain_recheck: true, daily_rerun: false, monitor_update_url: true };
 
 function deps(stored: unknown) {
   const state = { stored };
@@ -33,13 +33,13 @@ describe("readAutoRun", () => {
 
   it("keeps the safe kinds that are switched on, and a risky kind is always false whatever is stored", async () => {
     expect(await readAutoRun({ read: async () => ({ ...ALL_ON, extra: true }) })).toEqual({
-      recheck: true, neon_wake: true, supabase_keepalive: true, supabase_restore: false, vercel_redeploy: false, vercel_rollback: false, github_bump_pr: false, domain_recheck: true, daily_rerun: false,
+      recheck: true, neon_wake: true, supabase_keepalive: true, supabase_restore: false, vercel_redeploy: false, vercel_rollback: false, github_bump_pr: false, domain_recheck: true, daily_rerun: false, monitor_update_url: true,
     });
     expect(Object.keys(parseAutoRun({ extra: true })).sort()).toEqual(Object.keys(ALL_ON).sort());
   });
 
-  it("the safe kinds are the four idempotent ones", () => {
-    expect(SAFE_KINDS).toEqual(["recheck", "neon_wake", "supabase_keepalive", "domain_recheck"]);
+  it("the safe kinds are the five idempotent ones", () => {
+    expect(SAFE_KINDS).toEqual(["recheck", "neon_wake", "supabase_keepalive", "domain_recheck", "monitor_update_url"]);
   });
 });
 
@@ -126,27 +126,42 @@ describe("auto-rollback setting", () => {
 });
 
 describe("automatic security fixes setting", () => {
-  it("is ON by default for critical and high; a stored row decides", () => {
-    expect(parseAutoSecurity(null)).toEqual({ enabled: true, severities: ["critical", "high"], sameMajorOnly: true });
-    expect(parseAutoSecurity({ enabled: false, severities: ["critical"] })).toEqual({ enabled: false, severities: ["critical"], sameMajorOnly: true });
-    expect(parseAutoSecurity({ enabled: true, severities: ["high", "critical"] }).severities).toEqual(["critical", "high"]);
-    expect(parseAutoSecurity({ enabled: "yes", severities: ["moderate"] })).toEqual({ enabled: false, severities: ["critical", "high"], sameMajorOnly: true });
-    expect(parseAutoSecurity({ enabled: true, severities: [], sameMajorOnly: false })).toEqual({ enabled: true, severities: [], sameMajorOnly: true });
+  it("is ON by default for critical, high and moderate; a stored row decides", () => {
+    expect(parseAutoSecurity(null)).toEqual({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true });
+    expect(parseAutoSecurity({ enabled: false, severities: ["critical"], moderate: false })).toEqual({ enabled: false, severities: ["critical"], sameMajorOnly: true });
+    expect(parseAutoSecurity({ enabled: true, severities: ["high", "critical"], moderate: false }).severities).toEqual(["critical", "high"]);
+    expect(parseAutoSecurity({ enabled: "yes", severities: ["low"] })).toEqual({ enabled: false, severities: ["critical", "high", "moderate"], sameMajorOnly: true });
+    expect(parseAutoSecurity({ enabled: true, severities: [], moderate: false, sameMajorOnly: false })).toEqual({ enabled: true, severities: [], sameMajorOnly: true });
   });
-  it("validates input strictly; a major update can't be allowed", () => {
+  // Watchbell 1.2.1 (owner 1a: Moderate is treated like High): a row saved before 1.2.1 has no "moderate" key, so
+  // Moderate is on for it; once the owner flips the Moderate switch, the key holds the choice.
+  // Fix round 1 (review minor 1): Moderate is treated like High, so a keyless row follows its High switch.
+  it("a stored row without the moderate key follows High; the key decides once saved", () => {
+    expect(parseAutoSecurity({ enabled: true, severities: ["critical", "high"] }).severities).toEqual(["critical", "high", "moderate"]);
+    expect(parseAutoSecurity({ enabled: true, severities: ["critical"] }).severities).toEqual(["critical"]);
+    expect(parseAutoSecurity({ enabled: true }).severities).toEqual(["critical", "high", "moderate"]); // no valid list: critical and high
+    expect(parseAutoSecurity({ enabled: true, severities: ["critical", "high", "moderate"], moderate: false }).severities).toEqual(["critical", "high"]);
+    expect(parseAutoSecurity({ enabled: true, severities: ["critical"], moderate: true }).severities).toEqual(["critical", "moderate"]);
+  });
+  it("validates input strictly; a major update can't be allowed; low and unknown stay display-only", () => {
     expect(validateAutoSecurity({ enabled: false, severities: ["critical"] })).toEqual({ enabled: false, severities: ["critical"] });
-    for (const bad of [null, { enabled: 1 }, { severities: ["moderate"] }, { severities: "critical" }, { sameMajorOnly: false }, { other: 1 }]) {
+    expect(validateAutoSecurity({ severities: ["moderate", "critical"] })).toEqual({ severities: ["critical", "moderate"] });
+    for (const bad of [null, { enabled: 1 }, { severities: ["low"] }, { severities: ["unknown"] }, { severities: "critical" }, { sameMajorOnly: false }, { other: 1 }]) {
       expect(() => validateAutoSecurity(bad)).toThrow(AutoRunInputError);
     }
   });
-  it("reads the default, saves and audits what changed", async () => {
+  it("reads the default, saves (with the moderate key) and audits what changed", async () => {
     const d = deps(null);
-    expect(await readAutoSecurity(d)).toEqual({ enabled: true, severities: ["critical", "high"], sameMajorOnly: true });
-    const out = await writeAutoSecurity({ severities: ["critical"] }, ACTOR, d);
-    expect(out).toEqual({ enabled: true, severities: ["critical"], sameMajorOnly: true });
-    expect(d.audit).toHaveBeenCalledWith({ message: ACTIONS_COPY.settingsAudit.autoSecurity, detail: "severities critical+high → critical", actorUserId: "user-1" });
+    expect(await readAutoSecurity(d)).toEqual({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true });
+    const out = await writeAutoSecurity({ severities: ["critical", "high"] }, ACTOR, d);
+    expect(out).toEqual({ enabled: true, severities: ["critical", "high"], sameMajorOnly: true });
+    expect(d.state.stored).toEqual({ enabled: true, severities: ["critical", "high"], sameMajorOnly: true, moderate: false });
+    expect(await readAutoSecurity(d)).toEqual(out); // Moderate stays off once switched off
+    expect(d.audit).toHaveBeenCalledWith({ message: ACTIONS_COPY.settingsAudit.autoSecurity, detail: "severities critical+high+moderate → critical+high", actorUserId: "user-1" });
     d.audit.mockClear();
     await writeAutoSecurity({ enabled: false }, ACTOR, d);
     expect(d.audit).toHaveBeenCalledWith(expect.objectContaining({ detail: "Automatic security fixes on → off" }));
+    await writeAutoSecurity({ severities: ["critical", "high", "moderate"] }, ACTOR, d);
+    expect(d.state.stored).toMatchObject({ moderate: true });
   });
 });

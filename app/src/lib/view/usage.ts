@@ -1,6 +1,6 @@
 import { computeLine, type ComputeValues, connPct, FRESH_MS, hourSeries, type HourRow, type MetricsLatest } from "@/lib/databases/compute-metrics";
 import { d1Shares, type Share, tursoShares, upstashShares } from "@/lib/databases/extra";
-import { FIRESTORE_FREE, quotaDayStart } from "@/lib/databases/firebase";
+import { FIRESTORE_FREE, FIRESTORE_USAGE_STORAGE, quotaDayStart } from "@/lib/databases/firebase";
 import { NEON_FREE } from "@/lib/databases/neon";
 import { d1Data, firebaseData, neonData, readData, supabaseData, tursoData, upstashData } from "@/lib/databases/snapshot-data";
 import { FREE_DB_BYTES } from "@/lib/databases/supabase";
@@ -14,8 +14,8 @@ import { type AliasBook, dbAlias, EMPTY_BOOK } from "./display-name";
 //             size vs 500 MB from the Management API (daily). Egress and MAU have no per-project Management API
 //             endpoint, so they are named "not readable" with where to look.
 //   Neon      CU-hours, active time, storage and transfer vs the free plan, from the Neon API project object.
-//   Firestore reads / writes / deletes today vs the Spark quotas, from Cloud Monitoring; storage (1 GiB) has a
-//             Cloud Monitoring metric but Spark answers 403 "requires billing", so it is "not readable" there.
+//   Firestore reads / writes / deletes today vs the Spark quotas, from Cloud Monitoring (Blaze only: Spark answers 403
+//             "requires billing"); storage (1 GiB) isn't read on any plan.
 // Pure.
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
@@ -138,7 +138,7 @@ export function usageRows(
       id: r.id, name: r.name, alias: dbAlias(book, r.id), provider: "Firestore", href: "/firebase", state: r.state, main, source: "monitoring",
       asOf: opsAt ? ago(opsAt, now) : null,
       extra: shares.filter((s) => s !== main).map((s) => `${s.label.replace(" today", "")} ${Math.round(s.pct ?? 0)}%`),
-      note: d.opsError ?? (main ? "Storage (1 GiB): not readable, Cloud Monitoring needs billing (Blaze) for it." : "No usage read today yet."),
+      note: d.opsError ?? (main ? FIRESTORE_USAGE_STORAGE : "No usage read today yet."),
     });
   }
   // Stage 8: the same shares the Turso, Upstash and D1 pages show (lib/databases/extra.ts).

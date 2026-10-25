@@ -1,0 +1,4 @@
+-- Watchbell 1.2.1: the alert rule MonitorDomainMoved and the action monitor_update_url, the same as the cloud migration 0057 (MonitorDown's channels, else the default).
+insert into ops.alert_rules (key, severity, threshold, channels) select 'MonitorDomainMoved', 'warning', null, coalesce((select channels from ops.alert_rules where key = 'MonitorDown'), '["telegram","email_digest"]'::jsonb) on conflict (key) do nothing;--> statement-breakpoint
+alter table ops.action_proposals drop constraint if exists action_proposals_action_check;--> statement-breakpoint
+alter table ops.action_proposals add constraint action_proposals_action_check check (action in ('recheck', 'neon_wake', 'supabase_keepalive', 'supabase_restore', 'vercel_redeploy', 'vercel_rollback', 'github_bump_pr', 'domain_recheck', 'daily_rerun', 'monitor_update_url'));

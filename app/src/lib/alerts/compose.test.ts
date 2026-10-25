@@ -111,6 +111,12 @@ describe("composeMessage in Indonesian", () => {
     for (const t of [m.telegram, m.discord]) expect(t).not.toMatch(/consecutive|expires|limit|uses|min ago|more on the Alerts page|FIRING|REPEAT|RESOLVED|since /);
   });
 
+  // Review T1 minor 9: FrameworkVulnerable says how to get the update PR (or to update next by hand).
+  it("FrameworkVulnerable carries the next step in both languages", () => {
+    expect(nextStep("FrameworkVulnerable")).toBe("Next step: if the app's GitHub repository isn't linked yet, link it on the app page to get an update PR from the office; or update next yourself.");
+    expect(nextStep("FrameworkVulnerable", "id")).toBe("Langkah: kalau repo GitHub app-nya belum di-link, link di halaman app biar office bikinin PR update; atau update next sendiri.");
+  });
+
   it("restores the Indonesian next steps", () => {
     expect(nextStep("CollectorStale", "id")).toBe("Langkah: watchdog udah jalanin collector sendiri tiap 5 menit. Cek job di cron-job.org dan deploy terakhir di Vercel.");
     expect(nextStep("MonitorDown", "id")).toBeNull();

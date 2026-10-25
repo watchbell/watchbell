@@ -275,7 +275,7 @@ The installers never use `sudo` or administrator rights and never open a firewal
 | [Troubleshooting](docs/troubleshooting.md) | Common errors and how to fix them |
 | [FAQ](docs/faq.md) | Everything else |
 
-An online copy of the documentation and a live demo with made-up data are coming soon.
+The documentation is also online at [watchbell.west-solutions.web.id/docs](https://watchbell.west-solutions.web.id/docs).
 
 ## FAQ highlights
 

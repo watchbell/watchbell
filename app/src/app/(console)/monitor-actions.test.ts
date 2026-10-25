@@ -20,7 +20,9 @@ const h = vi.hoisted(() => ({
   updateHeartbeat: vi.fn(),
   rotateToken: vi.fn(),
   recordTestPing: vi.fn(),
+  moveMonitorToDomain: vi.fn(),
 }));
+vi.mock("@/lib/data/monitor-move-db", () => ({ moveMonitorToDomain: h.moveMonitorToDomain }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("@/lib/rate-limit-db", () => ({ limit: h.limit }));
 vi.mock("next/cache", () => ({ refresh: h.refresh }));
@@ -34,7 +36,7 @@ vi.mock("@/lib/env", () => ({ serverEnv: () => ({ SITE_URL: "https://ops.example
 vi.mock("@/lib/collector/run", () => ({ runCollector: h.runCollector }));
 
 import { LIMITS } from "@/lib/rate-limit";
-import { addHeartbeat, addMonitor, checkNow, editHeartbeat, editMonitor, newPingUrl, pauseAppMonitors, pauseMonitor, recordTestPingAction, removeMonitor } from "./monitor-actions";
+import { addHeartbeat, addMonitor, checkNow, editHeartbeat, editMonitor, newPingUrl, pauseAppMonitors, pauseMonitor, recordTestPingAction, removeMonitor, updateMonitorDomain } from "./monitor-actions";
 import { refreshNow } from "./refresh-action";
 
 const form = { url: "https://web.example.com/api/health", expectedStatus: "200", timeoutS: "5" };
@@ -49,6 +51,7 @@ const writes = [
   ["pauseAppMonitors", () => pauseAppMonitors(UUID, true), () => h.setAppMonitorsPaused, () => pauseAppMonitors("nope", true)],
   ["removeMonitor", () => removeMonitor(UUID), () => h.deleteMonitor, () => removeMonitor("nope")],
   ["recordTestPingAction", () => recordTestPingAction(UUID, "ok"), () => h.recordTestPing, () => recordTestPingAction("nope", "ok")],
+  ["updateMonitorDomain", () => updateMonitorDomain(UUID), () => h.moveMonitorToDomain, () => updateMonitorDomain("nope")], // Watchbell 1.2.1
 ] as const;
 const all = [...writes, ["checkNow", () => checkNow(UUID), () => h.checkMonitorNow, () => checkNow("nope")]] as const;
 
@@ -56,7 +59,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   h.requireActionMember.mockResolvedValue(member);
   h.limit.mockResolvedValue({ allowed: true, retryAfter: 0 });
-  for (const fn of [h.createMonitor, h.updateMonitor, h.setMonitorPaused, h.setAppMonitorsPaused, h.deleteMonitor, h.checkMonitorNow, h.recordTestPing]) fn.mockResolvedValue(done());
+  for (const fn of [h.createMonitor, h.updateMonitor, h.setMonitorPaused, h.setAppMonitorsPaused, h.deleteMonitor, h.checkMonitorNow, h.recordTestPing, h.moveMonitorToDomain]) fn.mockResolvedValue(done());
   h.recordAction.mockResolvedValue(undefined);
   h.runCollector.mockResolvedValue({ skipped: false, ok: true });
 });

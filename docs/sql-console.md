@@ -1,5 +1,7 @@
 # SQL console
 
+Bahasa Indonesia: [id/sql-console.md](id/sql-console.md)
+
 **Database › SQL console** (owner only) runs read-only queries against the Supabase and Neon databases you watch, and
 has a query builder for Firestore. It is meant for looking, not changing: every query runs as a read-only database
 role you create for Watchbell, inside a read-only transaction that is rolled back afterwards.
@@ -80,7 +82,8 @@ Review it first: it lets `watchpost_ro` read every row of those tables.
 On the **Postgres** tab, pick a database by its alias, write a query and run it.
 
 - Only one statement at a time, and only `SELECT`, `WITH`, `EXPLAIN` (without `ANALYZE`), `SHOW` and `TABLE`.
-  Parameters such as `$1` aren't supported; write the value into the query.
+  Parameters such as `$1` aren't supported; write the value into the query. Unicode escapes (`U&'…'` and `U&"…"`)
+  aren't accepted either; write the text plainly.
 - Limits: 5 seconds per statement, 2 seconds waiting for a lock, at most 500 rows and 100 columns shown, long values
   cut at 2,000 characters.
 - Every run is checked on the server first, then runs in a `READ ONLY` transaction that is rolled back. The database

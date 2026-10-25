@@ -58,6 +58,10 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     ComputeHigh: "check the Pool card on the Supabase page (idle connections close automatically at 10 of 15); for CPU or disk, look for heavy queries.",
     DnsProxiedToVercel: "turn off the proxy (orange cloud) for that record in Cloudflare; Vercel needs DNS only.",
     CredentialExpiring: "create a new token and replace it in Settings → Connections before it expires.",
+    // Review T1: the office proposes the update PR only for an app linked to its GitHub repository.
+    FrameworkVulnerable: "if the app's GitHub repository isn't linked yet, link it on the app page to get an update PR from the office; or update next yourself.",
+    // Watchbell 1.2.1: the app moved; nothing to redeploy.
+    MonitorDomainMoved: "press Update monitor on the Uptime page (or approve the proposal) so the monitor checks the new domain; the app itself is fine.",
   },
   // The owner's own words, as they were before 62caff7.
   id: {
@@ -70,6 +74,8 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     ComputeHigh: "cek kartu Pool di halaman Supabase (koneksi nganggur ditutup otomatis di 10 dari 15), kalau CPU/disk cari query yang berat.",
     DnsProxiedToVercel: "matiin proxy (awan oranye) record itu di Cloudflare, Vercel butuh DNS only.",
     CredentialExpiring: "bikin token baru dan ganti di Settings → Connections sebelum habis.",
+    FrameworkVulnerable: "kalau repo GitHub app-nya belum di-link, link di halaman app biar office bikinin PR update; atau update next sendiri.",
+    MonitorDomainMoved: "pencet Update monitor di halaman Uptime (atau approve usulannya) biar monitor ngecek domain baru; app-nya sendiri aman.",
   },
 };
 export const nextStep = (ruleKey: string, lang: NotifyLang = "en"): string | null => {

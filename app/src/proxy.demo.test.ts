@@ -45,7 +45,7 @@ describe("proxy in demo (cookie check only)", () => {
     const body = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
     const forged = (patch: object) => `${Buffer.from(JSON.stringify({ ...body, ...patch })).toString("base64url")}.${mac}`;
     for (const cookie of [
-      forged({ email: "demo@west-solutions.web.id" }),
+      forged({ email: "demo@watchbell.west-solutions.web.id" }),
       forged({ seed: "f".repeat(32) }),
       forged({ iat: body.iat + 1 }),
       `${payload}.${"A".repeat(43)}`,

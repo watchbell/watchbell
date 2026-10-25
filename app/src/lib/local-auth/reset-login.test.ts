@@ -7,6 +7,7 @@ import type { Db } from "@/db/client";
 import { selfhostMigrationsFolder } from "@/db/pglite";
 import * as schema from "@/db/schema";
 import { localSessions, localUsers, rateLimits } from "@/db/schema";
+import { BACKOFF_NAMES, backoffKeys } from "@/lib/backoff";
 import { LIMITS, subjectKey } from "@/lib/rate-limit";
 
 // sessions-db (used here to make and read sessions) reaches the database through db().
@@ -89,16 +90,21 @@ describe("resetLogin", () => {
     expect(await verifyPassword(first.password, (await user(userId)).passwordHash)).toBe(false);
   });
 
-  it("clears the lockouts on that email and that user's password change, and no one else's", async () => {
+  // Review m2: the back-off rows behind a proxy are keyed by email AND network (hashed), so they can't be picked out
+  // for one email: every password sign-in limit is cleared. Other users' password change, MFA rows and the known
+  // networks stay.
+  it("clears every password sign-in limit (proxied ones included) and that user's password change, nothing else", async () => {
     const windowStart = new Date("2026-10-19T10:00:00Z");
-    const keys = {
-      email: subjectKey(LIMITS.passwordEmail, "owner@example.com"),
-      change: subjectKey(LIMITS.passwordChange, userId),
-      otherEmail: subjectKey(LIMITS.passwordEmail, "bo@example.com"),
-    };
-    await db.insert(rateLimits).values(Object.values(keys).map((key) => ({ key, windowStart, count: 50 })));
+    const cleared = [
+      subjectKey(LIMITS.passwordEmail, "owner@example.com"), subjectKey(LIMITS.passwordChange, userId),
+      ...backoffKeys(BACKOFF_NAMES.accountIp, "owner@example.com 198.51.100.7"), ...backoffKeys(BACKOFF_NAMES.ip, "198.51.100.7"),
+      ...backoffKeys(BACKOFF_NAMES.accountAll, "owner@example.com"), subjectKey(LIMITS.passwordBurst, "owner@example.com 198.51.100.7"),
+      subjectKey(LIMITS.passwordEmail, "bo@example.com"),
+    ];
+    const kept = [subjectKey(LIMITS.passwordChange, "other-user"), backoffKeys(BACKOFF_NAMES.mfa, "u2")[0], backoffKeys(BACKOFF_NAMES.knownNet, "owner@example.com 192.0.2.1")[0]];
+    await db.insert(rateLimits).values([...cleared, ...kept].map((key) => ({ key, windowStart, count: 50 })));
     await reset("owner@example.com");
-    expect((await db.select({ key: rateLimits.key }).from(rateLimits)).map((r) => r.key)).toEqual([keys.otherEmail]);
+    expect((await db.select({ key: rateLimits.key }).from(rateLimits)).map((r) => r.key).sort()).toEqual([...kept].sort());
   });
 
   it("refuses an unknown email and changes nothing", async () => {

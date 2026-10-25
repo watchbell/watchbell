@@ -1,3 +1,4 @@
+import { BellMark } from "@/components/brand/bell-mark";
 import { Banner } from "@/components/kit";
 import { serverEnv } from "@/lib/env";
 import { isDemo, usesLocalAuth } from "@/lib/mode";
@@ -25,7 +26,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   return (
     <main className="grid min-h-screen place-items-center px-4 py-6">
       <div className="w-[400px] max-w-full rounded-xl border border-line bg-surface p-7">
-        <span className="mb-[18px] grid size-7 place-items-center rounded-[7px] bg-brand font-mono text-xs font-semibold text-on-brand">WB</span>
+        <BellMark className="mb-[18px]" />
         {error && errors[error] && <div className="mb-4"><Banner tone="warning" title={errors[error]} /></div>}
         {isDemo() ? (
           <DemoSignInForm next={nextPath} />

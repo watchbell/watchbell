@@ -25,6 +25,9 @@ describe("taskScheduleRows", () => {
     expect(rows.map((r) => r.task)).toEqual(Object.keys(TASKS));
     expect(rows.every((r) => r.label.length > 0)).toBe(true);
     expect(rows.find((r) => r.task === "pageviews")?.every).toBe("every 30 min");
+    expect(rows.find((r) => r.task === "security")).toEqual({
+      task: "security", label: "Security check: Next.js versions and dependency advisories (also right after a production deploy)", every: "every 6 h",
+    });
   });
 });
 
@@ -80,11 +83,12 @@ describe("budgetRows", () => {
     expect(rows.find((r) => r.key === "neon-n1")).toMatchObject({ use: "75 CU-hours", tone: "warn" });
     expect(rows.find((r) => r.key === "neon-n2")).toMatchObject({ use: "not read yet", pct: null, tone: "none" });
   });
-  it("never invents numbers: Vercel and Web Analytics events read 'not read yet'", () => {
+  // 1.2.1 (4c): the console never reads Vercel's usage or the monthly event count, so "not read", not "not read yet".
+  it("never invents numbers: Vercel usage and Web Analytics events say 'not read'", () => {
     const rows = budgetRows({ slots: [], neon: [], apps: { total: 3, read: 2, enabled: 1 } });
-    expect(rows.find((r) => r.key === "vercel")?.use).toBe("not read yet");
-    expect(rows.find((r) => r.key === "analytics")?.use).toBe("1 of 3 apps enabled · events not read yet");
-    expect(budgetRows({ slots: [], neon: [], apps: { total: 2, read: 0, enabled: 0 } }).find((r) => r.key === "analytics")?.use).toContain("not read yet");
+    expect(rows.find((r) => r.key === "vercel")?.use).toBe("not read (Vercel dashboard → Usage)");
+    expect(rows.find((r) => r.key === "analytics")?.use).toBe("1 of 3 apps enabled · events not read");
+    expect(budgetRows({ slots: [], neon: [], apps: { total: 2, read: 0, enabled: 0 } }).find((r) => r.key === "analytics")?.use).toBe("not read yet · events not read");
   });
   it("uses the Owner's saved limits and tones (stage 7, B6), the published ones by default", () => {
     const def = budgetRows({ slots: [], neon: [], apps });

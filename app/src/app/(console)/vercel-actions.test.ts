@@ -20,6 +20,9 @@ const h = vi.hoisted(() => ({
   promote: vi.fn(),
   cancelDeployment: vi.fn(),
   promotePreview: vi.fn(),
+  currentDeploymentId: vi.fn(),
+  deploymentOfApp: vi.fn(),
+  buildLogs: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("@/lib/data/provider-action-db", () => ({ loadTarget: h.loadTarget, targetQuota: h.targetQuota, finish: h.finish }));
@@ -29,7 +32,11 @@ vi.mock("@/lib/providers/vercel", () => ({
   promotePreview: h.promotePreview,
 }));
 
-import { cancelAction, promoteAction, promotePreviewAction, redeployAction, rollbackAction } from "./vercel-actions";
+vi.mock("@/lib/data/deployments-db", () => ({ currentDeploymentId: h.currentDeploymentId, deploymentOfApp: h.deploymentOfApp }));
+vi.mock("@/lib/providers/vercel-build-logs", () => ({ buildLogs: h.buildLogs }));
+
+import { DEMO_BUILD_LOG } from "@/lib/view/build-logs";
+import { buildLogsAction, cancelAction, promoteAction, promotePreviewAction, redeployAction, redeployCurrentAction, rollbackAction } from "./vercel-actions";
 
 const at = (hh: number) => new Date(Date.UTC(2026, 9, 13, hh));
 const dep = (id: string, hh: number, extra: Record<string, unknown> = {}) => ({
@@ -163,6 +170,92 @@ describe("redeployAction", () => {
     expect(h.finish).toHaveBeenCalledWith(
       expect.objectContaining({ done: true, audit: { message: "Redeploy requested · portfolio-site · cur0abc", resourceId: APP } }), member, ACCOUNT,
     );
+  });
+});
+
+// 1.2.1 (4c): Applications → row menu → Redeploy. The list has no deployment ids, so the action takes the console's
+// current production deployment and runs the app page's redeploy with it (live check, roll-back and running guards).
+describe("redeployCurrentAction", () => {
+  beforeEach(() => {
+    notRolledBack();
+    h.currentDeploymentId.mockResolvedValue(CUR);
+  });
+
+  it("redeploys the console's current production deployment through the same guards", async () => {
+    const r = await redeployCurrentAction(APP);
+    expect(r.ok).toBe(true);
+    expect(h.currentDeploymentId).toHaveBeenCalledWith(APP);
+    expect(h.redeploy).toHaveBeenCalledWith("tok_secret", "team_a", { projectId: "prj_web", name: "portfolio-site", deploymentId: CUR });
+  });
+
+  it("refuses while rolled back, like the app page", async () => {
+    h.productionDeployments.mockResolvedValue({ ok: true, data: [dep(STAGED, 5), dep(CUR, 4), dep(PREV, 3)] });
+    expect(await redeployCurrentAction(APP)).toEqual({ ok: false, error: "Rolled back: promote a deployment first. A redeploy would stay staged and not go live." });
+    expect(h.redeploy).not.toHaveBeenCalled();
+  });
+
+  it("no current production deployment known: a plain refusal, no Vercel call", async () => {
+    h.currentDeploymentId.mockResolvedValue(null);
+    expect(await redeployCurrentAction(APP)).toEqual({ ok: false, error: "No current production deployment" });
+    expect(h.currentProduction).not.toHaveBeenCalled();
+    expect(h.redeploy).not.toHaveBeenCalled();
+  });
+
+  it("checks the role and the id first", async () => {
+    expect(await redeployCurrentAction("nope")).toEqual({ ok: false, error: INVALID });
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect((await redeployCurrentAction(APP)).ok).toBe(false);
+    expect(h.redeploy).not.toHaveBeenCalled();
+  });
+});
+
+// Task 4 build logs: read server-side with the app's team id and stored token; Operator+ only; demo shows a canned log.
+describe("buildLogsAction", () => {
+  const log = { lines: [{ at: 1, kind: "stdout", text: "> next build" }], truncated: false };
+  beforeEach(() => {
+    h.deploymentOfApp.mockResolvedValue(true);
+    h.buildLogs.mockResolvedValue({ ok: true, data: log });
+  });
+
+  it("reads the build events with the app's team id and the stored token", async () => {
+    expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: true, data: log });
+    expect(h.requireActionMember).toHaveBeenCalledWith("operator");
+    expect(h.deploymentOfApp).toHaveBeenCalledWith(APP, BUILD);
+    expect(h.loadTarget).toHaveBeenCalledWith(APP, "app");
+    expect(h.buildLogs).toHaveBeenCalledWith("tok_secret", "team_a", BUILD);
+  });
+
+  it("viewers are refused before any read (the role gate)", async () => {
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: false, error: "You don't have permission to do that." });
+    expect(h.loadTarget).not.toHaveBeenCalled();
+    expect(h.buildLogs).not.toHaveBeenCalled();
+  });
+
+  it("only a deployment of this app, with valid ids", async () => {
+    expect(await buildLogsAction("nope", BUILD)).toEqual({ ok: false, error: INVALID });
+    expect(await buildLogsAction(APP, "dpl_x")).toEqual({ ok: false, error: INVALID });
+    h.deploymentOfApp.mockResolvedValue(false);
+    expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: false, error: INVALID });
+    expect(h.buildLogs).not.toHaveBeenCalled();
+  });
+
+  it("a failed read is one sentence, never Vercel's body", async () => {
+    h.buildLogs.mockResolvedValue({ ok: false, kind: "auth", status: 403, error: "Vercel rejected this credential (403)." });
+    expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: false, error: "Couldn't read the build log: Vercel rejected this credential (403)." });
+    h.loadTarget.mockResolvedValue(null);
+    expect((await buildLogsAction(APP, BUILD)).ok).toBe(false);
+  });
+
+  it("demo mode shows the canned log and calls nothing", async () => {
+    vi.stubEnv("WATCHBELL_MODE", "demo");
+    try {
+      expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: true, data: DEMO_BUILD_LOG });
+      expect(h.loadTarget).not.toHaveBeenCalled();
+      expect(h.buildLogs).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

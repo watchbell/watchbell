@@ -19,7 +19,8 @@ export type ProposalAction =
   | "vercel_rollback"    // roll production back to the previous ready deployment (vercel-actions rollbackAction) — risky
   | "github_bump_pr"     // Stage 9 slice 5: a branch + PR raising vulnerable packages to their fix (lib/data/deps-pr.ts) — risky
   | "daily_rerun"        // owner 19 Oct: call the console's own /api/daily again when its daily-job heartbeat is down (approval only) — risky
-  | "domain_recheck";    // owner 17 Oct: a TLS handshake + RDAP read for a domain whose certificate looks close to expiry (Domains → Re-check) — safe
+  | "domain_recheck"     // owner 17 Oct: a TLS handshake + RDAP read for a domain whose certificate looks close to expiry (Domains → Re-check) — safe
+  | "monitor_update_url"; // Watchbell 1.2.1: point an uptime monitor at its app's new domain, keeping the path (Uptime → Update monitor) — safe
 
 export type ProposalRisk = "safe" | "risky";
 export type ProposalStatus = "pending" | "approved" | "running" | "done" | "failed" | "rejected" | "expired";
@@ -34,6 +35,7 @@ export const ACTIONS: Record<ProposalAction, { risk: ProposalRisk; label: string
   github_bump_pr: { risk: "risky", label: "Open package update PR", uses: "lib/data/deps-pr.ts bumpPrAs (GitHub PR-write token)" },
   domain_recheck: { risk: "safe", label: "Re-check domain certificate", uses: "domains actions recheck (network-db recheckDomain)" },
   daily_rerun: { risk: "risky", label: "Rerun daily job", uses: "GET /api/daily with the cron secret (collector runDailyAll)" },
+  monitor_update_url: { risk: "safe", label: "Update monitor", uses: "Uptime Update monitor (monitor-move-db moveMonitorToDomain)" },
 };
 
 // What the office and the API see. No emails, no secrets, no provider ids beyond what the console already shows.

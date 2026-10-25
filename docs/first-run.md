@@ -1,5 +1,7 @@
 # First run
 
+Bahasa Indonesia: [id/first-run.md](id/first-run.md)
+
 The first person to finish the setup page becomes the **owner** of this Watchbell. To make sure that is you, the setup
 page asks for a one-time code that only someone with access to the machine can read.
 
@@ -86,6 +88,8 @@ If you forgot your password or lost your authenticator, reset the login from the
 `reset-login` works for any account on this Watchbell, not only the owner. It refuses to run while Watchbell is running
 ("Watchbell is running on …. Stop Watchbell first"). It reads `WATCHBELL_DATA_DIR` from the shell, not from
 `app/.env`, so if you moved the data folder, set it first (`WATCHBELL_DATA_DIR=/path/to/data npm run reset-login -- you@example.com`).
+It also clears the sign-in wait after failed passwords for every account (behind a reverse proxy those waits are kept
+per email and address together, so they can't be cleared for one email alone).
 
 ## If the setup code doesn't work
 

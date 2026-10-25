@@ -5,6 +5,8 @@ import { RULES, type RuleConfig, type RuleKey } from "./catalog";
 import { bodyFailure } from "@/lib/monitors";
 import { computeBreaches, computeLimits } from "@/lib/databases/compute-metrics";
 import { alertLevel, alertMessage } from "@/lib/deps/plan";
+import { frameworkMessage } from "@/lib/deps/framework";
+import { worstSeverity } from "@/lib/security/rules";
 import type { DbFact, Facts } from "./facts";
 
 export type Observation = {
@@ -20,6 +22,7 @@ const n = (x: number) => Math.round(x).toLocaleString("en-US");
 const daysLeft = (d: Date, now: Date) => Math.floor((d.getTime() - now.getTime()) / DAY);
 const plural = (k: number, w: string) => `${k} ${w}${k === 1 ? "" : "s"}`;
 const hostPath = (url: string) => { try { const u = new URL(url); return `${u.host}${u.pathname}`; } catch { return url; } };
+const hostOf = (url: string) => { try { return new URL(url).host; } catch { return url; } };
 const pathOf = (url: string) => { try { return new URL(url).pathname; } catch { return "/"; } };
 
 // A down heartbeat's lastError is its state text ("Down · the job reported a failure", "Down · started but didn't
@@ -43,8 +46,16 @@ const EVALUATORS: Record<RuleKey, Ev> = {
     const o = base("MonitorDown", m.id, { resourceId: m.appId, title: `${m.appName} ${m.kind === "heartbeat" ? m.url : pathOf(m.url)}`, provider: "vercel", sampleAt: m.lastCheckedAt });
     const limit = t ?? 3;
     if (m.kind === "heartbeat") return { ...o, status: m.state === "err" ? "firing" : m.state === "ok" ? "ok" : "unknown", message: `${m.appName} · ${m.url}: ${heartbeatReason(m.lastError)}.` };
+    // 1.2.1: a detached host isn't the app being down; MonitorDomainMoved speaks for it (and resolves an open MonitorDown).
+    if (m.movedTo) return { ...o, status: "ok", message: `${hostOf(m.url)} moved to ${m.movedTo}; MonitorDomainMoved takes over.` };
     if (m.failStreak >= limit) return { ...o, status: "firing", message: bodyFailure(m) ? `${hostPath(m.url)} failed its check (${bodyFailure(m)}) on ${limit} consecutive checks.` : `${hostPath(m.url)} returned ${m.lastStatus ? `HTTP ${m.lastStatus}` : "no answer"} on ${limit} consecutive checks.` };
     return { ...o, status: m.failStreak === 0 && m.lastCheckedAt ? "ok" : "unknown", message: `${hostPath(m.url)} answers again.` };
+  }),
+  MonitorDomainMoved: (f) => f.monitors.filter((m) => m.kind === "http").map((m) => {
+    const o = base("MonitorDomainMoved", m.id, { resourceId: m.appId, title: `${m.appName} ${pathOf(m.url)}`, provider: "vercel" });
+    return m.movedTo
+      ? { ...o, status: "firing", message: `${hostOf(m.url)} is no longer a domain of ${m.appName}; production is on ${m.movedTo}.` }
+      : { ...o, status: "ok", message: `The monitor checks ${hostOf(m.url)}, a domain of ${m.appName}.` };
   }),
   CollectorStale: (f, t) => {
     const limitMs = (t ?? 5) * 60_000;
@@ -135,8 +146,18 @@ const EVALUATORS: Record<RuleKey, Ev> = {
     const o = base("VulnerableDependency", d.appId, { resourceId: d.appId, title: app.name, provider: "github" });
     if (d.error) return [o];
     const level = alertLevel(d.vulns);
-    if (!level) return [{ ...o, status: "ok" as const, message: `${app.name} has no high or critical dependency advisories.` }];
+    if (!level) return [{ ...o, status: "ok" as const, message: `${app.name} has no moderate, high or critical dependency advisories.` }];
     return [{ ...o, status: "firing" as const, message: alertMessage(d.vulns), ...(level === "critical" ? { severity: "critical" as const } : {}) }];
+  }) : null,
+  // Watchbell 1.2: one subject per checked, watched app. "vulnerable" with findings fires (critical when one is); "ok"
+  // resolves; a check that couldn't read the version or reach OSV.dev ("unknown", "error") says nothing new.
+  FrameworkVulnerable: (f) => f.frameworks ? f.frameworks.flatMap((s) => {
+    const app = f.apps.find((a) => a.id === s.appId);
+    if (!app) return [];
+    const o = base("FrameworkVulnerable", s.appId, { resourceId: s.appId, title: app.name });
+    if (s.status === "ok") return [{ ...o, status: "ok" as const, message: `${app.name} runs Next.js ${s.version ?? "(unknown version)"} with no known advisories.` }];
+    if (s.status !== "vulnerable" || !s.findings.length) return [o];
+    return [{ ...o, status: "firing" as const, message: frameworkMessage(s.version, s.findings), ...(worstSeverity(s.findings) === "CRITICAL" ? { severity: "critical" as const } : {}) }];
   }) : null,
 };
 

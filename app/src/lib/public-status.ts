@@ -34,6 +34,34 @@ export function publicState(s: State, inMaintenance: boolean, paused: boolean): 
   return { state: "unknown", label: "No data" };
 }
 
+// "A", "A and B", "A, B and C", "A, B, C and 2 more": the public names, so a visitor knows which rows to look at.
+function nameList(names: string[]): string {
+  if (names.length > 3) return `${names.slice(0, 3).join(", ")} and ${names.length - 3} more`;
+  return names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+// 1.2.1: the page's one-line answer, from the rows it already shows. A problem outranks maintenance, maintenance
+// outranks missing data, and a service without recent data is never counted as running. Null for an empty page.
+export function overallLine(monitors: { name: string; state: PublicState }[]): { state: PublicState; text: string } | null {
+  if (monitors.length === 0) return null;
+  const names = (...states: PublicState[]) => monitors.filter((m) => states.includes(m.state)).map((m) => m.name);
+  const problems = monitors.filter((m) => m.state === "err" || m.state === "warn");
+  const worst: PublicState = problems.some((m) => m.state === "err") ? "err" : "warn";
+  if (problems.length === 1) return { state: worst, text: `${problems[0].name} is ${worst === "err" ? "down" : "degraded"}.` };
+  if (problems.length > 1) {
+    return { state: worst, text: `${problems.length} services have problems: ${nameList(problems.map((m) => m.name))}.` };
+  }
+  const maint = names("maint");
+  if (maint.length === 1) return { state: "maint", text: `${maint[0]} is in planned maintenance.` };
+  if (maint.length > 1) return { state: "maint", text: `${maint.length} services are in planned maintenance: ${nameList(maint)}.` };
+  const unknown = names("unknown");
+  if (unknown.length === monitors.length) return { state: "unknown", text: `No recent data for ${nameList(unknown)}.` };
+  if (unknown.length) {
+    return { state: "unknown", text: `${monitors.length - unknown.length} of ${monitors.length} services are running. No recent data for ${nameList(unknown)}.` };
+  }
+  return { state: "ok", text: monitors.length === 1 ? `${monitors[0].name} is running.` : `All ${monitors.length} services are running.` };
+}
+
 // The console's light-theme state colours, dark enough for white 11 px text (≥ 4.5:1).
 const COLOR: Record<PublicState, string> = { ok: "#17773f", warn: "#8f5200", err: "#c0272d", maint: "#1f45c9", unknown: "#5f6670" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");

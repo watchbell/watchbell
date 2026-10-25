@@ -60,6 +60,9 @@ describe("sections (Watchbell 1.2, D11)", () => {
     expect(alertSection("CertExpiringSoon")).toBe("hosting");
     expect(alertSection("StorageAlmostFull")).toBe("database");
     expect(alertSection("VulnerableDependency")).toBe("devops");
+    // Watchbell 1.2: the Next.js check needs no GitHub (its update PR does, and pauses with DevOps in the proposals step).
+    expect(alertSection("FrameworkVulnerable")).toBe("hosting");
+    expect(alertPaused(new Set(["devops"] as const), "FrameworkVulnerable")).toBe(false);
     expect(alertSection("CollectorStale")).toBeNull();
     expect(alertSection("CredentialExpiring", "neon")).toBe("database");
     expect(alertSection("CredentialExpiring", "drive")).toBeNull();

@@ -1,5 +1,7 @@
 # Configuration
 
+Bahasa Indonesia: [id/configuration.md](id/configuration.md)
+
 Watchbell reads its settings from `app/.env`. The installer creates the file with safe defaults and fresh secrets;
 [`app/.env.example`](../app/.env.example) lists every key with a comment. Restart Watchbell after you change the file.
 
@@ -77,6 +79,10 @@ Notifications.
 `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `OWNER_EMAIL`,
 `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, `QSTASH_CURRENT_SIGNING_KEY` and `QSTASH_NEXT_SIGNING_KEY` belong to the hosted
 `cloud` mode. Leave them empty on a self-hosted install. Watchbell checks them only if you set them.
+
+On Vercel, Watchbell limits `/api/ping/*`, `/api/v1/*` and sign-in requests per address in memory, per server
+instance, before the database. If your Vercel plan has Firewall rate-limit rules, you can add one too (optional), for
+example 120 requests per minute per IP for `/api/ping/` and `/api/v1/`, and 10 per minute for `POST /signin`.
 
 ## Time zone
 
@@ -165,6 +171,16 @@ WATCHBELL_TRUSTED_PROXY_HOPS=1
 `X-Forwarded-For`. With it set, sign-in and setup rate limits work per client address; without it, any address a
 client sends is ignored and only the overall limits apply. Don't set it without a proxy: clients could then fake their
 address. With an `https://` `SITE_URL`, session cookies are marked Secure.
+
+Behind a reverse proxy, set it. Wrong passwords back off step by step (after 5 failures each new attempt waits twice as
+long as the last: 30 seconds, 1 minute, 2 minutes, up to an hour), counted per email from one address and per address.
+With the setting, failures from somebody else's address never keep you out, and one account still gets at most 50
+free failures a day across all addresses before it backs off for addresses that haven't signed in to it in the last 90
+days (using a signed-in session from an address counts too, so an address you keep using stays known). Without it Watchbell can't tell addresses
+apart, so the back-off counts per email only, and anyone who knows your email can slow your own sign-in down. Wrong
+authenticator codes back off the same way. Ten wrong passwords or ten wrong codes for one account in a day send a
+Telegram notice (at most once an hour). `/api/ping` and the sign-in page also have small per-address limits held in
+memory, which use the same setting.
 
 Exposing Watchbell to the internet is your decision and your responsibility; keep it updated and use strong passwords
 and the authenticator.

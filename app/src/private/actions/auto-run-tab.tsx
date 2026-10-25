@@ -18,6 +18,7 @@ export const AUTO_RUN_WHAT: Record<keyof typeof ACTIONS, string> = {
   github_bump_pr: "Opens a pull request on a new branch that raises vulnerable packages to their fixed versions (needs the GitHub PR-write token).",
   daily_rerun: "Calls the console's daily job again when its heartbeat is down. Always asks for approval.",
   domain_recheck: "Re-reads a domain's TLS certificate and expiry when its certificate looks close to expiry, like Re-check on Domains.",
+  monitor_update_url: "Points an uptime monitor at its app's new domain when the app moved, keeping the path, like Update monitor on Uptime.",
 };
 
 export async function OfficeAutoRunTab() {
@@ -46,7 +47,8 @@ export async function OfficeAutoRunTab() {
       <div className="border-t border-line px-[18px] pb-4 pt-3.5">
         <h3 className="mb-1.5 text-[14px]">Automatic security fixes</h3>
         <p className="mb-2 text-ink-soft">
-          On by default. When a dependency scan finds a critical or high advisory with a fix, Watchbell fixes it end to end:
+          On by default. When a dependency scan finds a critical, high or moderate advisory with a fix, Watchbell fixes it end to end
+          (the scan and the Next.js check run every 6 hours and right after each production deploy):
         </p>
         <ol className="mb-2.5 list-decimal pl-5 text-ink-soft [&_li]:mt-0.5">
           <li>opens the update PR itself (package.json only, on a new watchpost/deps-… branch), only for direct packages that stay in their major version, never twice for the same package while a PR is open;</li>

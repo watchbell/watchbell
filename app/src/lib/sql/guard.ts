@@ -100,7 +100,7 @@ export function lex(src: string): LexResult {
       continue;
     }
     if (WORD_START.test(c)) {
-      // String prefixes: E'…' (backslash escapes), U&'…', B'…', X'…', N'…'; U&"…" is a quoted identifier.
+      // String prefixes: E'…' (backslash escapes), B'…', X'…', N'…'. U&'…' and U&"…" are refused.
       const two = src.slice(i, i + 3);
       if (/^[eE]'/.test(two)) {
         const end = quoted(i + 1, true);
@@ -116,14 +116,9 @@ export function lex(src: string): LexResult {
         i = end;
         continue;
       }
-      if (/^[uU]&'/.test(two)) {
-        const end = quoted(i + 2, false);
-        if (end < 0) return { ok: false, error: "A U&'string' isn't closed." };
-        out.push({ t: "string" });
-        i = end;
-        continue;
-      }
-      if (/^[uU]&"/.test(two)) { i += 2; continue; } // the "…" that follows is lexed as a quoted identifier
+      // Watchbell 1.2.1 (audit L1): U&'…' and U&"…" carry \XXXX escapes (and UESCAPE) that would hide a name from the
+      // checks below ("3et_config"), so they're refused rather than decoded.
+      if (/^[uU]&['"]/.test(two)) return { ok: false, error: "Unicode escapes (U&'…' or U&\"…\") aren't supported in the console. Write the text plainly." };
       let j = i + 1;
       while (j < n && WORD_PART.test(src[j])) j++;
       out.push({ t: "word", v: src.slice(i, j).toLowerCase() });
@@ -151,7 +146,8 @@ const STARTS = new Set(["select", "with", "explain", "show", "table"]);
 
 // Words that never belong in a read-only query, anywhere in it (outside strings, comments and "quoted names"):
 // data-modifying CTEs, SELECT … INTO, EXPLAIN ANALYZE (it runs the statement), and statements that would change the
-// session or the schema. A column really called one of these has to be written "quoted".
+// session or the schema. A column really called one of these has to be written "quoted": Postgres never reads a quoted
+// name as a keyword, except an EXPLAIN option, so a quoted "analyze" / "analyse" is refused (1.2.1, audit L1).
 const DENY_WORDS = new Set([
   "insert", "update", "delete", "merge", "upsert", "into", "truncate", "copy",
   "analyze", "analyse",
@@ -204,17 +200,18 @@ export function guardSql(raw: unknown): GuardResult {
   for (let i = 0; i < tokens.length; i++) {
     const t = tokens[i];
     if (t.t === "param") return { ok: false, error: "Parameters ($1) aren't supported. Write the value into the query." };
-    if (t.t === "word" && DENY_WORDS.has(t.v)) {
-      if (t.v === "analyze" || t.v === "analyse") return { ok: false, error: "EXPLAIN ANALYZE runs the statement, so it isn't allowed. Use plain EXPLAIN." };
-      if (t.v === "into") return { ok: false, error: "SELECT … INTO creates a table, so it isn't allowed." };
-      return { ok: false, error: `${t.v.toUpperCase()} isn't allowed: this console only reads.` };
+    const folded = t.t === "word" || t.t === "qident" ? t.v.toLowerCase() : "";
+    if ((t.t === "word" && DENY_WORDS.has(folded)) || (t.t === "qident" && (folded === "analyze" || folded === "analyse"))) {
+      if (folded === "analyze" || folded === "analyse") return { ok: false, error: "EXPLAIN ANALYZE runs the statement, so it isn't allowed. Use plain EXPLAIN." };
+      if (folded === "into") return { ok: false, error: "SELECT … INTO creates a table, so it isn't allowed." };
+      return { ok: false, error: `${folded.toUpperCase()} isn't allowed: this console only reads.` };
     }
     // Row locks: FOR UPDATE / FOR NO KEY UPDATE / FOR SHARE / FOR KEY SHARE.
     if (isWord(t, "for") && isWord(tokens[i + 1], "update", "share", "no", "key")) {
       return { ok: false, error: "Row locks (FOR UPDATE / FOR SHARE) aren't allowed." };
     }
     if ((t.t === "word" || t.t === "qident") && isPunct(tokens[i + 1], "(")) {
-      if (deniedFunc(t.v)) return { ok: false, error: `${t.v}() isn't allowed in the console.` };
+      if (deniedFunc(folded)) return { ok: false, error: `${folded}() isn't allowed in the console.` };
     }
   }
   return { ok: true, text: raw.trim(), kind: first.v };

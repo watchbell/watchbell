@@ -78,6 +78,7 @@ const ACTION_LABEL_ID: Record<ProposalAction, string> = {
   recheck: "Cek ulang sekarang", neon_wake: "Bangunin Neon", supabase_keepalive: "Kirim keep-alive Supabase",
   supabase_restore: "Restore project Supabase", vercel_redeploy: "Redeploy production", vercel_rollback: "Rollback ke deploy sebelumnya",
   github_bump_pr: "Bikin PR update paket", domain_recheck: "Cek ulang sertifikat domain", daily_rerun: "Jalanin ulang daily job",
+  monitor_update_url: "Arahin monitor ke domain baru",
 };
 export const pendingLine = (lang: NotifyLang = "en"): string => t(MSG, lang, "pending");
 export const devLine = (lang: NotifyLang = "en"): string => t(MSG, lang, "dev");

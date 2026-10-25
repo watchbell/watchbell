@@ -211,6 +211,7 @@ describe("Indonesian notices (lang: id)", () => {
     expect(names).toEqual([
       "Cek ulang sekarang", "Bangunin Neon", "Kirim keep-alive Supabase", "Restore project Supabase",
       "Redeploy production", "Rollback ke deploy sebelumnya", "Bikin PR update paket", "Cek ulang sertifikat domain", "Jalanin ulang daily job",
+      "Arahin monitor ke domain baru",
     ]);
   });
   it("grouped, result, rollback and dep-PR lines", async () => {

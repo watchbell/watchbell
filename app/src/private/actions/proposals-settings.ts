@@ -51,7 +51,7 @@ export function autoRunChanges(before: AutoRun, after: AutoRun): string | null {
 
 export type AutoRunDeps = {
   read: () => Promise<unknown>;
-  write: (value: AutoRun | AutoRollback | AutoSecurity) => Promise<void>;
+  write: (value: AutoRun | AutoRollback | StoredAutoSecurity) => Promise<void>;
   audit: (e: { message: string; detail: string; actorUserId: string }) => Promise<void>;
 };
 
@@ -161,25 +161,35 @@ export async function writeAutoRollback(next: Partial<AutoRollback>, actor: { us
 }
 
 // Automatic security fixes (owner 16 Oct: "Auto aja, soalnya tentang keamanan dependencies"): ops.settings
-// "office.autoSecurity" { enabled, severities, sameMajorOnly }. ON by default for critical and high. When on, an update-PR
-// proposal (github_bump_pr) runs without asking if its packages are direct, stay in their major and are at a chosen
-// severity, and the merge watcher merges Watchbell's PRs once CI, the Vercel preview and its smoke test pass, but only
-// while auto-rollback is on. sameMajorOnly is always true (a major jump always waits for the owner).
+// "office.autoSecurity" { enabled, severities, sameMajorOnly, moderate }. ON by default for critical, high and moderate. When on, an
+// update-PR proposal (github_bump_pr) runs without asking if its packages are direct, stay in their major and are at a
+// chosen severity, and the merge watcher merges Watchbell's PRs once CI, the Vercel preview and its smoke test pass, but
+// only while auto-rollback is on. sameMajorOnly is always true (a major jump always waits for the owner). Low and
+// unknown advisories are shown, never fixed automatically.
+// Watchbell 1.2.1 (owner 1a: "Moderate is treated like High"): a row saved before 1.2.1 has no `moderate` key, and reads
+// with Moderate as its High switch (on for the default critical+high); a new install has it on. Every save writes the
+// key, so the owner's later choice for Moderate sticks.
 export const AUTO_SECURITY_SETTING = "office.autoSecurity";
-export const SECURITY_LEVELS = ["critical", "high"] as const;
+export const SECURITY_LEVELS = ["critical", "high", "moderate"] as const;
 export type SecurityLevel = (typeof SECURITY_LEVELS)[number];
 export type AutoSecurity = { enabled: boolean; severities: SecurityLevel[]; sameMajorOnly: true };
-export const AUTO_SECURITY_DEFAULT: AutoSecurity = { enabled: true, severities: ["critical", "high"], sameMajorOnly: true };
+export const AUTO_SECURITY_DEFAULT: AutoSecurity = { enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true };
+// What is stored: the setting plus the explicit Moderate choice.
+export type StoredAutoSecurity = AutoSecurity & { moderate: boolean };
+export const storedAutoSecurity = (s: AutoSecurity): StoredAutoSecurity => ({ ...s, moderate: s.severities.includes("moderate") });
 
 const levelsOf = (v: unknown): SecurityLevel[] | null =>
   Array.isArray(v) && v.every((x) => (SECURITY_LEVELS as readonly unknown[]).includes(x)) ? SECURITY_LEVELS.filter((l) => v.includes(l)) : null;
 
 // Pure: whatever is stored → a full AutoSecurity. Nothing stored → the default (on); a stored row decides enabled
-// (only exactly true is on) and its severities when they are a valid list.
+// (only exactly true is on) and its severities when they are a valid list (else critical and high); Moderate follows
+// the row's `moderate` key; without it (a row saved before 1.2.1) it follows High, since Moderate is treated like High.
 export function parseAutoSecurity(raw: unknown): AutoSecurity {
   if (raw === null || raw === undefined) return { ...AUTO_SECURITY_DEFAULT, severities: [...AUTO_SECURITY_DEFAULT.severities] };
   const src = typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  return { enabled: src.enabled === true, severities: levelsOf(src.severities) ?? [...AUTO_SECURITY_DEFAULT.severities], sameMajorOnly: true };
+  const listed = levelsOf(src.severities) ?? ["critical", "high"];
+  const moderate = typeof src.moderate === "boolean" ? src.moderate : listed.includes("high");
+  return { enabled: src.enabled === true, severities: SECURITY_LEVELS.filter((l) => (l === "moderate" ? moderate : listed.includes(l))), sameMajorOnly: true };
 }
 
 export function validateAutoSecurity(input: unknown): Partial<AutoSecurity> {
@@ -191,7 +201,7 @@ export function validateAutoSecurity(input: unknown): Partial<AutoSecurity> {
       out.enabled = v;
     } else if (k === "severities") {
       const l = levelsOf(v);
-      if (!l) throw new AutoRunInputError("Severities are critical and/or high.");
+      if (!l) throw new AutoRunInputError("Severities are critical, high and/or moderate.");
       out.severities = l;
     } else if (k === "sameMajorOnly") {
       if (v !== true) throw new AutoRunInputError("Major updates always wait for you.");
@@ -227,10 +237,11 @@ export async function writeAutoSecurity(next: Partial<AutoSecurity>, actor: { us
   const d = { ...SECURITY_DEPS, ...deps };
   const changes = validateAutoSecurity(next);
   const before = parseAutoSecurity(await d.read());
-  const after = parseAutoSecurity({ ...before, ...changes });
+  // The merged list decides Moderate too (storedAutoSecurity sets the key from it).
+  const after = parseAutoSecurity(storedAutoSecurity({ ...before, ...changes }));
   const diff = autoSecurityChanges(before, after);
   if (!diff) return after;
-  await d.write(after);
+  await d.write(storedAutoSecurity(after));
   await d.audit({ message: ACTIONS_COPY.settingsAudit.autoSecurity, detail: diff, actorUserId: actor.userId })
     .catch(() => console.warn("settings audit failed"));
   return after;

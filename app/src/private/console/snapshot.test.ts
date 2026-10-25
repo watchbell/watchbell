@@ -23,7 +23,7 @@ vi.mock("react", async (orig) => ({
 }));
 vi.mock("@/lib/data/apps-db", () => ({ listApps: h.listApps }));
 vi.mock("@/lib/data/monitors-db", () => ({ listMonitors: h.listMonitors }));
-vi.mock("@/lib/data/alerts-db", () => ({ listFiring: h.listFiring }));
+vi.mock("@/lib/data/alerts-db", () => ({ listShownFiring: h.listFiring }));
 vi.mock("@/lib/data/events-db", () => ({ listEvents: h.listEvents }));
 vi.mock("@/lib/data/logs-db", () => ({ listStoredLogs: h.listStoredLogs }));
 vi.mock("@/lib/data/advisor-db", () => ({ listRecommendations: h.listRecommendations }));

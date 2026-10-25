@@ -10,5 +10,12 @@ node_modules/
 .cache/
 .worktrees/
 
+# Public site (site/): build output, docs assets copied at build time, test scratch, generated types
+site/out/
+site/public/docs-assets/
+site/.test-out/
+site/next-env.d.ts
+site/*.tsbuildinfo
+
 # Written by scripts/export-public.mjs when this repo was produced by an export
 .watchpost-export

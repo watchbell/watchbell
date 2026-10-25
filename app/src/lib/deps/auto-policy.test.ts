@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { autoPick, effectiveDeps, installedOf, overlappingPr, prPackages, sameMajor, STALE_NOTE } from "./auto-policy";
+import { autoPick, effectiveDeps, installedOf, overlappingPr, prDir, prPackages, sameMajor, STALE_NOTE } from "./auto-policy";
 import type { Upgrade } from "./plan";
 
 const up = (o: Partial<Upgrade>): Upgrade => ({ package: "next", to: "15.0.5", vulnIds: ["GHSA-x"], cves: [], severity: "critical", ...o });
@@ -22,6 +22,22 @@ describe("autoPick", () => {
   it("severity filter: only critical when the owner chose only critical", () => {
     expect(autoPick([up({ severity: "high" })], installed, ["critical"])).toEqual({ ok: false, why: "severity" });
     expect(autoPick([up({ severity: "moderate" })], installed, ["critical", "high"])).toEqual({ ok: false, why: "severity" });
+  });
+  // Watchbell 1.2.1 (owner 1a): Moderate like High, when the owner has it switched on (the default).
+  it("picks a moderate upgrade when moderate is chosen, and not when it isn't", () => {
+    const mod = up({ package: "lodash", to: "4.17.21", severity: "moderate" });
+    expect(autoPick([mod], installed, ["critical", "high", "moderate"])).toEqual({ ok: true, upgrades: [mod] });
+    expect(autoPick([up({}), mod], installed, ["critical", "high", "moderate"])).toEqual({ ok: true, upgrades: [up({}), mod] });
+    expect(autoPick([mod], installed, ["critical", "high"])).toEqual({ ok: false, why: "severity" });
+    expect(autoPick([up({ severity: "low" }), up({ package: "lodash", to: "4.17.21", severity: "unknown" })], installed, ["critical", "high", "moderate"])).toEqual({ ok: false, why: "severity" });
+  });
+  // Fix round 1 (review minor 7): Moderate counts for direct production dependencies only, in the alert and here.
+  it("never picks a moderate devDependency, even with Moderate on; a high one still follows the High switch", () => {
+    const devMod = up({ package: "lodash", to: "4.17.21", severity: "moderate", dev: true });
+    expect(autoPick([devMod], installed, ["critical", "high", "moderate"])).toEqual({ ok: false, why: "severity" });
+    expect(autoPick([up({}), devMod], installed, ["critical", "high", "moderate"])).toEqual({ ok: true, upgrades: [up({})] });
+    const devHigh = up({ package: "lodash", to: "4.17.21", severity: "high", dev: true });
+    expect(autoPick([devHigh], installed, ["high"])).toEqual({ ok: true, upgrades: [devHigh] });
   });
   it("a major (or 0.x minor) jump among the picked ones → waits for the owner", () => {
     expect(autoPick([up({ to: "16.0.1" })], installed, ["critical"])).toEqual({ ok: false, why: "major" });
@@ -72,5 +88,28 @@ describe("effectiveDeps (stale lockfile)", () => {
     expect(effectiveDeps(deps, manifest).stale).toEqual([]);
     expect(effectiveDeps(deps, null)).toEqual({ deps, stale: [] });
     expect(STALE_NOTE(["next"])).toBe("Lockfile tertinggal — jalankan npm install (next).");
+  });
+});
+
+// Watchbell 1.2.1 (review T1): two apps of one repository in different folders each get their own PR.
+describe("prDir / overlappingPr per folder", () => {
+  const pr = (title: string, packages: string[] | null = null) => ({ number: 4, branch: "watchpost/deps-0a0b0c0d", title, packages });
+  it("reads the folder from a Watchbell title; older and root titles are the root", () => {
+    expect(prDir("Watchbell: update next to 16.4.1 in apps/web (security fix)")).toBe("apps/web");
+    expect(prDir("Watchbell: update 2 vulnerable packages in apps/admin (next, vite)")).toBe("apps/admin");
+    expect(prDir("Watchbell: update next to 16.4.1 (security fix)")).toBeNull();
+    expect(prDir("Watchbell: update 2 vulnerable packages (next, vite)")).toBeNull();
+    expect(prDir("Watchpost: update next ke 15.1.0 (perbaikan keamanan)")).toBeNull();
+    expect(prDir("Bump next in apps/web (manual)")).toBeNull();
+  });
+
+  it("only a PR of the same folder overlaps", () => {
+    const web = pr("Watchbell: update next to 16.4.1 in apps/web (security fix)", ["next", "eslint-config-next"]);
+    expect(overlappingPr(["next"], [web], "apps/admin")).toBeNull();
+    expect(overlappingPr(["next"], [web], "apps/web")?.number).toBe(4);
+    expect(overlappingPr(["next"], [web], null)).toBeNull();
+    const root = pr("Watchbell: update next to 16.4.1 (security fix)");
+    expect(overlappingPr(["next"], [root])?.number).toBe(4);
+    expect(overlappingPr(["next"], [root], "apps/web")).toBeNull();
   });
 });

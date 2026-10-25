@@ -5,11 +5,12 @@ import { toast } from "sonner";
 import { Switch } from "@/private/ui/switch";
 import { saveOfficeAutoSecurity } from "./auto-run-actions";
 
-type Level = "critical" | "high";
+type Level = "critical" | "high" | "moderate";
 type Value = { enabled: boolean; severities: Level[]; sameMajorOnly: true };
-const LEVELS: { level: Level; label: string }[] = [{ level: "critical", label: "Critical" }, { level: "high", label: "High" }];
+const LEVELS: { level: Level; label: string }[] = [{ level: "critical", label: "Critical" }, { level: "high", label: "High" }, { level: "moderate", label: "Moderate" }];
 
-// Automatic security fixes (owner 16 Oct): the main switch and one switch per severity, saved on change.
+// Automatic security fixes (owner 16 Oct): the main switch and one switch per severity, saved on change. Watchbell 1.2.1:
+// Moderate sits next to Critical and High (owner 1a); low and unknown advisories are never fixed automatically.
 export function AutoSecurityForm({ saved, rollbackOn }: { saved: Value; rollbackOn: boolean }) {
   const [value, setValue] = useState<Value>(saved);
   const [pending, start] = useTransition();

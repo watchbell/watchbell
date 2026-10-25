@@ -49,7 +49,7 @@ describe("signDemoCookie / verifyDemoCookie", () => {
     const mac = cookie.split(".")[1];
     const body = decode(cookie);
     for (const changed of [
-      { ...body, email: "demo@west-solutions.web.id" },
+      { ...body, email: "demo@watchbell.west-solutions.web.id" },
       { ...body, seed: "f".repeat(32) },
       { ...body, iat: body.iat + 60 },
     ]) {

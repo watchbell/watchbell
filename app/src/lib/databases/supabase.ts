@@ -63,3 +63,18 @@ export function sizeDue(i: { status: string; lastTrafficAt: Date | null; sizeAt:
   if (i.now.getTime() - i.lastTrafficAt.getTime() > DAY) return false;
   return !i.sizeAt || i.now.getTime() - i.sizeAt.getTime() >= DAY - 60 * 60_000;
 }
+
+// 1.2.1 (4c): Supabase → row menu → Check services. The Management API's /health answer as one sentence, the services
+// that aren't healthy first. ok only when every service answered ACTIVE_HEALTHY.
+const SERVICE_NAMES: Record<string, string> = { auth: "Auth", rest: "REST", realtime: "Realtime", storage: "Storage", db: "Database" };
+export function servicesMessage(list: { name: string; status: string; error: string | null }[]): { ok: boolean; message: string } {
+  if (!list.length) return { ok: false, message: "Supabase returned no service health for this project." };
+  const name = (s: { name: string }) => SERVICE_NAMES[s.name] ?? s.name;
+  const healthy = list.filter((s) => s.status === "ACTIVE_HEALTHY");
+  const bad = list.filter((s) => s.status !== "ACTIVE_HEALTHY");
+  if (!bad.length) return { ok: true, message: `All ${list.length} services are healthy: ${healthy.map(name).join(", ")}.` };
+  const why = (s: { status: string; error: string | null }) => s.error || s.status.toLowerCase().replace(/_/g, " ");
+  const parts = [`Not healthy: ${bad.map((s) => `${name(s)} (${why(s)})`).join(", ")}.`];
+  if (healthy.length) parts.push(`Healthy: ${healthy.map(name).join(", ")}.`);
+  return { ok: false, message: parts.join(" ") };
+}

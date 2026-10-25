@@ -158,12 +158,3 @@ export function Tag({ children }: { children: ReactNode }) {
   return <span className="mr-1 inline-block rounded-[5px] border border-line bg-surface-2 px-1.5 text-xs text-ink-soft">{children}</span>;
 }
 
-// R4: an action the mockup shows that a later stage makes real. The wrapper carries the tooltip, because a disabled
-// button does not receive the hover that shows one; the aria-label gives assistive tech the stage.
-export function LaterButton({ label, stage, variant = "secondary" }: { label: string; stage: number; variant?: "secondary" | "ghost" }) {
-  return (
-    <span title={`Arrives in stage ${stage}`} className="inline-flex">
-      <Button size="sm" variant={variant} disabled aria-label={`${label}, arrives in stage ${stage}`}>{label}</Button>
-    </span>
-  );
-}

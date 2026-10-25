@@ -73,6 +73,15 @@ describe("monitorStatus", () => {
   });
 });
 
+describe("monitorStatus of a moved domain (1.2.1)", () => {
+  it("reads Domain changed (a warning) instead of Down; paused and maintenance still win", () => {
+    const move = { from: "old.example.com", to: "new.example.com" };
+    expect(monitorStatus({ ...mon({ state: "err", lastStatus: null }), move })).toEqual({ state: "warn", label: "Domain changed: old.example.com → new.example.com" });
+    expect(monitorStatus({ ...mon({ state: "ok" }), move })).toMatchObject({ state: "warn" });
+    expect(monitorStatus({ ...mon({ ownerPaused: true }), move })).toEqual({ state: "paused", label: "Paused" });
+  });
+});
+
 describe("monitorStatus of a heartbeat (U3)", () => {
   const hb = (o: Record<string, unknown> = {}) => ({ ...mon({ lastStatus: null }), kind: "heartbeat", lastError: null, lastPingAt: new Date(now.getTime() - 12 * 60_000), ...o });
   it("reads from the last ping and the stored reason, as in the mockup", () => {

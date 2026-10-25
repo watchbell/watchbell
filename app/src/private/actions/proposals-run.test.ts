@@ -68,6 +68,18 @@ describe("runProposalAction", () => {
     expect(await runProposalAction({ action: "domain_recheck", resourceId: DOM, targetRef: DOM }, owner, gone)).toEqual({ ok: false, error: "That domain is no longer watched." });
   });
 
+  it("monitor_update_url (1.2.1): the monitor on the app's new domain, the check quota, an audit row", async () => {
+    const moveMonitorToDomain = vi.fn().mockResolvedValue({ ok: true, message: "Monitor now checks https://new.example.com/health.", audit: { message: "Monitor moved to the app's new domain: new.example.com/health", detail: "was old.example.com/health", resourceId: APP } });
+    const d = deps({ moveMonitorToDomain });
+    expect(await runProposalAction({ action: "monitor_update_url", resourceId: APP, targetRef: MON }, "auto", d)).toEqual({ ok: true, message: "Monitor now checks https://new.example.com/health." });
+    expect(moveMonitorToDomain).toHaveBeenCalledWith(MON);
+    expect(d.recordAction).toHaveBeenCalledWith({ kind: "ok", message: `${ACTIONS_COPY.auditPrefix}Monitor moved to the app's new domain: new.example.com/health`, detail: "was old.example.com/health", resourceId: APP, actorUserId: null });
+    const stale = deps({ moveMonitorToDomain: vi.fn().mockResolvedValue({ ok: false, error: "This monitor already checks a domain of its app, so there is nothing to update." }) });
+    expect(await runProposalAction({ action: "monitor_update_url", resourceId: APP, targetRef: MON }, owner, stale)).toMatchObject({ ok: false });
+    const busy = deps({ moveMonitorToDomain, limit: vi.fn().mockResolvedValue({ allowed: false, retryAfter: 60 }) });
+    expect(await runProposalAction({ action: "monitor_update_url", resourceId: APP, targetRef: MON }, owner, busy)).toMatchObject({ ok: false });
+  });
+
   describe("daily_rerun (owner 19 Oct)", () => {
     const t = { action: "daily_rerun", resourceId: APP, targetRef: MON } as const;
     const now = new Date("2026-10-19T10:00:00Z");

@@ -93,6 +93,22 @@ describe("the app's alert", () => {
     expect(isRce("source code exposure")).toBe(false);
   });
 
+  // Watchbell 1.2.1 (owner 1a): Moderate is treated like High, for a direct production dependency only.
+  it("warning for a moderate advisory on a direct, non-dev dependency; never for a dev or transitive one, nor low/unknown", () => {
+    expect(alertLevel([{ severity: "moderate", summary: "", dev: false, direct: true }])).toBe("warning");
+    expect(alertLevel([{ severity: "moderate", summary: "", dev: true, direct: true }])).toBeNull();
+    expect(alertLevel([{ severity: "moderate", summary: "", dev: false, direct: false }])).toBeNull();
+    expect(alertLevel([{ severity: "low", summary: "", dev: false, direct: true }, { severity: "unknown", summary: "", dev: false, direct: true }])).toBeNull();
+    expect(alertLevel([{ severity: "moderate", summary: "", dev: false, direct: true }, { severity: "critical", summary: "", dev: false, direct: false }])).toBe("critical");
+    const msg = alertMessage([
+      { package: "axios", installedVersion: "1.6.0", fixedVersion: "1.6.8", severity: "moderate", summary: "", dev: false, direct: true },
+      { package: "vite", installedVersion: "5.0.0", fixedVersion: "5.0.1", severity: "moderate", summary: "", dev: true, direct: true },
+      { package: "ws", installedVersion: "8.0.0", fixedVersion: "8.1.0", severity: "moderate", summary: "", dev: false, direct: false },
+      { package: "next", installedVersion: "15.0.0", fixedVersion: "15.2.3", severity: "high", summary: "", dev: false, direct: true },
+    ]);
+    expect(msg).toBe("2 vulnerable packages (1 high, 1 moderate): next 15.0.0 → 15.2.3, axios 1.6.0 → 1.6.8.");
+  });
+
   it("one message per app, grouping its ringing packages, worst first", () => {
     const vulns = [
       { package: "lodash", installedVersion: "4.17.20", fixedVersion: "4.17.21", severity: "high" as const, summary: "", dev: false },
@@ -120,6 +136,13 @@ describe("upgradesFor", () => {
       open({ package: "zod", fixedVersion: null }),
       open({ package: "old", installedVersion: "2.0.0", fixedVersion: "1.0.0" }),
     ])).toEqual([{ package: "next", to: "15.2.3", vulnIds: ["GHSA-1", "GHSA-2"], cves: ["CVE-1"], severity: "critical" }]);
+  });
+});
+
+describe("upgradesFor: devDependencies (fix round 1)", () => {
+  it("marks a package whose every advisory row is a devDependency; one production copy keeps it unmarked", () => {
+    expect(upgradesFor([open({ dev: true }), open({ vulnId: "GHSA-b", fixedVersion: "15.2.3", dev: true })])[0].dev).toBe(true);
+    expect(upgradesFor([open({ dev: true }), open({ vulnId: "GHSA-b", fixedVersion: "15.2.3", dev: false })])[0].dev).toBeUndefined();
   });
 });
 

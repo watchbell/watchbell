@@ -16,13 +16,14 @@ import { DeployRowActions } from "./deploy-row-actions";
 
 export const DEPLOY_HEAD: ReactNode[] = [
   "Status", "Project", "Environment",
-  <span key="commit">Commit and branch<Src kind="test">message: needs test</Src></span>,
+  // The commit message is confirmed from Vercel's API (spec §14, 12 Oct), so no "needs test" tag (1.2.1).
+  <span key="commit">Commit and branch<Src kind="api" /></span>,
   <span key="dur">Duration<Src kind="calc" /></span>,
   "Created", "",
 ];
 
 // Stage 6: each row's Vercel actions come from its role among its app's rows (current, previous, staged, building…),
-// as the mockup's depRow() lists them. Viewers get no action controls.
+// as the mockup's depRow() lists them. Viewers get no action controls (so no build logs either: Operator+, Task 4).
 export function deploymentRows(list: DeploymentRow[], o: { canAct: boolean; now: Date }): ListRow[] {
   const roles = rowRoles(list);
   // A9: apps with a staged deployment are rolled back, so their current row offers Promote's way out, not Redeploy.
@@ -49,9 +50,9 @@ export function deploymentRows(list: DeploymentRow[], o: { canAct: boolean; now:
           <td className={td}>
             {o.canAct && (
               <DeployRowActions
-                d={{ appId: d.appId, appName: d.appName, externalId: d.externalId, sha: d.commitSha, url: d.url, visit: outboundLinks() }}
+                d={{ appId: d.appId, appName: d.appName, externalId: d.externalId, sha: d.commitSha, url: d.url, visit: outboundLinks(), primaryDomain: d.primaryDomain }}
                 actions={actionsFor(role, rolledBack.has(d.appId))}
-                logs={role === "building" || role === "failed"}
+                logs={role === "building" || role === "failed" ? "button" : d.state === "ready" ? "menu" : null}
               />
             )}
           </td>

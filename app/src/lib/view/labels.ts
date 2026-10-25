@@ -110,6 +110,8 @@ export function monitorStatus(
   m: {
     state: State; lastStatus: number | null; lastError?: string | null; paused: boolean; ownerPaused: boolean; appGone?: boolean;
     maintUntil?: Date | null; kind?: string; lastPingAt?: Date | null;
+    // Watchbell 1.2.1: the host is no longer a domain of the app (lib/domain-move.ts).
+    move?: { from: string; to: string } | null;
   },
   active?: { end: Date } | null,
   now: Date = new Date(),
@@ -125,6 +127,8 @@ export function monitorStatus(
     if (m.state === "err") return { state: "err", label: m.lastError?.startsWith("Down · ") ? m.lastError : "Down · no ping" };
     return { state: "unknown", label: "Waiting for the first ping" };
   }
+  // A moved domain isn't the app being down: a warning that names the new domain (Update monitor fixes it).
+  if (m.move) return { state: "warn", label: `Domain changed: ${m.move.from} → ${m.move.to}` };
   const code = bodyFailure(m) ?? (m.lastStatus === null ? "no answer" : String(m.lastStatus));
   if (m.state === "ok") return { state: "ok", label: "Up" };
   if (m.state === "warn") return { state: "warn", label: `Degraded · ${code}` };

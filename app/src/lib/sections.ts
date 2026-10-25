@@ -79,6 +79,11 @@ export const RULE_SECTION: Record<string, SectionId | "account" | null> = {
   MonitorDown: "hosting", HighLatency: "hosting", DeploymentFailed: "hosting", CertExpiringSoon: "hosting", DomainExpiringSoon: "hosting", DnsProxiedToVercel: "hosting",
   DatabasePaused: "database", StorageAlmostFull: "database", NeonComputeHigh: "database", FirestoreQuotaHigh: "database", AutoPauseRisk: "database", ComputeHigh: "database", DbQuotaHigh: "database",
   VulnerableDependency: "devops",
+  // Watchbell 1.2: Hosting, not DevOps. The rule needs no GitHub: the daily job's "security" step (a Hosting step) reads
+  // the version from the app's live site and asks OSV.dev, and the Security card is on the app page. Only its fix (the
+  // update PR) needs GitHub, so update-PR proposals pause with DevOps instead (private/actions/proposals-db.ts).
+  FrameworkVulnerable: "hosting",
+  MonitorDomainMoved: "hosting", // Watchbell 1.2.1: an uptime monitor on a domain its app no longer has
   CredentialExpiring: "account",
   CollectorStale: null,
 };

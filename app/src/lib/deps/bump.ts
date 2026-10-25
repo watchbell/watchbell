@@ -11,7 +11,8 @@ import { DEPS_COPY } from "@/lib/copy/edition";
 
 export const GROUPS = ["dependencies", "devDependencies", "optionalDependencies"] as const;
 export type Group = (typeof GROUPS)[number];
-export type Bump = { package: string; group: Group; from: string; to: string; fixed: string; vulnIds: string[]; cves: string[] };
+// companionOf: updated only to match another bump (Upgrade.companionOf); not a vulnerable package itself.
+export type Bump = { package: string; group: Group; from: string; to: string; fixed: string; vulnIds: string[]; cves: string[]; companionOf?: string };
 export const BRANCH_PREFIX = "watchpost/deps-";
 export const PACKAGE_JSON_MAX = 256 * 1024;
 
@@ -46,7 +47,7 @@ export function planBumps(manifestText: string, upgrades: Upgrade[]): Bump[] | n
       const low = minVersion(from);
       const to = bumpRange(from, u.to);
       if (!low || !to || compareVersions(low, u.to) >= 0) continue;
-      out.push({ package: u.package, group, from, to, fixed: u.to, vulnIds: u.vulnIds, cves: u.cves });
+      out.push({ package: u.package, group, from, to, fixed: u.to, vulnIds: u.vulnIds, cves: u.cves, ...(u.companionOf ? { companionOf: u.companionOf } : {}) });
     }
   }
   return out;
@@ -84,23 +85,37 @@ function fnv(s: string): string {
   return h.toString(16).padStart(8, "0");
 }
 
-export function branchName(bumps: Bump[]): string {
+// dir (Watchbell 1.2.1, review T1): the monorepo folder whose package.json the PR edits is part of the key, so two apps
+// of one repository (apps/web, apps/admin) with the same bumps get two branches. A root PR keeps the key it always had,
+// so the dedupe still finds PRs opened before.
+export function branchName(bumps: Bump[], dir: string | null = null): string {
   const key = bumps.map((b) => `${b.package}@${b.to}`).sort().join(",");
-  return `${BRANCH_PREFIX}${fnv(key)}`;
+  return `${BRANCH_PREFIX}${fnv(dir ? `${dir}|${key}` : key)}`;
 }
 
 // A branch the PR flow may create and write: ours, and never the default one.
 export const isOwnBranch = (branch: string, defaultBranch: string): boolean =>
   branch.startsWith(BRANCH_PREFIX) && /^watchpost\/deps-[0-9a-f]{8}$/.test(branch) && branch !== defaultBranch;
 
+// The vulnerable bumps (a companion only follows one of them); a list of companions alone counts them all.
+const vulnerable = (bumps: Bump[]): Bump[] => {
+  const v = bumps.filter((b) => !b.companionOf);
+  return v.length ? v : bumps;
+};
+
 export function commitMessage(bumps: Bump[]): string {
-  return bumps.length === 1 ? `chore(deps): update ${bumps[0].package} to ${bumps[0].fixed} (security fix)` : `chore(deps): update ${bumps.length} packages for security fixes`;
+  const v = vulnerable(bumps);
+  return v.length === 1 ? `chore(deps): update ${v[0].package} to ${v[0].fixed} (security fix)` : `chore(deps): update ${v.length} packages for security fixes`;
 }
 
-export function prTitle(bumps: Bump[]): string {
-  const t = bumps.length === 1
-    ? `Watchbell: update ${bumps[0].package} to ${bumps[0].fixed} (security fix)`
-    : `Watchbell: update ${bumps.length} vulnerable packages (${bumps.slice(0, 2).map((b) => b.package).join(", ")}${bumps.length > 2 ? ", …" : ""})`;
+// "Watchbell: update next to 16.4.1 in apps/web (security fix)": the folder (when not the root) is read back by
+// auto-policy.ts prDir, so the open-PR dedupe stays per folder.
+export function prTitle(bumps: Bump[], dir: string | null = null): string {
+  const v = vulnerable(bumps);
+  const where = dir ? ` in ${dir}` : "";
+  const t = v.length === 1
+    ? `Watchbell: update ${v[0].package} to ${v[0].fixed}${where} (security fix)`
+    : `Watchbell: update ${v.length} vulnerable packages${where} (${v.slice(0, 2).map((b) => b.package).join(", ")}${v.length > 2 ? ", …" : ""})`;
   return t.length > 200 ? `${t.slice(0, 199)}…` : t;
 }
 
@@ -110,9 +125,13 @@ const LOCK_CMD: Record<string, string> = {
 
 // `auto`: opened by "Automatic security fixes"; Watchbell merges it itself once CI, the preview and its smoke test
 // pass (and auto-rollback is on), so the lockfile is updated afterwards on the main branch.
-export function prBody(bumps: Bump[], lockKind: string | null, auto = false): string {
+// dir: the monorepo folder whose package.json changed ("run `npm install` in `apps/web`").
+export function prBody(bumps: Bump[], lockKind: string | null, auto = false, dir: string | null = null): string {
   const cmd = LOCK_CMD[lockKind ?? "npm"] ?? "npm install";
-  const rows = bumps.map((b) => {
+  const run = `run \`${cmd}\`${dir ? ` in \`${dir}\`` : ""}`;
+  const vuln = bumps.filter((b) => !b.companionOf);
+  const companions = bumps.filter((b) => b.companionOf);
+  const rows = vuln.map((b) => {
     const refs = [...b.cves, ...b.vulnIds.filter((id) => !b.cves.includes(id))].slice(0, 4)
       .map((id) => `[${id}](https://osv.dev/vulnerability/${encodeURIComponent(id)})`).join(", ");
     return `| \`${b.package}\` | \`${b.from}\` | \`${b.to}\` | ${refs || "-"} |`;
@@ -128,11 +147,13 @@ export function prBody(bumps: Bump[], lockKind: string | null, auto = false): st
     "| --- | --- | --- | --- |",
     ...rows,
     "",
+    ...companions.map((b) => `Updated to match ${b.companionOf} (no advisory of its own): \`${b.package}\` \`${b.from}\` → \`${b.to}\`.`),
+    ...(companions.length ? [""] : []),
     "### Important: the lockfile is not updated",
     "",
     auto
-      ? `Watchbell only changes \`package.json\`; it can't regenerate the lockfile on the server. Vercel installs the new version at build time, so production is safe after the merge. Afterwards run \`${cmd}\` on the main branch and commit the lockfile to bring it up to date.`
-      : `Watchbell only changes \`package.json\`; it can't regenerate the lockfile on the server. Before merging, check out this branch, run \`${cmd}\`, then commit the changed lockfile. Then make sure the build and tests still pass.`,
+      ? `Watchbell only changes \`package.json\`; it can't regenerate the lockfile on the server. Vercel installs the new version at build time, so production is safe after the merge. Afterwards ${run} on the main branch and commit the lockfile to bring it up to date.`
+      : `Watchbell only changes \`package.json\`; it can't regenerate the lockfile on the server. Before merging, check out this branch, ${run}, then commit the changed lockfile. Then make sure the build and tests still pass.`,
     "",
     "Vulnerable packages that are only installed through other packages (transitive) are not changed here; check with `npm audit` after installing.",
     "",

@@ -10,7 +10,7 @@ vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).d
 vi.mock("./proposals-run", () => ({ runProposalAction: vi.fn() }));
 
 import {
-  claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, listProposals, pruneProposals, readLogApps, readProposal, runLogProposals,
+  claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, frameworkAskedApps, listProposals, pruneProposals, readLogApps, readProposal, runLogProposals,
   runProposalsStep, type StepDeps,
 } from "./proposals-db";
 
@@ -117,7 +117,7 @@ describe("claim, finish, execute", () => {
     const f = fakeDb([], [[row({ status: "running" })], [row({ status: "failed", result: "That was just done. Wait a minute before trying again." })]]);
     h.current = f;
     const p = await executeProposal(ID, { id: MEMBER, userId: "u1" }, now, { run, book: async () => EMPTY_BOOK });
-    expect(run).toHaveBeenCalledWith({ action: "recheck", resourceId: APP, targetRef: MON, proposalId: ID }, { id: MEMBER, userId: "u1" });
+    expect(run).toHaveBeenCalledWith({ action: "recheck", resourceId: APP, targetRef: MON, proposalId: ID, ruleKey: null }, { id: MEMBER, userId: "u1" });
     expect(p).toMatchObject({ status: "failed" });
     expect(payloadOf(f.writes[1].calls)).toMatchObject({ status: "failed", result: "That was just done. Wait a minute before trying again." });
     h.current = fakeDb([], [[]]);
@@ -214,6 +214,22 @@ describe("runProposalsStep", () => {
     await runProposalsStep(now, {}, none);
     expect(providers).not.toHaveBeenCalled(); // nothing paused: no provider read
   });
+  // Watchbell 1.2: FrameworkVulnerable is a Hosting rule, but its fix is an update PR, which needs GitHub (DevOps).
+  it("proposes no update PR while DevOps is off, and still the other actions", async () => {
+    const fw: ProposalAlert = { ...alert, id: "fw-1", ruleKey: "FrameworkVulnerable", subject: APP, message: "Next.js 16.3.8 has 1 known vulnerability (critical), fixed in 16.4.1." };
+    const REPO = "55555555-5555-4555-8555-555555555555";
+    const facts = vi.fn().mockResolvedValue({
+      monitorKinds: new Map([[MON, "http"]]), deploys: new Map(), supabaseRefs: new Map(), neonSuspended: new Map(),
+      frameworkFixes: new Map([[APP, { repoId: REPO, from: "16.3.8", to: "16.4.1" }]]),
+    });
+    const on = deps({ firing: vi.fn().mockResolvedValue([fw, alert]), facts });
+    await runProposalsStep(now, {}, on);
+    expect((on.create as ReturnType<typeof vi.fn>).mock.calls[0][0].map((p: { action: string }) => p.action)).toEqual(["github_bump_pr", "recheck"]);
+    const off = deps({ firing: vi.fn().mockResolvedValue([fw, alert]), facts, paused: vi.fn().mockResolvedValue(new Set(["devops"])) });
+    await runProposalsStep(now, {}, off);
+    expect((off.create as ReturnType<typeof vi.fn>).mock.calls[0][0].map((p: { action: string }) => p.action)).toEqual(["recheck"]);
+    expect(off.expire).toHaveBeenCalledWith(["fw-1", ALERT], now);
+  });
   it("still proposes for the sections that are on", async () => {
     const d = deps({ paused: vi.fn().mockResolvedValue(new Set(["database", "devops"])) });
     expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1 });
@@ -298,6 +314,19 @@ describe("runProposalsStep", () => {
       expect(d.approveAutoBump).toHaveBeenCalledWith("bump-1", expect.any(Date));
       expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }));
       expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set() });
+    });
+    // Watchbell 1.2: a FrameworkVulnerable proposal is judged on the app's Next.js check (bumpReady gets the app).
+    it("asks the policy about the app's Next.js check for a FrameworkVulnerable proposal", async () => {
+      const d = secDeps({ logs: vi.fn().mockResolvedValue({ created: [bump({ ruleKey: "FrameworkVulnerable" })], expired: 0 }) });
+      expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
+      expect(d.bumpReady).toHaveBeenCalledWith(REPO, ["critical", "high"], { appId: APP });
+    });
+    // Watchbell 1.2.1 (owner 1a): Moderate is a chosen severity like the others; the run and its result notice are the same.
+    it("hands Moderate to the policy when it is on, and reports the auto-run like any other", async () => {
+      const d = secDeps({ autoSecurity: vi.fn().mockResolvedValue({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true }) });
+      expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
+      expect(d.bumpReady).toHaveBeenCalledWith(REPO, ["critical", "high", "moderate"]);
+      expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }));
     });
     it("stays pending for the owner when off, or when the policy says no (severity, major, no token)", async () => {
       for (const d of [
@@ -391,5 +420,30 @@ describe("runLogProposals / readLogApps", () => {
     const [a] = await readLogApps(now);
     expect(a).toMatchObject({ appId: APP, previousId: "dpl_prv00000001", httpMonitorId: MON, db: null, errors30: 25 });
     expect(f.queries).toHaveLength(4);
+  });
+});
+
+// Review T1 minor 1: which apps' Next.js fix the office already asked about (so the dependency proposal leaves next out).
+describe("frameworkAskedApps", () => {
+  const alert = (o: Partial<ProposalAlert> = {}): ProposalAlert => ({
+    id: ALERT, ruleKey: "FrameworkVulnerable", subject: APP, severity: "critical", title: "app-a", message: "m", resourceId: APP, resourceKind: "app", resourceName: "app-a",
+    causedBy: null, silencedUntil: null, silencedUntilResolved: false, ...o,
+  });
+
+  it("reads the pending / approved / running / done framework PR proposals of the apps' firing FrameworkVulnerable alerts", async () => {
+    const f = fakeDb([[{ resourceId: APP }]]);
+    h.current = f;
+    expect(await frameworkAskedApps([alert(), alert({ id: ID, ruleKey: "VulnerableDependency" })], [APP])).toEqual(new Set([APP]));
+    const q = render(whereOf(f.queries[0])!);
+    expect(q.params).toEqual(expect.arrayContaining(["FrameworkVulnerable", "github_bump_pr", "pending", "approved", "running", "done", ALERT, APP]));
+    expect(q.params).not.toContain(ID);
+  });
+
+  it("reads nothing when no firing FrameworkVulnerable alert is for one of these apps", async () => {
+    const f = fakeDb([]);
+    h.current = f;
+    expect(await frameworkAskedApps([alert({ ruleKey: "VulnerableDependency" }), alert({ resourceId: MON })], [APP])).toEqual(new Set());
+    expect(await frameworkAskedApps([alert()], [])).toEqual(new Set());
+    expect(f.queries).toHaveLength(0);
   });
 });

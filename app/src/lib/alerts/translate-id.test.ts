@@ -34,6 +34,7 @@ const FIXTURES: Facts[] = [
       hb("f", "Down · the job reported a failure"), hb("s", "Down · started but didn't finish"), hb("n", "Down · no ping for 2 h"),
       hb("d", "Down · no ping for 3 days"), hb("v", "Down · never pinged"), hb("x", null),
       mon({ id: "slow", state: "ok", failStreak: 0, lastStatus: 200, lastError: null, p95Last10: 1800 }),
+      mon({ id: "moved", url: "https://old.example.com/", movedTo: "new.example.com" }),
     ],
     lastMinuteRunAt: new Date(now.getTime() - 12 * 60_000),
     apps: [
@@ -71,8 +72,18 @@ const FIXTURES: Facts[] = [
       { appId: "a1", error: null, vulns: [vuln(), vuln({ package: "lodash", installedVersion: "4.17.20", fixedVersion: "4.17.21", severity: "critical" })] },
       { appId: "a2", error: null, vulns: [vuln({ fixedVersion: null }), ...["a", "b", "c", "d", "e"].map((p) => vuln({ package: `pkg-${p}` }))] },
     ],
+    frameworks: [
+      { appId: "a1", version: "16.3.8", status: "vulnerable", findings: [
+        { id: "GHSA-aaaa-bbbb-cccc", cve: "CVE-2026-1111", summary: "x", severity: "CRITICAL", fixed: "16.4.1" },
+        { id: "GHSA-dddd-eeee-ffff", cve: null, summary: "y", severity: "HIGH", fixed: "16.3.9" },
+      ] },
+      { appId: "a2", version: "15.0.0", status: "vulnerable", findings: [{ id: "GHSA-gggg-hhhh-iiii", cve: null, summary: "z", severity: "MODERATE", fixed: null }] },
+    ],
   }),
-  facts({ lastMinuteRunAt: null }),
+  facts({
+    lastMinuteRunAt: null, apps: [{ id: "a3", name: "app-c", latestProduction: null }],
+    frameworks: [{ appId: "a3", version: "16.4.1", status: "ok", findings: [] }],
+  }),
 ];
 
 const observations = FIXTURES.flatMap((f) => evaluate(f, rules).observations);
@@ -96,6 +107,8 @@ describe("translateAlertText", () => {
   it("speaks like the owner", () => {
     const one = (rule: RuleKey, subject: string) => translateAlertText(rule, observations.find((o) => o.rule === rule && o.subject === subject)!.message);
     expect(one("MonitorDown", "502")).toBe("app-a.example.com/health: 3 cek gagal berturut-turut (HTTP 502).");
+    expect(one("MonitorDomainMoved", "moved")).toBe("old.example.com udah bukan domain app-a; production sekarang di new.example.com.");
+    expect(one("MonitorDown", "moved")).toBe("old.example.com pindah ke new.example.com; MonitorDomainMoved yang ambil alih.");
     expect(one("MonitorDown", "none")).toBe("app-a.example.com/health: 3 cek gagal berturut-turut (nggak ada jawaban).");
     expect(one("MonitorDown", "kw")).toBe("app-a.example.com/health: 3 cek gagal berturut-turut (Keyword not found).");
     expect(one("MonitorDown", "n")).toBe("app-a · backup job: nggak ada ping selama 2 jam.");
@@ -111,7 +124,21 @@ describe("translateAlertText", () => {
     expect(one("DbQuotaHigh", "c1")).toBe("db-j: baris ditulis hari ini dari 100k (akun) udah 88% dari kuota gratis.");
     expect(one("ComputeHigh", "p1")).toBe("db-a: CPU 92%+ selama 15 menit (batas 80%), RAM 93% (batas 90%), disk 85% (batas 80%), koneksi 55 dari 60 (batas 80%).");
     expect(one("VulnerableDependency", "a1")).toBe("2 paket rentan (1 kritis, 1 tinggi): lodash 4.17.20 → 4.17.21, next 15.0.0 → 15.2.3.");
+    expect(one("FrameworkVulnerable", "a1")).toBe("Next.js 16.3.8 punya 2 kerentanan yang diketahui (kritis), udah di-fix di 16.4.1.");
+    expect(one("FrameworkVulnerable", "a2")).toBe("Next.js 15.0.0 punya 1 kerentanan yang diketahui (sedang), belum ada fix.");
+    expect(one("FrameworkVulnerable", "a3")).toBe("app-c pakai Next.js 16.4.1 tanpa advisory yang diketahui.");
+    expect(translateAlertText("FrameworkVulnerable", "Next.js 15.5.0 has 2 known vulnerabilities (high), fixed in 15.5.7 (one fix needs Next.js 16)."))
+      .toBe("Next.js 15.5.0 punya 2 kerentanan yang diketahui (tinggi), udah di-fix di 15.5.7 (satu fix butuh Next.js 16).");
+    expect(translateAlertText("FrameworkVulnerable", "Next.js 15.5.0 has 3 known vulnerabilities (critical), fixed in 15.5.7 (some fixes need Next.js 17)."))
+      .toBe("Next.js 15.5.0 punya 3 kerentanan yang diketahui (kritis), udah di-fix di 15.5.7 (sebagian fix butuh Next.js 17).");
     expect(one("VulnerableDependency", "a2")).toMatch(/^6 paket rentan \(6 tinggi\): next 15\.0\.0 \(belum ada fix\), .*, \+2 lagi\.$/);
+  });
+
+  // Watchbell 1.2.1: Moderate rings like High; the back-to-normal text names it, and the older wording still translates.
+  it("translates VulnerableDependency's moderate wording, old and new", () => {
+    expect(translateAlertText("VulnerableDependency", "1 vulnerable package (1 moderate): axios 1.6.0 → 1.6.8.")).toBe("1 paket rentan (1 sedang): axios 1.6.0 → 1.6.8.");
+    expect(translateAlertText("VulnerableDependency", "web has no moderate, high or critical dependency advisories.")).toBe("web nggak punya advisory dependency sedang, tinggi atau kritis.");
+    expect(translateAlertText("VulnerableDependency", "web has no high or critical dependency advisories.")).toBe("web nggak punya advisory dependency tinggi atau kritis.");
   });
 
   it("translates the back-to-normal messages too", () => {

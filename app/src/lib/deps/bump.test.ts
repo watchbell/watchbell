@@ -74,3 +74,43 @@ describe("branch and PR text", () => {
     expect(prBody(bumps, null)).toContain("run `npm install`");
   });
 });
+
+// Watchbell 1.2.1 (review T1): a monorepo folder is part of the PR's identity and text; a package updated only to match
+// next (eslint-config-next) isn't listed as vulnerable.
+describe("per-folder PRs and companion packages", () => {
+  const bumps = planBumps(manifest, [upgrade()])!;
+  const eslint = { package: "eslint-config-next", to: "15.2.3", vulnIds: [], cves: [], severity: "critical" as const, companionOf: "next" };
+  const withEslint = `{"dependencies":{"next":"^15.0.0"},"devDependencies":{"eslint-config-next":"15.0.0"}}`;
+
+  it("the folder is in the branch key; a root PR keeps its old branch name", () => {
+    expect(branchName(bumps)).toBe("watchpost/deps-ae170b17");
+    expect(branchName(bumps, null)).toBe("watchpost/deps-ae170b17");
+    const web = branchName(bumps, "apps/web");
+    const admin = branchName(bumps, "apps/admin");
+    expect(web).toMatch(/^watchpost\/deps-[0-9a-f]{8}$/);
+    expect(new Set([branchName(bumps), web, admin]).size).toBe(3);
+    expect(branchName([...bumps], "apps/web")).toBe(web);
+  });
+
+  it("the title, commit and body name the folder", () => {
+    expect(prTitle(bumps, "apps/web")).toBe("Watchbell: update next to 15.2.3 in apps/web (security fix)");
+    const two = planBumps(manifest, [upgrade(), upgrade({ package: "vite", to: "5.0.12" })])!;
+    expect(prTitle(two, "apps/web")).toBe("Watchbell: update 2 vulnerable packages in apps/web (next, vite)");
+    const body = prBody(bumps, "npm", false, "apps/web");
+    expect(body).toContain("run `npm install` in `apps/web`");
+    expect(prBody(bumps, "npm", true, "apps/web")).toContain("run `npm install` in `apps/web` on the main branch");
+    expect(prBody(bumps, "npm")).not.toContain(" in `");
+  });
+
+  it("planBumps keeps companionOf; a companion is 'updated to match', not vulnerable, in the title and body", () => {
+    const b = planBumps(withEslint, [upgrade({ to: "15.2.3" }), eslint])!;
+    expect(b.map((x) => [x.package, x.companionOf ?? null])).toEqual([["next", null], ["eslint-config-next", "next"]]);
+    expect(prTitle(b)).toBe("Watchbell: update next to 15.2.3 (security fix)");
+    expect(commitMessage(b)).toBe("chore(deps): update next to 15.2.3 (security fix)");
+    const body = prBody(b, "npm");
+    const table = body.slice(body.indexOf("| Package"), body.indexOf("### Important"));
+    expect(table).toContain("| `next` |");
+    expect(table).not.toMatch(/\| `eslint-config-next` \|.*\| - \|/);
+    expect(body).toContain("Updated to match next (no advisory of its own): `eslint-config-next` `15.0.0` → `15.2.3`.");
+  });
+});

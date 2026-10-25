@@ -1,5 +1,7 @@
 # FAQ
 
+Bahasa Indonesia: [id/faq.md](id/faq.md)
+
 ### Does Watchbell cost anything?
 
 No. Watchbell is free and open source (MIT). It runs on your own machine and needs no account with anyone to start.
@@ -96,5 +98,5 @@ Bugs: open an issue on GitHub. Security problems: report them privately, as desc
 
 ### Is there a demo?
 
-Not yet. A live demo with made-up data is coming soon. Until then, the screenshots in the
-[README](../README.md) all come from Watchbell's demo mode.
+No, there is no hosted demo. The screenshots in the [README](../README.md) all come from Watchbell's demo mode, with
+made-up data. To try Watchbell itself, [install it](install.md): it is free and runs on your own machine.

@@ -5,8 +5,9 @@ import type { Failure, FetchOpts, Result } from "./http";
 
 // Stage 9 slice 5: the ONLY GitHub writes in the console, with the separate "GitHub (PR write)" token (a fine-grained
 // token with Contents and Pull requests: Read and write on chosen repositories). They run only from an approved office
-// proposal ("Open package update PR"): read the default branch's head and package.json, create a new watchpost/deps-…
-// branch, commit the edited package.json there, open a pull request. Every write names a watchpost/deps-… branch that
+// proposal ("Open package update PR"): read the base branch's head and package.json (the app's Vercel production branch
+// when the repository has it, else the default branch; Watchbell 1.2.1), create a new watchpost/deps-… branch, commit
+// the edited package.json there, open a pull request into the base branch. Every write names a watchpost/deps-… branch that
 // isn't the default branch (isOwnBranch), checked here before any request is sent: nothing is ever pushed to the
 // default branch.
 
@@ -15,14 +16,15 @@ type Method = "GET" | "POST" | "PUT";
 
 export const WRITE_SCOPE_ERROR = "The GitHub PR-write token can't do this (403). It needs Contents and Pull requests: Read and write on this repository.";
 
-async function call(method: Method, path: string, token: string, body: unknown, opts: FetchOpts): Promise<{ ok: true; status: number; data: unknown } | Failure> {
+// raw: the file's own bytes (the Contents API's raw media type, files up to 100 MB), answered as text in `data`.
+async function call(method: Method, path: string, token: string, body: unknown, opts: FetchOpts, raw = false): Promise<{ ok: true; status: number; data: unknown } | Failure> {
   const timeoutMs = opts.timeoutMs ?? 8000;
   let res: Response;
   try {
     res = await (opts.fetch ?? fetch)(`${API}${path}`, {
       method,
       headers: {
-        Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Watchbell",
+        Authorization: `Bearer ${token}`, Accept: raw ? "application/vnd.github.raw+json" : "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "Watchbell",
         ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -33,6 +35,7 @@ async function call(method: Method, path: string, token: string, body: unknown, 
     return { ok: false, kind: "transient", error: late ? `GitHub didn't answer within ${Math.round(timeoutMs / 1000)} seconds.` : "Couldn't reach GitHub." };
   }
   const text = await res.text().catch(() => "");
+  if (raw && res.ok) return { ok: true, status: res.status, data: text };
   let data: unknown = null;
   try {
     data = text ? JSON.parse(text) : null;
@@ -69,14 +72,31 @@ export async function branchHead(token: string, fullName: string, branch: string
   return p.success ? { ok: true, data: p.data.object.sha } : fmt("the branch");
 }
 
+// Watchbell 1.2: the package.json the update PR edits is at the root or in the Vercel project's Root Directory
+// ("apps/web/package.json"). Only plain folder names, never "..".
+const MANIFEST_PATH = /^(?:[A-Za-z0-9._-]{1,100}\/){0,6}package\.json$/;
+export const isManifestPath = (p: string): boolean => MANIFEST_PATH.test(p) && !p.split("/").some((s) => s === "." || s === "..");
+const manifestUrl = (fullName: string, path: string) => `/repos/${repoPath(fullName)}/contents/${path.split("/").map(encodeURIComponent).join("/")}`;
+
 // package.json at a commit: its text and blob SHA (the update needs the SHA).
-export async function manifestAt(token: string, fullName: string, ref: string, opts: FetchOpts = {}): Promise<Result<{ text: string; sha: string } | null>> {
-  if (!isFullName(fullName) || !isGitRef(ref)) return badRepo;
-  const r = await call("GET", `/repos/${repoPath(fullName)}/contents/package.json?ref=${encodeURIComponent(ref)}`, token, undefined, opts);
+export async function manifestAt(token: string, fullName: string, ref: string, opts: FetchOpts = {}, path = "package.json"): Promise<Result<{ text: string; sha: string } | null>> {
+  if (!isFullName(fullName) || !isGitRef(ref) || !isManifestPath(path)) return badRepo;
+  const r = await call("GET", `${manifestUrl(fullName, path)}?ref=${encodeURIComponent(ref)}`, token, undefined, opts);
   if (!r.ok) return r.kind === "missing" ? { ok: true, data: null } : r;
   const p = z.object({ sha: z.string(), encoding: z.literal("base64"), content: z.string() }).safeParse(r.data);
   if (!p.success) return fmt("package.json");
   return { ok: true, data: { sha: p.data.sha, text: Buffer.from(p.data.content.replace(/\s/g, ""), "base64").toString("utf8") } };
+}
+
+// Review T2b-fix I-1: an npm lockfile at a ref, for the merge watcher's content check (null: not there). Read raw, since
+// a lockfile is often over the 1 MB the JSON answer carries.
+const NPM_LOCKFILE_PATH = /^(?:[A-Za-z0-9._-]{1,100}\/){0,6}(?:package-lock|npm-shrinkwrap)\.json$/;
+export const isNpmLockfilePath = (p: string): boolean => NPM_LOCKFILE_PATH.test(p) && !p.split("/").some((s) => s === "." || s === "..");
+export async function lockfileAt(token: string, fullName: string, ref: string, path: string, opts: FetchOpts = {}): Promise<Result<string | null>> {
+  if (!isFullName(fullName) || !isGitRef(ref) || !isNpmLockfilePath(path)) return badRepo;
+  const r = await call("GET", `${manifestUrl(fullName, path)}?ref=${encodeURIComponent(ref)}`, token, undefined, { timeoutMs: 20_000, ...opts }, true);
+  if (!r.ok) return r.kind === "missing" ? { ok: true, data: null } : r;
+  return typeof r.data === "string" ? { ok: true, data: r.data } : fmt("the lockfile");
 }
 
 export async function createBranch(token: string, fullName: string, branch: string, fromSha: string, defaultBranch: string, opts: FetchOpts = {}): Promise<Result<true>> {
@@ -85,9 +105,9 @@ export async function createBranch(token: string, fullName: string, branch: stri
   return r.ok ? { ok: true, data: true } : r;
 }
 
-export async function putManifest(token: string, fullName: string, branch: string, defaultBranch: string, text: string, blobSha: string, message: string, opts: FetchOpts = {}): Promise<Result<true>> {
-  if (!isFullName(fullName) || !isOwnBranch(branch, defaultBranch)) return badRepo;
-  const r = await call("PUT", `/repos/${repoPath(fullName)}/contents/package.json`, token, {
+export async function putManifest(token: string, fullName: string, branch: string, defaultBranch: string, text: string, blobSha: string, message: string, opts: FetchOpts = {}, path = "package.json"): Promise<Result<true>> {
+  if (!isFullName(fullName) || !isOwnBranch(branch, defaultBranch) || !isManifestPath(path)) return badRepo;
+  const r = await call("PUT", manifestUrl(fullName, path), token, {
     message, content: Buffer.from(text, "utf8").toString("base64"), sha: blobSha, branch,
   }, opts);
   return r.ok ? { ok: true, data: true } : r;
@@ -194,6 +214,48 @@ export async function mergeWatchpostPull(token: string, fullName: string, number
   }
   const p = z.object({ merged: z.boolean(), sha: z.string() }).safeParse(r.data);
   return p.success && p.data.merged ? { ok: true, data: { sha: p.data.sha } } : fmt("the merge");
+}
+
+// Watchbell 1.2.1 (audit M1): what the merge watcher reads before a merge — the PR's changed files, its commits, one
+// commit's files, and the PR-write token's own login. Reads only ("Pull requests: Read", "Contents: Read"; GET /user
+// works for any token).
+export async function pullFiles(token: string, fullName: string, number: number, opts: FetchOpts = {}): Promise<Result<{ filename: string; previous: string | null }[]>> {
+  if (!isFullName(fullName) || !Number.isInteger(number) || number <= 0) return badRepo;
+  const r = await call("GET", `/repos/${repoPath(fullName)}/pulls/${number}/files?per_page=100`, token, undefined, opts);
+  if (!r.ok) return r;
+  const p = z.array(z.object({ filename: z.string(), previous_filename: z.string().optional() })).safeParse(r.data);
+  return p.success ? { ok: true, data: p.data.map((f) => ({ filename: f.filename, previous: f.previous_filename ?? null })) } : fmt("the PR's files");
+}
+
+const personSchema = z.object({ name: z.string().optional(), email: z.string().optional() }).nullable().optional();
+export async function pullCommits(token: string, fullName: string, number: number, opts: FetchOpts = {}): Promise<Result<{ sha: string; login: string | null; name: string; email: string; message: string }[]>> {
+  if (!isFullName(fullName) || !Number.isInteger(number) || number <= 0) return badRepo;
+  const r = await call("GET", `/repos/${repoPath(fullName)}/pulls/${number}/commits?per_page=100`, token, undefined, opts);
+  if (!r.ok) return r;
+  const p = z.array(z.object({
+    sha: z.string().regex(/^[0-9a-f]{40}$/), author: z.object({ login: z.string() }).nullable().optional(),
+    commit: z.object({ message: z.string(), author: personSchema }),
+  })).safeParse(r.data);
+  if (!p.success) return fmt("the PR's commits");
+  return {
+    ok: true,
+    data: p.data.map((c) => ({ sha: c.sha, login: c.author?.login ?? null, name: c.commit.author?.name ?? "", email: c.commit.author?.email ?? "", message: c.commit.message })),
+  };
+}
+
+export async function commitFiles(token: string, fullName: string, sha: string, opts: FetchOpts = {}): Promise<Result<string[]>> {
+  if (!isFullName(fullName) || !/^[0-9a-f]{40}$/.test(sha)) return badRepo;
+  const r = await call("GET", `/repos/${repoPath(fullName)}/commits/${sha}`, token, undefined, opts);
+  if (!r.ok) return r;
+  const p = z.object({ files: z.array(z.object({ filename: z.string(), previous_filename: z.string().optional() })) }).safeParse(r.data);
+  return p.success ? { ok: true, data: p.data.files.flatMap((f) => [f.filename, ...(f.previous_filename ? [f.previous_filename] : [])]) } : fmt("the commit");
+}
+
+export async function tokenLogin(token: string, opts: FetchOpts = {}): Promise<Result<string>> {
+  const r = await call("GET", "/user", token, undefined, opts);
+  if (!r.ok) return r;
+  const p = z.object({ login: z.string().min(1) }).safeParse(r.data);
+  return p.success ? { ok: true, data: p.data.login } : fmt("the token's user");
 }
 
 // Lockfile through GitHub Actions (owner 16 Oct): a repository_dispatch to the owner's actions repository. The

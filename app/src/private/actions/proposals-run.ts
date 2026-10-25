@@ -10,6 +10,7 @@ import { recordAction } from "@/lib/data/audit-db";
 import { bumpPrAs } from "@/lib/data/deps-pr";
 import { keepAliveNow } from "@/lib/data/keep-active-db";
 import { checkMonitorNow } from "@/lib/data/monitors-db";
+import { moveMonitorToDomain } from "@/lib/data/monitor-move-db";
 import { recheckDomain } from "@/lib/data/network-db";
 import { wakeAs } from "@/lib/data/neon-wake";
 import { type Actor, finish, type Finisher } from "@/lib/data/provider-action-db";
@@ -29,7 +30,8 @@ import { ACTIONS, type ProposalAction } from "./proposals-types";
 // office auto-run (quota key "office-auto", no actor on the audit row, message prefixed "Office auto-run: "). Outside a
 // server action nothing is refreshed. Never throws: an unexpected error is a failed result.
 
-export type RunTarget = { action: ProposalAction; resourceId: string | null; targetRef: string | null; proposalId?: string | null };
+// ruleKey: the proposal's alert rule (Watchbell 1.2: a github_bump_pr of FrameworkVulnerable updates Next.js).
+export type RunTarget = { action: ProposalAction; resourceId: string | null; targetRef: string | null; proposalId?: string | null; ruleKey?: string | null };
 export type Runner = { member: { id: string; userId: string } | "auto" };
 
 export type RunDeps = {
@@ -38,13 +40,14 @@ export type RunDeps = {
   bumpPrAs?: typeof bumpPrAs;
   autoSecurity?: typeof readAutoSecurity;
   recheckDomain?: typeof recheckDomain;
+  moveMonitorToDomain?: typeof moveMonitorToDomain;
   lastDailyRunAt?: () => Promise<Date | null>;
   fetch?: typeof fetch;
   dailyTarget?: () => { url: string; secret: string } | null;
   now?: () => Date;
 };
 const DEPS: RunDeps = {
-  checkMonitorNow, keepAliveNow, wakeAs, supabaseAct, redeployAs, rollbackAs, finish, recordAction, limit, bumpPrAs, autoSecurity: () => readAutoSecurity(), recheckDomain,
+  checkMonitorNow, keepAliveNow, wakeAs, supabaseAct, redeployAs, rollbackAs, finish, recordAction, limit, bumpPrAs, autoSecurity: () => readAutoSecurity(), recheckDomain, moveMonitorToDomain,
 };
 
 // Owner 19 Oct: the console's daily job (/api/daily, trigger vercel_cron) is not run twice within this time.
@@ -125,6 +128,18 @@ export async function runProposalAction(t: RunTarget, who: Runner["member"], dep
           .catch(() => console.warn("audit event failed"));
         return { ok: true, message: r.message };
       }
+      // Watchbell 1.2.1: Uptime → Update monitor (the app moved to a new domain), under the same quota as the button.
+      case "monitor_update_url": {
+        const quota = await deps.limit(LIMITS.monitorWrite, actor.id);
+        if (!quota.allowed) return { ok: false, error: `Too many changes. Try again in ${minutesText(quota.retryAfter)}.` };
+        const r = await (deps.moveMonitorToDomain ?? moveMonitorToDomain)(t.targetRef);
+        if (!r.ok) return r;
+        if (r.audit) {
+          await deps.recordAction({ kind: "ok", ...r.audit, message: `${auto ? AUTO_AUDIT_PREFIX : ""}${r.audit.message}`, actorUserId: actor.userId })
+            .catch(() => console.warn("audit event failed"));
+        }
+        return { ok: true, message: r.message };
+      }
       // Owner 19 Oct: approval only (never auto). The route runs with the cron secret, the same as Vercel Cron's call.
       case "daily_rerun": return await rerunDaily(deps);
       case "neon_wake": return await deps.wakeAs(actor, t.resourceId, t.targetRef, fin);
@@ -139,6 +154,7 @@ export async function runProposalAction(t: RunTarget, who: Runner["member"], dep
         if (auto && !security?.enabled) return { ok: false, error: "Automatic security fixes is off." };
         return await (deps.bumpPrAs ?? bumpPrAs)(actor, t.resourceId, t.targetRef, fin, {
           proposalId: t.proposalId ?? null, ...(security ? { auto: { severities: security.severities } } : {}),
+          ...(t.ruleKey === "FrameworkVulnerable" ? { framework: true } : {}),
         });
       }
       default: return { ok: false, error: GONE };

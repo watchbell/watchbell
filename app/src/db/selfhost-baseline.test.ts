@@ -119,7 +119,60 @@ describe("self-host migration baseline", { timeout: 30_000 }, () => {
 
   it("seeds the alert rules the cloud migrations insert", async () => {
     const keys = rowsOf<{ key: string }>(await db.execute(sql`select key from ops.alert_rules`)).map((r) => r.key);
-    expect(keys).toEqual(expect.arrayContaining(["MonitorDown", "CollectorStale", "HighLatency", "DeploymentFailed", "VulnerableDependency", "ComputeHigh", "DbQuotaHigh"]));
+    expect(keys).toEqual(expect.arrayContaining(["MonitorDown", "CollectorStale", "HighLatency", "DeploymentFailed", "VulnerableDependency", "ComputeHigh", "DbQuotaHigh", "FrameworkVulnerable", "MonitorDomainMoved"]));
+  });
+
+  // Review T1 minor 10: FrameworkVulnerable takes the owner's channels of VulnerableDependency (else the default), in both
+  // editions' seeds; an existing FrameworkVulnerable row is never changed.
+  it("seeds FrameworkVulnerable with VulnerableDependency's channels, else the default (cloud 0056 and self-host 0005)", async () => {
+    const channels = async (key: string) =>
+      rowsOf<{ channels: unknown }>(await db.execute(sql`select channels from ops.alert_rules where key = ${key}`)).map((r) => r.channels)[0];
+    const seeds = [readFileSync(resolve("drizzle/0056_framework_vulnerable_rule.sql"), "utf8"), readFileSync(join(selfhostMigrationsFolder(), "0005_framework_vulnerable_rule.sql"), "utf8")];
+    const before = await channels("VulnerableDependency");
+    try {
+      for (const seed of seeds) {
+        await db.execute(sql`delete from ops.alert_rules where key = 'FrameworkVulnerable'`);
+        await db.execute(sql`update ops.alert_rules set channels = '["discord"]'::jsonb where key = 'VulnerableDependency'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("FrameworkVulnerable")).toEqual(["discord"]);
+        // ON CONFLICT DO NOTHING: an owner's edit stays
+        await db.execute(sql`update ops.alert_rules set channels = '["email_digest"]'::jsonb where key = 'FrameworkVulnerable'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("FrameworkVulnerable")).toEqual(["email_digest"]);
+        // no VulnerableDependency row: the default channels
+        const vd = rowsOf<Record<string, unknown>>(await db.execute(sql`delete from ops.alert_rules where key = 'VulnerableDependency' returning key, severity, threshold, channels, enabled`))[0];
+        await db.execute(sql`delete from ops.alert_rules where key = 'FrameworkVulnerable'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("FrameworkVulnerable")).toEqual(["telegram", "email_digest"]);
+        await db.execute(sql`insert into ops.alert_rules (key, severity, threshold, channels, enabled) values (${vd.key}, ${vd.severity}, ${vd.threshold}, ${JSON.stringify(vd.channels)}::jsonb, ${vd.enabled})`);
+      }
+    } finally {
+      await db.execute(sql`update ops.alert_rules set channels = ${JSON.stringify(before)}::jsonb where key = 'VulnerableDependency'`);
+    }
+  });
+
+  // Watchbell 1.2.1: MonitorDomainMoved takes MonitorDown's channels (it fires instead of it), in both editions' seeds.
+  it("seeds MonitorDomainMoved with MonitorDown's channels and allows monitor_update_url (cloud 0057 and self-host 0006)", async () => {
+    const channels = async (key: string) =>
+      rowsOf<{ channels: unknown }>(await db.execute(sql`select channels from ops.alert_rules where key = ${key}`)).map((r) => r.channels)[0];
+    const seeds = [readFileSync(resolve("drizzle/0057_monitor_domain_moved.sql"), "utf8"), readFileSync(join(selfhostMigrationsFolder(), "0006_monitor_domain_moved.sql"), "utf8")];
+    const before = await channels("MonitorDown");
+    const run = async (seed: string) => { for (const stmt of seed.split("--> statement-breakpoint")) await db.execute(sql.raw(stmt)); };
+    try {
+      for (const seed of seeds) {
+        await db.execute(sql`delete from ops.alert_rules where key = 'MonitorDomainMoved'`);
+        await db.execute(sql`update ops.alert_rules set channels = '["discord"]'::jsonb where key = 'MonitorDown'`);
+        await run(seed);
+        expect(await channels("MonitorDomainMoved")).toEqual(["discord"]);
+        await db.execute(sql`update ops.alert_rules set channels = '["email_digest"]'::jsonb where key = 'MonitorDomainMoved'`);
+        await run(seed);
+        expect(await channels("MonitorDomainMoved")).toEqual(["email_digest"]);
+      }
+      const check = rowsOf<{ def: string }>(await db.execute(sql`select pg_get_constraintdef(oid) as def from pg_constraint where conname = 'action_proposals_action_check'`))[0];
+      expect(check.def).toContain("monitor_update_url");
+    } finally {
+      await db.execute(sql`update ops.alert_rules set channels = ${JSON.stringify(before)}::jsonb where key = 'MonitorDown'`);
+    }
   });
 
   it("upserts ai_agents on the coalesce(key_id) expression index, as src/private/ai/usage.ts does", async () => {

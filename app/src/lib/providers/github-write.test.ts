@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { dependabotAlerts, rootFiles } from "./github-deps";
-import { branchHead, createBranch, createPull, manifestAt, mergeWatchpostPull, openPull, putManifest, repoInfo, WRITE_SCOPE_ERROR } from "./github-write";
+import {
+  branchHead, commitFiles, createBranch, createPull, lockfileAt, manifestAt, mergeWatchpostPull, openPull, pullCommits, pullFiles, putManifest, repoInfo, tokenLogin, WRITE_SCOPE_ERROR,
+} from "./github-write";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const SHA = "a".repeat(40);
@@ -73,6 +75,24 @@ describe("github-write: never the default branch", () => {
     expect(r.seen.every((s) => s.method === "GET")).toBe(true);
     expect(r.seen.find((s) => s.url.includes("/pulls?"))?.url).toContain(`head=o%3A${encodeURIComponent(BRANCH)}`);
   });
+
+  // Review T2b-fix I-1: lockfiles are often over the Contents API's 1 MB JSON limit, so they're read raw (up to 100 MB).
+  it("reads an npm lockfile raw at a ref; a missing one is null; other paths are refused before any request", async () => {
+    const accept: string[] = [];
+    const r = recorder((url, init) => {
+      accept.push(String((init.headers as Record<string, string>).Accept));
+      if (url.includes("/contents/apps/web/package-lock.json?ref=")) return new Response('{"lockfileVersion":3}', { status: 200 });
+      return json({ message: "Not Found" }, 404);
+    });
+    expect(await lockfileAt("t", "o/r", SHA, "apps/web/package-lock.json", { fetch: r.fetch })).toEqual({ ok: true, data: '{"lockfileVersion":3}' });
+    expect(r.seen[0].url).toBe(`https://api.github.com/repos/o/r/contents/apps/web/package-lock.json?ref=${SHA}`);
+    expect(accept[0]).toBe("application/vnd.github.raw+json");
+    expect(await lockfileAt("t", "o/r", "main", "npm-shrinkwrap.json", { fetch: r.fetch })).toEqual({ ok: true, data: null });
+    for (const p of ["pnpm-lock.yaml", "../package-lock.json", "a/../package-lock.json", ".npmrc"]) {
+      expect(await lockfileAt("t", "o/r", "main", p, { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
+    }
+    expect(r.seen).toHaveLength(2);
+  });
 });
 
 describe("github-deps (read-only)", () => {
@@ -96,5 +116,24 @@ describe("github-deps (read-only)", () => {
     const ok = recorder(() => json([]));
     expect(await dependabotAlerts("t", "o/r", { fetch: ok.fetch })).toEqual({ ok: true, data: { alerts: [] } });
     expect(ok.seen[0].url).toBe("https://api.github.com/repos/o/r/dependabot/alerts?state=open&ecosystem=npm&per_page=100");
+  });
+});
+
+describe("github-write: the merge watcher's allow-list reads (audit M1)", () => {
+  it("reads the PR's files, commits, one commit's files and the token's login", async () => {
+    const r = recorder((url) => {
+      if (url.endsWith("/pulls/7/files?per_page=100")) return json([{ filename: "package.json" }, { filename: "b.json", previous_filename: "a.json" }]);
+      if (url.endsWith("/pulls/7/commits?per_page=100")) return json([{ sha: SHA, author: { login: "me" }, commit: { message: "m", author: { name: "Me", email: "me@x" } } }, { sha: SHA, author: null, commit: { message: "n", author: null } }]);
+      if (url.endsWith(`/commits/${SHA}`)) return json({ files: [{ filename: "package-lock.json" }, { filename: "x", previous_filename: "y" }] });
+      return json({ login: "me" });
+    });
+    expect(await pullFiles("t", "o/r", 7, { fetch: r.fetch })).toEqual({ ok: true, data: [{ filename: "package.json", previous: null }, { filename: "b.json", previous: "a.json" }] });
+    expect(await pullCommits("t", "o/r", 7, { fetch: r.fetch })).toEqual({ ok: true, data: [
+      { sha: SHA, login: "me", name: "Me", email: "me@x", message: "m" }, { sha: SHA, login: null, name: "", email: "", message: "n" },
+    ] });
+    expect(await commitFiles("t", "o/r", SHA, { fetch: r.fetch })).toEqual({ ok: true, data: ["package-lock.json", "x", "y"] });
+    expect(await tokenLogin("t", { fetch: r.fetch })).toEqual({ ok: true, data: "me" });
+    expect(r.seen.map((x) => x.method)).toEqual(["GET", "GET", "GET", "GET"]);
+    expect(await pullFiles("t", "../r", 7, { fetch: r.fetch })).toMatchObject({ ok: false });
   });
 });

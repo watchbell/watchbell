@@ -16,6 +16,16 @@ describe("checkUrl", () => {
     const fetch = vi.fn(async () => new Response("bad", { status: 502 }));
     expect(await checkUrl("https://a.example/", { fetch, clock: clock(), lookup: publicLookup })).toEqual({ ok: false, statusCode: 502, latencyMs: 120, error: "HTTP 502" });
   });
+  // Watchbell 1.2.1: Vercel's own "no deployment for this domain" answer is named (a fixed code, nothing else of the
+  // headers is kept), so a monitor on a domain the app left can read as moved instead of down.
+  it("names Vercel's DEPLOYMENT_NOT_FOUND, and only from Vercel", async () => {
+    const vercel = vi.fn(async () => new Response("The deployment could not be found on Vercel.", { status: 404, headers: { server: "Vercel", "x-vercel-error": "DEPLOYMENT_NOT_FOUND" } }));
+    expect(await checkUrl("https://a.example/", { fetch: vercel, clock: clock(), lookup: publicLookup })).toEqual({ ok: false, statusCode: 404, latencyMs: 120, error: "HTTP 404 · DEPLOYMENT_NOT_FOUND" });
+    const other = vi.fn(async () => new Response("x", { status: 404, headers: { server: "nginx", "x-vercel-error": "DEPLOYMENT_NOT_FOUND" } }));
+    expect((await checkUrl("https://a.example/", { fetch: other, clock: clock(), lookup: publicLookup })).error).toBe("HTTP 404");
+    const otherCode = vi.fn(async () => new Response("x", { status: 404, headers: { server: "Vercel", "x-vercel-error": "NOT_FOUND<script>" } }));
+    expect((await checkUrl("https://a.example/", { fetch: otherCode, clock: clock(), lookup: publicLookup })).error).toBe("HTTP 404");
+  });
   it("reports timeouts and connection errors in words", async () => {
     const timeout = vi.fn(async () => { throw new DOMException("t", "TimeoutError"); });
     expect(await checkUrl("https://a.example/", { fetch: timeout, timeoutMs: 5000, lookup: publicLookup })).toMatchObject({ ok: false, statusCode: null, error: "No answer within 5 s" });

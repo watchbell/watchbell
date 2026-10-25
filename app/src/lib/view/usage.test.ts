@@ -55,7 +55,7 @@ describe("usageRows (cross-provider overview)", () => {
     expect(rows[0].note).toContain("No metrics key");
     expect(rows[0].note).toContain("Egress and MAU: not readable");
     expect(rows[1].extra).toEqual(["Storage 5%", "Transfer 20%", "active 2 h this month"]);
-    expect(rows[2].note).toContain("Storage (1 GiB): not readable");
+    expect(rows[2].note).toBe("Storage (1 GiB): not read; the Firebase console's usage page shows it.");
     expect(rows[3].note).toBe("Not available on Spark: Firestore usage needs billing (Blaze plan)");
   });
 
