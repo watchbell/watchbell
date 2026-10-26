@@ -31,6 +31,7 @@ const TASK_LABEL: Record<TaskName, string> = {
   tls: "TLS certificate expiry",
   rdap: "Domain expiry (RDAP)",
   eol: "Next.js end-of-life data",
+  node: "Node.js security releases and end of life, for Watchbell's own runtime",
   status: "Provider status feeds",
   logs: "Copy of Vercel warning and error logs",
   pageviews: "Web Analytics page views",

@@ -3,12 +3,15 @@ import { cleanLine } from "@/private/console/clean-text";
 import type { ActionArea } from "./areas";
 import { clip, type ProposalDraft, proposalTitle, proposedBy, shownName, TEXT_MAX } from "./proposals";
 import { ACTIONS, PROPOSAL_TTL_MS, type ProposalAction } from "./proposals-types";
+import { type PreviousNext, UNKNOWN_NOTE } from "./rollback-guard";
 
 // Stage 9 (owner 15 Oct): officers read the stored logs (ops.stored_logs: warning / error / fatal lines of the watched
 // apps) and propose console actions through the same proposals flow as the firing alerts. Pure. Three rules:
 //   LogErrorSpike (Workloads): the app's live production deployment went live < 2 h ago and the errors since then are
 //     ≥ max(10, 5 × the hourly error rate of the 24 h before it) → vercel_rollback (risky), only with a previous ready
 //     production deployment (the same target as the DeploymentFailed path: is_current / is_previous_production).
+//     Watchbell 1.2.2 (D17): not when that deployment's Next.js has known advisories; an unknown one is proposed with
+//     that said first in its reason (and never auto-runs: auto-rollback.ts).
 //   LogErrors (Workloads): ≥ 20 errors in the last 30 min and no production deploy in the last 2 h → recheck (safe) of
 //     the app's HTTP monitor, when it has one.
 //   LogDbErrors (Databases): ≥ 3 lines in the last 30 min that read like a database connection problem, for an app with a
@@ -45,6 +48,7 @@ export type LogApp = {
   dbErrors30: number; topDb: string | null;
   httpMonitorId: string | null;
   db: { resourceId: string; kind: string; wakeEndpoint: string | null; supabaseRef: string | null; supabasePaused: boolean } | null;
+  previousNext?: PreviousNext; // the previous production deployment's Next.js (read only for a spike; missing: unknown)
 };
 
 export type LogDraft = Omit<ProposalDraft, "alertId"> & { alertId: null; ruleKey: LogRule };
@@ -69,9 +73,11 @@ export function logPicks(a: LogApp, book: AliasBook, now: Date): Pick1[] {
   const out: Pick1[] = [];
   const t = now.getTime();
   const recentLive = a.liveAt !== null && t - a.liveAt.getTime() < SPIKE_WINDOW_MS && a.liveAt.getTime() <= t;
-  if (recentLive && a.errorsSinceLive >= spikeThreshold(a.baselineErrors) && a.currentId && a.previousId && DPL.test(a.previousId) && a.previousId !== a.currentId) {
+  const prev = a.previousNext?.status ?? "unknown";
+  if (recentLive && a.errorsSinceLive >= spikeThreshold(a.baselineErrors) && a.currentId && a.previousId && DPL.test(a.previousId) && a.previousId !== a.currentId && prev !== "vulnerable") {
     const counts = `${a.errorsSinceLive} errors since the deploy went live ${minutes(t - a.liveAt!.getTime())} min ago (${a.baselineErrors} in the 24 h before)`;
-    out.push({ ruleKey: "LogErrorSpike", room: "workloads", action: "vercel_rollback", resourceKind: "app", resourceId: a.appId, targetRef: a.previousId, reason: logReason(counts, a.topSinceLive, book) });
+    const reason = logReason(counts, a.topSinceLive, book);
+    out.push({ ruleKey: "LogErrorSpike", room: "workloads", action: "vercel_rollback", resourceKind: "app", resourceId: a.appId, targetRef: a.previousId, reason: prev === "ok" ? reason : clip(`${UNKNOWN_NOTE} ${reason}`) });
   }
   const deployedLately = a.lastDeployAt !== null && t - a.lastDeployAt.getTime() < NO_DEPLOY_MS;
   if (a.errors30 >= ERRORS_MIN && !deployedLately && a.httpMonitorId) {

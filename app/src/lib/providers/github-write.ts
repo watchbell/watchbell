@@ -126,9 +126,12 @@ export async function openPull(token: string, fullName: string, owner: string, b
   return { ok: true, data: pr ? { number: pr.number, url: pr.html_url } : null };
 }
 
-export async function createPull(token: string, fullName: string, branch: string, defaultBranch: string, title: string, body: string, opts: FetchOpts = {}): Promise<Result<{ number: number; url: string }>> {
+// extra.draft (1.2.2, D15): opened as a draft, so a merge from GitHub needs a deliberate "Ready for review" first.
+export async function createPull(
+  token: string, fullName: string, branch: string, defaultBranch: string, title: string, body: string, opts: FetchOpts = {}, extra: { draft?: boolean } = {},
+): Promise<Result<{ number: number; url: string }>> {
   if (!isFullName(fullName) || !isOwnBranch(branch, defaultBranch) || !isGitRef(defaultBranch)) return badRepo;
-  const r = await call("POST", `/repos/${repoPath(fullName)}/pulls`, token, { title, head: branch, base: defaultBranch, body, maintainer_can_modify: true }, opts);
+  const r = await call("POST", `/repos/${repoPath(fullName)}/pulls`, token, { title, head: branch, base: defaultBranch, body, maintainer_can_modify: true, ...(extra.draft ? { draft: true } : {}) }, opts);
   if (!r.ok) return r;
   const p = pullSchema.safeParse(r.data);
   return p.success ? { ok: true, data: { number: p.data.number, url: p.data.html_url } } : fmt("the new pull request");

@@ -42,7 +42,7 @@ describe("database aliases (privacy)", () => {
 
   it("Overview's Neon cell names the project by alias", () => {
     const neon = row({ id: "t", kind: "neon_project", name: "ticketer", state: "idle", data: { computeSeconds: 148_320, endpoints: [{ id: "ep", branchId: "br", state: "idle", pendingState: null, disabled: false, minCu: 0.25, maxCu: 2, lastActive: ago(1) }] } });
-    expect(neonCell([neon], now, book).sub).toBe("db-d idle · 41 of 100 CU-h");
+    expect(neonCell([neon], now, book).sub).toBe("db-d is asleep · 41 of 100 compute hours used this month");
   });
 });
 
@@ -112,7 +112,7 @@ describe("neonBlocks / neonCell", () => {
     expect(b.branches.map((x) => [x.name, x.status.label, x.autoscaling])).toEqual([["main", "Idle", "0.25–2 CU"], ["dev", "No compute", "—"]]);
   });
   it("summarises one project, and a provider that stopped answering", () => {
-    expect(neonCell([{ ...neon, id: "t" }], now, book)).toEqual({ state: "idle", sub: "db-d idle · 41 of 100 CU-h" });
+    expect(neonCell([{ ...neon, id: "t" }], now, book)).toEqual({ state: "idle", sub: "db-d is asleep · 41 of 100 compute hours used this month" });
     expect(neonCell([{ ...neon, state: "unknown", collectedAt: new Date(now.getTime() - 14 * 60_000) }], now)).toEqual({ state: "unknown", sub: "API not responding · data from 14 min ago" });
     expect(neonCell([], now)).toEqual({ state: "unknown", sub: "No projects watched yet" });
   });

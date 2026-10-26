@@ -144,7 +144,7 @@ function staleSub(rows: DbRow[], now: Date): string | null {
   return `API not responding${at ? ` · data from ${rel(at, now)}` : ""}`;
 }
 
-// Overview → status strip cells (mockup: "2 accounts · 1 paused", "ticketer idle · 41 of 100 CU-h", "3 projects reachable").
+// Overview → status strip cells (mockup: "2 accounts · 1 paused", "ticketer is asleep · 41 of 100 compute hours used this month", "3 projects reachable").
 export function supabaseCell(rows: DbRow[], now: Date): { state: State; sub: string } {
   if (!rows.length) return { state: "unknown", sub: "No projects watched yet" };
   const stale = staleSub(rows, now);
@@ -162,7 +162,10 @@ export function neonCell(rows: DbRow[], now: Date, book: AliasBook = EMPTY_BOOK)
   const blocks = neonBlocks(rows, now, book);
   if (blocks.length === 1) {
     const b = blocks[0];
-    return { state: rows[0].state, sub: `${b.alias} ${b.status.label.toLowerCase()}${b.cu ? ` · ${Math.round(b.cu.value)} of ${NEON_FREE.cuHours} CU-h` : ""}` };
+    // Plain words (D22): an idle compute "is asleep", and the figure says what it counts and over which period (the Neon
+    // free plan's compute hours reset monthly, see neonBlocks' `resets`).
+    const word = b.status.label === "Idle" ? "is asleep" : b.status.label.toLowerCase();
+    return { state: rows[0].state, sub: `${b.alias} ${word}${b.cu ? ` · ${Math.round(b.cu.value)} of ${NEON_FREE.cuHours} compute hours used this month` : ""}` };
   }
   return { state: worst(rows.map((r) => r.state)), sub: `${plural(rows.length, "project")} · ${rows.filter((r) => r.state === "ok").length} active` };
 }

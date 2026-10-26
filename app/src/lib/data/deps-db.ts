@@ -12,7 +12,7 @@ import { advisories, queryBatch } from "@/lib/deps/osv-client";
 import { cleanRootDir, dirText, inDir, lockCoversDir, unusableRootDir, workspaceCovers } from "@/lib/deps/root-dir";
 import { idsToRead, knownFindings, mergeDependabot, type OpenVuln, planVulns, rank, scanDue, scanOrder, upgradesFor } from "@/lib/deps/plan";
 import { branchExists, dependabotAlerts, LOCKFILE_MAX_BYTES, type RootFile, repoFile, rootFiles } from "@/lib/providers/github-deps";
-import { productionCandidate } from "@/lib/deps/branch";
+import { productionCandidate, scanBranchOf, scanFallbackOf } from "@/lib/deps/branch";
 import { PACKAGE_MAX_BYTES } from "@/lib/providers/github";
 import type { FetchOpts } from "@/lib/providers/http";
 
@@ -46,6 +46,8 @@ async function readToken(): Promise<Token> {
 // linked app's Vercel production branch, read instead of the default branch when the repository has it.
 export type ScanTarget = {
   id: string; fullName: string; defaultBranch: string | null; scannedAt: Date | null; rootDir?: string | null; rootDirUnsupported?: string | null; prodBranch?: string | null;
+  // 1.2.2 (D15): the production branch, tried when prodBranch (the branch production was built from) isn't in the repository.
+  prodFallback?: string | null;
 };
 
 async function scanAll(): Promise<boolean> {
@@ -54,12 +56,17 @@ async function scanAll(): Promise<boolean> {
 }
 
 // An app's folder from its resources.meta: the usable Root Directory, or the text of one that couldn't be used; and its
-// Vercel production branch (null: none, or not a plain branch name).
-export type ScanDir = { dir: string | null; unsupported: string | null; branch: string | null };
-const dirOf = (meta: Record<string, unknown> | null): ScanDir => ({
-  dir: cleanRootDir((meta ?? {}).rootDirectory), unsupported: unusableRootDir((meta ?? {}).rootDirectoryUnsupported),
-  branch: productionCandidate((meta ?? {}).productionBranch, null),
-});
+// Vercel production branch (null: none, or not a plain branch name). 1.2.2 (D15): the Git branch the live production
+// deployment was really built from (meta.productionSource) comes first: production can be built from another branch.
+// `fallback` (only when there is one): the production branch, tried next.
+export type ScanDir = { dir: string | null; unsupported: string | null; branch: string | null; fallback?: string };
+const dirOf = (meta: Record<string, unknown> | null): ScanDir => {
+  const fallback = scanFallbackOf(meta);
+  return {
+    dir: cleanRootDir((meta ?? {}).rootDirectory), unsupported: unusableRootDir((meta ?? {}).rootDirectoryUnsupported),
+    branch: productionCandidate(scanBranchOf(meta), null), ...(fallback ? { fallback } : {}),
+  };
+};
 
 // Watchbell 1.2: which folder of each repository is scanned: the Vercel Root Directory (resources.meta.rootDirectory,
 // written by the account sync) of the app linked to it. When several live apps share a repository, a watched
@@ -85,7 +92,10 @@ export async function reposToScan(): Promise<ScanTarget[]> {
     : await db().selectDistinct(cols).from(appRepos).innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId))
       .leftJoin(dependencyScans, eq(dependencyScans.repoId, githubRepos.id)).where(live).limit(MAX_REPOS);
   const dirs = rows.length ? await scanDirs(rows.map((r) => r.id)) : new Map<string, ScanDir>();
-  return scanOrder(rows.map((r) => ({ ...r, rootDir: dirs.get(r.id)?.dir ?? null, rootDirUnsupported: dirs.get(r.id)?.unsupported ?? null, prodBranch: dirs.get(r.id)?.branch ?? null })));
+  return scanOrder(rows.map((r) => {
+    const d = dirs.get(r.id);
+    return { ...r, rootDir: d?.dir ?? null, rootDirUnsupported: d?.unsupported ?? null, prodBranch: d?.branch ?? null, ...(d?.fallback ? { prodFallback: d.fallback } : {}) };
+  }));
 }
 
 export type RepoScan = { status: "scanned" | "unchanged" | "failed"; error?: string; vulns?: number; packages?: number; note?: string | null };
@@ -128,17 +138,23 @@ export async function scanRepo(token: string, repo: ScanTarget, deadline: number
     return { status: "failed", error };
   };
   let ref = repo.defaultBranch ?? "HEAD";
-  const prod = productionCandidate(repo.prodBranch, repo.defaultBranch);
-  let onProd = false;
-  if (prod) {
-    const has = await branchExists(token, repo.fullName, prod, gh());
+  // 1.2.2 (D15): the branch production was built from, then the production branch (prodFallback), the first the
+  // repository has, in the same order as the update PR's base (lib/deps/branch.ts baseCandidates).
+  let prod: string | null = null;
+  for (const b of [repo.prodBranch, repo.prodFallback]) {
+    if (b && b === repo.defaultBranch) break;
+    const c = productionCandidate(b, repo.defaultBranch);
+    if (!c) continue;
+    const has = await branchExists(token, repo.fullName, c, gh());
     if (!has.ok) return fail(has.error);
     if (has.data) {
-      ref = prod;
-      onProd = true;
+      prod = c;
+      break;
     }
   }
-  const branchNote = onProd ? `Scanned ${prod}, the branch Vercel deploys to production.` : null;
+  const onProd = prod !== null;
+  if (prod) ref = prod;
+  const branchNote = onProd ? `Scanned ${prod}, the branch production is built from.` : null;
   const dir = cleanRootDir(repo.rootDir);
   // An app's Root Directory that couldn't be used: the root is scanned, and the note says so first (review T1).
   const odd = dir ? null : unusableRootDir(repo.rootDirUnsupported);
@@ -398,7 +414,7 @@ export async function scanAppNow(appId: string, opts: FetchOpts = {}): Promise<{
   if ("error" in t) return { ok: false, error: t.error };
   // The clicked app's own folder (review T1), even when another app of the same repository decides the daily scan's.
   const d = dirOf(row.meta as Record<string, unknown> | null);
-  const s = await scanRepo(t.token, { id: row.id, fullName: row.fullName, defaultBranch: row.defaultBranch, scannedAt: null, rootDir: d.dir, rootDirUnsupported: d.unsupported, prodBranch: d.branch }, Date.now() + SCAN_NOW_MS, { ...opts, force: true });
+  const s = await scanRepo(t.token, { id: row.id, fullName: row.fullName, defaultBranch: row.defaultBranch, scannedAt: null, rootDir: d.dir, rootDirUnsupported: d.unsupported, prodBranch: d.branch, prodFallback: d.fallback ?? null }, Date.now() + SCAN_NOW_MS, { ...opts, force: true });
   if (s.status === "failed") return { ok: false, error: `The scan failed: ${s.error}` };
   const [c] = await db().select({ n: sql<number>`count(*)::int` }).from(dependencyVulns).where(and(eq(dependencyVulns.repoId, row.id), isNull(dependencyVulns.resolvedAt)));
   const n = c?.n ?? 0;

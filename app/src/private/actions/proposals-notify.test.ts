@@ -7,7 +7,10 @@ vi.mock("@/lib/data/notify-db", () => ({ telegramTarget: vi.fn(), recordResult: 
 vi.mock("@/lib/env", () => ({ serverEnv: () => ({ SITE_URL: "https://never-used.example.test" }) }));
 vi.mock("@/lib/notify/telegram", () => ({ sendTelegram: () => { throw new Error("tests never send a real message"); } }));
 
-import { actionsUrl, autoRollbackMessage, depPrMessage, notifyNewProposals, notifyProposalResult, proposalMessage, proposalResultMessage, proposalsGroupMessage } from "./proposals-notify";
+import {
+  actionsUrl, autoRollbackMessage, depPrMessage, historyLine, notifyAutoRollback, notifyNewProposals, notifyProposalResult, proposalMessage, proposalResultMessage,
+  proposalsGroupMessage, quietResult,
+} from "./proposals-notify";
 import { AUTO_RUN_OFF } from "./proposals-settings";
 import { ACTIONS, type Proposal, type ProposalAction } from "./proposals-types";
 
@@ -165,9 +168,9 @@ describe("notifyNewProposals", () => {
 describe("notifyProposalResult", () => {
   it("an auto-run proposal that finished: one line, ✅ done or ❌ failed", async () => {
     const d = deps();
-    await notifyProposalResult(proposal({ action: "recheck", title: "Cek ulang api", auto: true, status: "done", result: "Sehat lagi (200 OK)." }), d, { now: NOW });
+    await notifyProposalResult(proposal({ action: "neon_wake", title: "Neon db-a", auto: true, status: "done", result: "Woken." }), d, { now: NOW });
     await notifyProposalResult(proposal({ action: "neon_wake", title: "Neon db-a", auto: true, status: "failed", result: "Neon <menolak>." }), d, { now: NOW });
-    expect(sent).toEqual(["✅ Automatic: Check again now — Cek ulang api: Sehat lagi (200 OK).", "❌ Automatic: Wake Neon — Neon db-a: Neon &lt;menolak&gt;."]);
+    expect(sent).toEqual(["✅ Automatic: Wake Neon — Neon db-a: Woken.", "❌ Automatic: Wake Neon — Neon db-a: Neon &lt;menolak&gt;."]);
   });
 
   it("not auto, or not finished: nothing", async () => {
@@ -235,5 +238,132 @@ describe("Indonesian notices (lang: id)", () => {
     sent = [];
     await notifyNewProposals([proposal()], e, { now: NOW });
     expect(sent[0]).toContain("Open in Auto-actions");
+  });
+});
+
+// Watchbell 1.2.2 (D18): fewer and clearer Telegram messages.
+describe("D18: real names on Telegram, the Discord history keeps the aliases", () => {
+  const NAMED = {
+    db: [{ id: "d1", name: "orders-db", alias: "db-a" }],
+    app: [{ id: "a1", name: "shop", alias: "app-a" }, { id: "a2", name: "blog", alias: "app-o" }],
+    host: [{ id: "h1", name: "shop.example.com", alias: "app-a.example" }],
+  };
+  const p = proposal({ title: "Check app-a again now", reason: "app-a.example/ returned HTTP 502. db-a is paused.", resourceName: "app-a" });
+
+  it("one proposal, in English and Indonesian", () => {
+    expect(proposalMessage(p, NAMED, SITE).split("\n").slice(0, 2)).toEqual([
+      "🧑‍✈️ Workloads officer proposes: Redeploy production — Check shop again now",
+      "Why: shop.example.com/ returned HTTP 502. orders-db is paused.",
+    ]);
+    expect(proposalMessage(p, NAMED, SITE, false, "id").split("\n").slice(0, 2)).toEqual([
+      "🧑‍✈️ Workloads officer usul: Redeploy production — Check shop again now",
+      "Kenapa: shop.example.com/ returned HTTP 502. orders-db is paused.",
+    ]);
+  });
+
+  it("the grouped list, a result, a rollback and an update PR", () => {
+    const list = ["a", "b", "c", "d"].map((id) => ({ ...p, id }));
+    expect(proposalsGroupMessage(list, NAMED, SITE)).toContain("Check shop again now");
+    const auto = { ...p, action: "neon_wake" as const, title: "Wake the Neon compute of db-a", auto: true, status: "done" as const, result: "db-a is waking up." };
+    expect(proposalResultMessage(auto, NAMED)).toBe("✅ Automatic: Wake Neon — Wake the Neon compute of orders-db: orders-db is waking up.");
+    expect(proposalResultMessage(auto, NAMED, "id")).toBe("✅ Otomatis: Bangunin Neon — Wake the Neon compute of orders-db: orders-db is waking up.");
+    const rb = { ...p, action: "vercel_rollback" as const, status: "done" as const, result: "Rolled back app-a." };
+    expect(autoRollbackMessage(rb, { reason: "app-a is down", newRef: "abc1234" }, NAMED)).toMatch(/^⏪ Automatic rollback of shop: shop is down\. .*\n✅ Succeeded: Rolled back shop\.$/);
+    expect(autoRollbackMessage(rb, { reason: "app-a is down", newRef: "abc1234" }, NAMED, "id")).toMatch(/^⏪ Otomatis rollback shop: shop is down\. .*\n✅ Berhasil: Rolled back shop\.$/);
+    // The merge watcher names the app by its alias (app-o): the owner's chat reads the real name.
+    expect(depPrMessage({ kind: "stopped", app: "app-o", number: 3, packages: ["next"], reason: "CI failed" }, NAMED)).toBe("⚠️ PR #3 in blog needs a look: CI failed. The PR was left open.");
+    expect(depPrMessage({ kind: "stopped", app: "app-o", number: 3, packages: ["next"], reason: "CI gagal" }, NAMED, "id")).toBe("⚠️ PR #3 di blog butuh dicek: CI gagal. PR-nya dibiarin terbuka.");
+  });
+
+  it("Discord's history line keeps the aliases", () => {
+    expect(historyLine("proposed", { ...p, title: "Check shop again now" }, NAMED)).toBe("📝 Proposed: Check app-a again now — waiting for approval on Telegram.");
+  });
+
+  it("still never an email or a key", () => {
+    const text = proposalMessage({ ...p, reason: "app-a failed for owner@example.com with sk-abcdef1234567890" }, NAMED, SITE);
+    expect(text).not.toMatch(/owner@example\.com|sk-abcdef/);
+    expect(text).toContain("shop failed");
+  });
+});
+
+describe("D18: an automatic re-check that ran sends nothing on Telegram", () => {
+  const recheck = (o: Partial<Proposal> = {}) => proposal({ action: "recheck", title: "Check shop again now", auto: true, status: "done", result: "Still failing: HTTP 502.", ...o });
+
+  it("quietResult: a re-check (monitor or certificate) that ran; never one that failed to run, a manual one or another action", () => {
+    expect(quietResult(recheck())).toBe(true);
+    expect(quietResult(recheck({ result: "Healthy again (200 OK)." }))).toBe(true);
+    expect(quietResult(recheck({ action: "domain_recheck" }))).toBe(true);
+    expect(quietResult(recheck({ status: "failed" }))).toBe(false);
+    expect(quietResult(recheck({ auto: false }))).toBe(false);
+    expect(quietResult(recheck({ action: "neon_wake" }))).toBe(false);
+    expect(proposalResultMessage(recheck(), BOOK)).toBeNull();
+  });
+
+  it("no Telegram message, still or passing; the Discord history still records it", async () => {
+    const discord: string[] = [];
+    const d = deps({
+      discord: async () => ({ url: "https://discord.example.test/hook" }), sendDiscord: vi.fn(async (_u: string, c: string) => { discord.push(c); return { ok: true as const }; }),
+      recordDiscord: vi.fn(async () => undefined), discordLang: async () => "en" as const,
+    });
+    await notifyProposalResult(recheck(), d, { now: NOW });
+    await notifyProposalResult(recheck({ result: "Healthy again (200 OK)." }), d, { now: NOW });
+    expect(d.send).not.toHaveBeenCalled();
+    expect(discord).toEqual(["⚙️ Ran: Check shop again now — Still failing: HTTP 502.", "⚙️ Ran: Check shop again now — Healthy again (200 OK)."]);
+  });
+
+  it("a re-check that couldn't run is still told, in English and Indonesian", async () => {
+    await notifyProposalResult(recheck({ status: "failed", result: "Too many checks. Try again in 1 minute." }), deps(), { now: NOW });
+    await notifyProposalResult(recheck({ status: "failed", result: "Too many checks. Try again in 1 minute." }), deps({ lang: async () => "id" as const }), { now: NOW });
+    expect(sent).toEqual([
+      "❌ Automatic: Check again now — Check shop again now: Too many checks. Try again in 1 minute.",
+      "❌ Otomatis: Cek ulang sekarang — Check shop again now: Too many checks. Try again in 1 minute.",
+    ]);
+  });
+});
+
+describe("D18: a notice about one alert replies to that alert's Telegram message", () => {
+  const ALERT_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const ALERT_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  const replyTo = (d: { send: { mock: { calls: unknown[][] } } }) => d.send.mock.calls.map((c) => c[4]);
+
+  it("an auto-run's result answers its alert's message", async () => {
+    const thread = vi.fn(async (id: string) => (id === ALERT_A ? 41 : null));
+    const d = deps({ thread });
+    const done = proposal({ action: "neon_wake", auto: true, status: "done", result: "Woken." });
+    await notifyProposalResult(done, d, { now: NOW, alertId: ALERT_A });
+    await notifyProposalResult(done, d, { now: NOW, alertId: ALERT_B });
+    await notifyProposalResult(done, d, { now: NOW });
+    expect(replyTo(d)).toEqual([41, undefined, undefined]);
+    expect(thread.mock.calls.map((c) => c[0])).toEqual([ALERT_A, ALERT_B]);
+  });
+
+  it("an automatic rollback answers its alert's message", async () => {
+    const d = deps({ thread: async () => 52 });
+    await notifyAutoRollback(proposal({ action: "vercel_rollback", auto: true, status: "done" }), { reason: "down", newRef: "abc" }, d, { now: NOW, alertId: ALERT_A });
+    expect(replyTo(d)).toEqual([52]);
+  });
+
+  it("a thread that can't be read sends a plain message", async () => {
+    const d = deps({ thread: async () => { throw new Error("db down"); } });
+    await notifyProposalResult(proposal({ action: "neon_wake", auto: true, status: "failed", result: "x" }), d, { now: NOW, alertId: ALERT_A });
+    expect(sent).toHaveLength(1);
+    expect(replyTo(d)).toEqual([undefined]);
+  });
+
+  it("single proposals answer their own alert, with or without buttons; a grouped message answers none", async () => {
+    const thread = vi.fn(async (id: string) => (id === ALERT_A ? 7 : id === ALERT_B ? 8 : null));
+    const alertIds = new Map<string, string | null>([["a", ALERT_A], ["b", ALERT_B], ["c", null]]);
+    const d = deps({ thread });
+    await notifyNewProposals([proposal({ id: "a" }), proposal({ id: "b" }), proposal({ id: "c" })], d, { now: NOW, alertIds });
+    expect(replyTo(d)).toEqual([7, 8, undefined]);
+    const keyboard = { inline_keyboard: [] };
+    const b = deps({ thread, buttons: async () => () => keyboard });
+    await notifyNewProposals([proposal({ id: "a" })], b, { now: NOW, alertIds });
+    expect(b.send.mock.calls[0].slice(3)).toEqual([keyboard, 7]);
+    const g = deps({ thread });
+    await notifyNewProposals(["a", "b", "c", "d"].map((id) => proposal({ id })), g, { now: NOW, alertIds: new Map([["a", ALERT_A]]) });
+    expect(g.send).toHaveBeenCalledTimes(1);
+    expect(replyTo(g)).toEqual([undefined]);
+    expect(thread).toHaveBeenCalledTimes(3);
   });
 });

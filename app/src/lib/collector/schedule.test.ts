@@ -9,7 +9,7 @@ const ago = (s: number, from = now) => new Date(from.getTime() - s * 1000).toISO
 const at = (iso: string) => new Date(iso);
 
 const MINUTE = ["heartbeats", "checks", "vercel", "alerts"];
-const ORDER = ["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "neon", "firebase", "firebaseUsage", "extraDbs", "cloudflare", "domains", "tls", "rdap", "eol", "status", "logs", "pageviews", "security", "alerts", "digest"];
+const ORDER = ["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "neon", "firebase", "firebaseUsage", "extraDbs", "cloudflare", "domains", "tls", "rdap", "eol", "status", "logs", "pageviews", "node", "security", "alerts", "digest"];
 const SLOW = ORDER.filter((t) => !MINUTE.includes(t)) as TaskName[];
 // Every task ran in its current slot (or, for minute tasks, a second ago).
 const fresh = (when: Date) => Object.fromEntries(ORDER.map((t) => [t, MINUTE.includes(t) ? ago(1, when) : new Date(slotStart(t as TaskName, when)).toISOString()]));
@@ -31,7 +31,7 @@ describe("TASKS", () => {
   it("runs heartbeats first (final review I1), then the stage 3, 4 and 5 tasks in one order, with alerts and digest last", () => {
     expect(Object.keys(TASKS)).toEqual(ORDER);
     expect(POST_TASKS).toEqual(["alerts", "digest"]);
-    expect(TASKS).toMatchObject({ checks: 60, heartbeats: 60, vercel: 60, alerts: 60, status: 300, logs: 300, pageviews: 1800, digest: 300, supabaseUsage: 3600, cloudflare: 3600, domains: 21_600, eol: 86_400 });
+    expect(TASKS).toMatchObject({ checks: 60, heartbeats: 60, vercel: 60, alerts: 60, status: 300, logs: 300, pageviews: 1800, digest: 300, supabaseUsage: 3600, cloudflare: 3600, domains: 21_600, eol: 86_400, node: 43_200 });
   });
   // Watchbell 1.2.1 (owner 23 Oct): the security check (Next.js versions and the dependency scan) every 6 hours, last of
   // the main tasks so it only takes the time the others leave.
@@ -102,11 +102,11 @@ describe("dueTasks: spreading the first runs and catch-ups", () => {
     expect(dueTasks({}, now, false)).toEqual(["heartbeats", "checks", "vercel", "supabase", "supabaseUsage", "alerts"]);
     expect(CATCH_UP_PER_RUN).toBe(2);
   });
-  it("after a deploy (all fourteen slower tasks new) every task has run within seven minutes, never more than two late ones a run", () => {
+  it("after a deploy (all seventeen slower tasks new) every task has run within eight minutes (seven before D20 added node), never more than two late ones a run", () => {
     const runs = simulate(at("2026-10-12T10:17:01Z"), 10);
     const firstRun = new Map<TaskName, number>();
     runs.forEach((r, i) => r.due.forEach((t) => firstRun.has(t) || firstRun.set(t, i)));
-    for (const t of ORDER as TaskName[]) expect(firstRun.get(t), t).toBeLessThanOrEqual(7);
+    for (const t of ORDER as TaskName[]) expect(firstRun.get(t), t).toBeLessThanOrEqual(8);
     for (const r of runs) expect(slowOnly(r.due).length).toBeLessThanOrEqual(CATCH_UP_PER_RUN + 2);
   });
   it("after an outage the missed slots are caught up two at a time, not all at once", () => {
@@ -123,12 +123,15 @@ describe("dueTasks: spreading the first runs and catch-ups", () => {
     const count = (t: string) => day2.filter((r) => r.due.includes(t as TaskName)).length;
     expect(Object.fromEntries(ORDER.map((t) => [t, count(t)]))).toEqual({
       checks: 1440, heartbeats: 1440, vercel: 1440, alerts: 1440, supabase: 288, neon: 288, firebase: 288, status: 288, logs: 288, pageviews: 48, digest: 288,
-      supabaseUsage: 24, firebaseUsage: 24, extraDbs: 24, cloudflare: 24, tls: 24, rdap: 24, domains: 4, eol: 1, security: 4,
+      supabaseUsage: 24, firebaseUsage: 24, extraDbs: 24, cloudflare: 24, tls: 24, rdap: 24, domains: 4, eol: 1, node: 2, security: 4,
     });
     expect(day2.filter((r) => r.due.includes("security")).map((r) => r.at.toISOString().slice(11, 16))).toEqual(["04:36", "10:36", "16:36", "22:36"]);
     // eol at 03:46 UTC, domains at 01:28, 07:28, 13:28, 19:28 UTC.
     expect(day2.filter((r) => r.due.includes("eol")).map((r) => r.at.toISOString())).toEqual(["2026-10-12T03:46:01.000Z"]);
     expect(day2.filter((r) => r.due.includes("domains")).map((r) => r.at.toISOString().slice(11, 16))).toEqual(["01:28", "07:28", "13:28", "19:28"]);
+    // D20: node at 03:43 and 15:43 UTC, after status in the same run (fix round 1, M3).
+    for (const r of day2.filter((x) => x.due.includes("node"))) expect(r.due.indexOf("status")).toBeLessThan(r.due.indexOf("node"));
+    expect(day2.filter((r) => r.due.includes("node")).map((r) => r.at.toISOString().slice(11, 16))).toEqual(["03:43", "15:43"]);
   });
 });
 
@@ -190,6 +193,8 @@ describe("taskFits", () => {
     expect(taskFits("digest", deadline, 14_500)).toBe(false);
     expect(taskFits("eol", deadline, 14_500)).toBe(false);
     expect(taskFits("eol", deadline, 13_000)).toBe(true);
+    expect(taskFits("node", deadline, 14_500)).toBe(false);
+    expect(taskFits("node", deadline, 13_000)).toBe(true);
   });
   it("defers page views like logs when less than 9 s remain", () => {
     expect(taskFits("pageviews", 20_000, 11_000)).toBe(true);

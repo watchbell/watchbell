@@ -40,7 +40,11 @@ export function parseServerEnv(source: Record<string, string | undefined>): Serv
     throw new Error("Missing or invalid environment variables: NEXT_PUBLIC_TURNSTILE_SITE_KEY (a test key in production)");
   }
   // The rest is only worth a warning (a local `next start` is a production build too). Names only, never values.
-  const problems = devOnlyProblems(source).filter((p) => !p.startsWith("NEXT_PUBLIC_TURNSTILE_SITE_KEY"));
+  // Self-host and demo run on the user's own machine, where a localhost SITE_URL is the normal setup (1.2.2).
+  const cloud = mode(source) === "cloud";
+  const problems = devOnlyProblems(source)
+    .filter((p) => !p.startsWith("NEXT_PUBLIC_TURNSTILE_SITE_KEY"))
+    .filter((p) => cloud || !p.startsWith("SITE_URL"));
   if (problems.length) console.warn(`env: ${problems.join("; ")}`);
   return result.data;
 }

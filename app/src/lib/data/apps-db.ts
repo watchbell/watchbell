@@ -1,10 +1,11 @@
 import "server-only";
-import { and, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accounts, appSecurity, deployments, monitors, resources, snapshots } from "@/db/schema";
 import type { SecurityRow } from "@/lib/security/types";
 import type { State } from "@/lib/status";
 import { storedDomains } from "@/lib/domain-move";
+import { type ProductionSource, readProductionSource } from "@/lib/deps/branch";
 import { type DomainFlag, type DomainLines, appDomainLines } from "@/lib/view/app-domains";
 import { appDomain } from "@/lib/view/format";
 import { type PageViewsView, pageViewsOf, pageViewsUnavailable } from "@/lib/view/pageviews";
@@ -22,6 +23,8 @@ import { toSecurityRow } from "./security-db";
 export type AppSummary = {
   id: string; name: string; gone: boolean; state: State; stateSince: Date | null; domain: string;
   framework: string | null; productionBranch: string | null; createdAt: Date | null; teamName: string | null;
+  // 1.2.2 (D15): what the live production deployment was really built from (the collector's meta.productionSource).
+  productionSource?: ProductionSource | null;
   // From Sync's project data (the next Sync fills them in): the Vercel team slug and Git repository for "Open in", and
   // the function regions for Details.
   teamSlug: string | null; repo: string | null; repoType: string | null; functionRegions: string[];
@@ -55,8 +58,16 @@ export async function listApps(now: Date, onlyId?: string): Promise<AppSummary[]
   const ids = apps.map((a) => a.r.id);
   const mons = (await db().select().from(monitors).where(inArray(monitors.resourceId, ids)).orderBy(monitors.createdAt)
     .limit(PAGE_ROWS.monitors)).map(toMonitorLite);
+  // Watchbell 1.2.2 (D16): Last deploy is the production deployment Vercel serves (the collector's isCurrent), so a
+  // promote or roll back to an older one shows that one, not the newest READY one. A production build newer than it that
+  // isn't READY (building, failed, canceled) still shows, as before. An app with no current row yet: the newest one.
+  // Review I1: the "no current row" test is uncorrelated (NOT IN over the current production rows, at most one per app;
+  // resource_id is NOT NULL), so Postgres evaluates it once as a hashed subplan instead of once per READY row.
   const latest = await db().selectDistinctOn([deployments.resourceId]).from(deployments)
-    .where(and(inArray(deployments.resourceId, ids), eq(deployments.target, "production")))
+    .where(and(inArray(deployments.resourceId, ids), eq(deployments.target, "production"), or(
+      eq(deployments.isCurrent, true), ne(deployments.state, "ready"),
+      sql`${deployments.resourceId} not in (select serving.resource_id from ${deployments} as serving where serving.target = 'production' and serving.is_current)`,
+    )))
     .orderBy(deployments.resourceId, desc(deployments.createdAtProvider));
   const days = await monitorDays(mons.map((m) => m.id), now);
   // Watchbell 1.2.1: monitors still on a domain their app no longer has ("Domain changed", Update monitor).
@@ -85,7 +96,7 @@ export async function listApps(now: Date, onlyId?: string): Promise<AppSummary[]
       // 1.2.1: the domain production is served on (Sync / the domains task), else the first monitor's host as before.
       domain: storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url)),
       domainLines: appDomainLines(r.meta, flags.get(r.id) ?? {}, storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url))),
-      framework: str(r.meta.framework), productionBranch: str(r.meta.productionBranch),
+      framework: str(r.meta.framework), productionBranch: str(r.meta.productionBranch), productionSource: readProductionSource(r.meta.productionSource),
       createdAt: created ? new Date(created) : null, teamName: str(r.meta.teamName),
       teamSlug: str(r.meta.teamSlug), repo: str(r.meta.repo), repoType: str(r.meta.repoType),
       functionRegions: Array.isArray(r.meta.functionRegions) ? r.meta.functionRegions.filter((x): x is string => typeof x === "string") : [],

@@ -17,7 +17,7 @@ vi.mock("@/lib/env", () => ({ serverEnv: () => ({ OPS_ENCRYPTION_KEY: "key", SIT
 vi.mock("@/lib/notify/lang", async (orig) => ({ ...(await orig<typeof import("@/lib/notify/lang")>()), readNotifyLang: h.readLang, readNotifyLangs: h.readLangs }));
 vi.mock("@/lib/notify/resend", () => ({ sendEmail: h.sendEmail }));
 
-import { deliverPending, digestData, sendTest, taskDigest } from "./notify-db";
+import { deliverPending, digestData, rememberTelegramThread, sendTest, taskDigest, TELEGRAM_THREADS_KEY, telegramThread, THREAD_KEEP_MS } from "./notify-db";
 
 const NOW = new Date("2026-10-13T12:00:00Z");
 const alert = (o: Record<string, unknown> = {}) => ({
@@ -49,18 +49,21 @@ beforeEach(() => {
 });
 
 describe("notifications never name a database or show an email (privacy)", () => {
-  it("Telegram and Discord get the alias, for the alert's own database and one named in its text", async () => {
+  // Watchbell 1.2.2 (D18): Telegram is the owner's own chat, so it keeps the real names (still never an email).
+  it("Discord gets the alias, for the alert's own database and one named in its text; Telegram the real name", async () => {
     use([[
       { a: alert({ id: "x1", ruleKey: "DatabasePaused", resourceId: "db1", title: "someone@gmail.com's Project", message: "Supabase project someone@gmail.com's Project is paused." }), channels: ["telegram", "discord"] },
       { a: alert({ id: "x2", resourceId: "app1", title: "web /", message: "HTTP 502", causedBy: "DatabasePaused · ticketer" }), channels: ["telegram", "discord"] },
     ]]);
     const send = vi.fn().mockResolvedValue(ok);
     await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["telegram", "discord"]) } });
-    for (const [, text] of send.mock.calls) {
-      expect(text).not.toMatch(/gmail|ticketer/);
-      expect(text).toContain("db-a");
-      expect(text).toContain("caused by DatabasePaused · db-b");
-    }
+    const text = Object.fromEntries(send.mock.calls.map(([kind, t]) => [kind, t as string]));
+    expect(text.discord).not.toMatch(/gmail|ticketer/);
+    expect(text.discord).toContain("db-a");
+    expect(text.discord).toContain("caused by DatabasePaused · db-b");
+    expect(text.telegram).not.toMatch(/gmail|db-a|db-b/);
+    expect(text.telegram).toContain("Supabase project [email hidden]'s Project is paused.");
+    expect(text.telegram).toContain("caused by DatabasePaused · ticketer");
   });
 
   it("still sends, without emails, when the letters can't be read", async () => {
@@ -438,5 +441,74 @@ describe("the notification language", () => {
     h.current = fakeDb(Array.from({ length: 12 }, () => answer));
     await sendTest("email_digest", NOW);
     expect((h.sendEmail.mock.calls[0][1] as { subject: string }).subject).not.toMatch(/Okt/);
+  });
+});
+
+// Watchbell 1.2.2 (D18): the Telegram message that opened an alert, so its auto-actions reply to it.
+describe("Telegram threads (D18)", () => {
+  const A1 = "11111111-1111-4111-8111-111111111111";
+  const A2 = "22222222-2222-4222-8222-222222222222";
+  const render = (q: unknown) => new PgDialect().sqlToQuery(q as never);
+  const threadWrites = (f: ReturnType<typeof use>) => f.writes.filter((w) => w.table === settings);
+
+  it("remembers the message id of an opening Telegram message, for the opened alerts only", async () => {
+    const f = use([[
+      { a: alert({ id: A1 }), channels: ["telegram", "discord"] },
+      { a: alert({ id: A2, pending: "resolve", resolvedAt: NOW }), channels: ["telegram"] },
+    ]]);
+    const send = vi.fn(async (kind: string) => (kind === "telegram" ? { ok: true as const, messageId: 501 } : { ok: true as const, messageId: 9 }));
+    expect(await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["telegram", "discord"]) } })).toEqual({ sent: 2, dropped: 0 });
+    const w = threadWrites(f);
+    expect(w).toHaveLength(1);
+    expect(payloadOf(w[0].calls)).toEqual({ key: TELEGRAM_THREADS_KEY, value: { [A1]: { m: 501, at: NOW.getTime() } } });
+    // The stored entry wins over a new one, and entries older than a week go, in the same statement.
+    const upsert = w[0].calls.find((c) => c.method === "onConflictDoUpdate")?.args[0] as { set: { value: unknown } };
+    const q = render(upsert.set.value);
+    expect(q.sql).toContain("jsonb_each");
+    expect(q.sql).toMatch(/\|\| case when jsonb_typeof/);
+    expect(q.params).toEqual(expect.arrayContaining([NOW.getTime() - THREAD_KEEP_MS]));
+  });
+
+  it("remembers nothing without a message id, for a failed send, or for a resolve or repeat only", async () => {
+    for (const [rows, result] of [
+      [[{ a: alert({ id: A1 }), channels: ["telegram"] }], ok],
+      [[{ a: alert({ id: A1 }), channels: ["telegram"] }], fail],
+      [[{ a: alert({ id: A1, pending: "repeat" }), channels: ["telegram"] }], { ok: true as const, messageId: 5 }],
+    ] as const) {
+      const f = use([rows as unknown as unknown[]]);
+      await deliverPending(NOW, deadline(), { sender: { send: vi.fn().mockResolvedValue(result), configured: new Set(["telegram"]) } });
+      expect(threadWrites(f)).toEqual([]);
+    }
+  });
+
+  it("a failed write never stops the delivery", async () => {
+    use([[{ a: alert({ id: A1 }), channels: ["telegram"] }]]);
+    const f = h.current as ReturnType<typeof fakeDb>;
+    const conn = f.db() as { insert: (t: unknown) => unknown };
+    const insert = conn.insert;
+    conn.insert = (t: unknown) => { if (t === settings) throw new Error("db down"); return insert(t); };
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(await deliverPending(NOW, deadline(), { sender: { send: vi.fn().mockResolvedValue({ ok: true, messageId: 3 }), configured: new Set(["telegram"]) } })).toEqual({ sent: 1, dropped: 0 });
+    expect(warn).toHaveBeenCalledWith("notify: remembering the Telegram message failed");
+    warn.mockRestore();
+  });
+
+  it("rememberTelegramThread ignores ids that aren't alert ids and bad message ids", async () => {
+    const f = fakeDb([]);
+    h.current = f;
+    await rememberTelegramThread(["x1", ""], 5, NOW);
+    await rememberTelegramThread([A1], 0, NOW);
+    await rememberTelegramThread([A1], 1.5, NOW);
+    expect(f.writes).toEqual([]);
+  });
+
+  it("telegramThread reads the stored message id, null for anything else", async () => {
+    h.current = fakeDb([[{ value: { [A1]: { m: 501, at: 1 } } }], [{ value: { [A1]: { m: 501, at: 1 }, [A2]: { m: "x" } } }], [], new Error("down")]);
+    expect(await telegramThread(A1)).toBe(501);
+    expect(await telegramThread(A2)).toBeNull();
+    expect(await telegramThread(A1)).toBeNull();
+    expect(await telegramThread(A1)).toBeNull();
+    expect(await telegramThread("not-an-id")).toBeNull();
+    expect(await telegramThread(null)).toBeNull();
   });
 });

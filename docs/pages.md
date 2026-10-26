@@ -30,6 +30,13 @@ databases), each ticked off as you do it.
 by the collector, creates waiting for approval, and every watched application with its uptime, latest deployment and
 linked database. Operators and owners get a Refresh button that runs the collector now.
 
+The Health card sums up the last 24 hours in plain words: **Sites reachable** (the share of checks that got an answer,
+the uptime), **Response time** (most checks, 95 of 100, answered faster than this: the p95), **Server errors** (pages
+that broke on the server side: the HTTP 5xx responses) and **New versions** (deploys put live). Counts read "in 24 h"
+because the window is the last 24 hours, not the calendar day. Hover a line to see its technical name. With the
+data-source tags on, the badges read **Checked by Watchbell** or **From Vercel**. The Neon cell above it says "is asleep"
+for an idle compute and counts "compute hours used this month".
+
 **Topology.** A map of how each domain reaches an app and which database each app uses. Domains come from Vercel;
 database links come from each app's Edit link. Select a node for its details.
 
@@ -47,9 +54,10 @@ isn't your app.
 
 - Details: status, response time, page views, 5xx responses, uptime, security advisories for its dependencies, and its
   GitHub repository and Actions status when GitHub is connected. The Security card shows the Next.js version the live
-  site runs and its known advisories, checked every 6 hours and right after each new production deployment; a vulnerable
-  version raises the FrameworkVulnerable alert and, with a linked repository, an update pull request proposal (see
-  [Auto-actions](auto-actions.md#which-alerts-propose-what)). In a monorepo, the Dependencies card scans the Vercel
+  site runs and its known advisories, checked every 6 hours and right after production starts serving another
+  deployment (a new deploy, a promote or a roll back); a vulnerable version raises the FrameworkVulnerable alert and, with a linked repository, an update pull request proposal (see
+  [Auto-actions](auto-actions.md#which-alerts-propose-what)). The Node.js under Watchbell itself is checked on Settings ›
+  Collector (Watchbell runtime). In a monorepo, the Dependencies card scans the Vercel
   project's Root Directory (for example `apps/web/package-lock.json`), and Scan now scans that app's folder. "None
   known" only appears after a successful scan; otherwise the card says **Not scanned** and why (no linked repository,
   DevOps is off, no lockfile or package.json, or the scan failed).
@@ -58,7 +66,10 @@ isn't your app.
   (the same confirm) and View logs (the app's Logs tab) too.
 
 **Deployments.** Recent deployments of the watched apps, read from the Vercel API. Vercel's free Hobby plan can only
-roll back to the previous production deployment. **View build logs** (operators and owners: a button on a building or
+roll back to the previous production deployment. **Current** marks the deployment production serves, and Last deploy
+(Overview, Applications, the app page) shows that one, also after a promote or roll back to an older deployment; a
+newer production build that is still building or failed is shown there instead. Its time is when that build was made,
+not when it was promoted. **View build logs** (operators and owners: a button on a building or
 failed deployment, in the row menu of a ready one) opens the newest build's log in a side drawer, read from Vercel when
 you open it (the last 2,000 lines, not stored), with error lines highlighted and a "Jump to first error" link.
 
@@ -159,7 +170,18 @@ never paused because of the switch.
 
 **Settings** (owner only). Tabs:
 
-- Collector: how often each collector task runs, and the database keep-alive notes.
+- Collector: how often each collector task runs, the database keep-alive notes, and **Watchbell runtime**: the
+  Node.js this Watchbell runs on (Vercel's function runtime in the cloud edition, the machine's Node.js when
+  self-hosted). Every 12 hours Watchbell reads the release list on nodejs.org and the Node.js end-of-life dates on
+  endoflife.date. A version with a newer security release in its line reads, for example, "Node 24.12.0: security fix
+  available (24.22.1)" with a warning; a line past its end of life reads "end of life"; otherwise "ok".
+  - It says unknown, never ok, when nodejs.org hasn't been read successfully in the last 36 hours, or endoflife.date
+    has never been read. A fix or end of life that is already known still shows.
+  - With `WATCHBELL_NO_UPDATE_CHECK=1` set for the server, it reads nothing and says "check turned off".
+  - Self-hosted with the npm package, `watchbell start` and `watchbell status` print a one-line warning as well when
+    the Node.js is vulnerable or past end of life. `watchbell status` also checks the Node.js an installed service
+    runs. The warning isn't printed under `WATCHBELL_NO_UPDATE_CHECK`, `NO_UPDATE_NOTIFIER` or `CI`, and a service
+    (`watchbell run`) never prints it.
 - Free tier budget: the free plan limits the meters compare against. Correct them here when a provider changes its
   free plan. Supabase slots, Neon CU-hours, QStash and cron-job.org show what Watchbell reads; Vercel's monthly usage
   and the Web Analytics event count aren't read, so those rows say "not read" (see Usage in the Vercel dashboard).

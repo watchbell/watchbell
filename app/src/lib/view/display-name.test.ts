@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Rec } from "@/lib/advisor/rules";
 import {
   accountAlias, type AliasBook, aliasLetters, appAlias, buildAliasBook, dbAlias, displayName, hideAlert, hideEmails, hideEvent, hideNames, hideRec, isDbKind, maskText,
-  searchText,
+  realNames, searchText,
 } from "./display-name";
 
 const at = (s: string) => new Date(`2026-10-${s}T00:00:00Z`);
@@ -255,5 +255,38 @@ describe("team aliases (M5)", () => {
 
   it("an app without a team adds none", () => {
     expect(buildAliasBook([row("w", "app", "web", "01")]).team).toEqual([]);
+  });
+});
+
+// Watchbell 1.2.2 (D18): the owner's own Telegram chat reads the real names behind the aliases.
+describe("realNames", () => {
+  const b: AliasBook = {
+    db: [{ id: "d", name: "orders-db", alias: "db-a" }, { id: "e", name: "ops@acme.example.com's Project", alias: "db-b" }],
+    app: [{ id: "w", name: "web", alias: "app-a" }, { id: "s", name: "shop", alias: "app-b" }, { id: "n", name: "news", alias: "app-aa" }],
+    account: [{ id: "u", name: "main", alias: "account-1" }],
+    host: [
+      { id: "h1", name: "web.example.com", alias: "app-a.example" }, { id: "h2", name: "www.web.example.com", alias: "app-a-2.example" },
+      { id: "h3", name: "example.org", alias: "site-a.example" },
+    ],
+  };
+
+  it("turns app, database and host aliases back into the names, whole words only", () => {
+    expect(realNames("Check app-a again now. db-a is paused; app-aa and app-b are fine.", b)).toBe("Check web again now. orders-db is paused; news and shop are fine.");
+    expect(realNames("app-a.example/ returned HTTP 502, api.app-a.example and app-a-2.example too; site-a.example.", b))
+      .toBe("web.example.com/ returned HTTP 502, api.web.example.com and www.web.example.com too; example.org.");
+    expect(realNames("app-ab, my-app-a, app-a_2, app-?, db-?", b)).toBe("app-ab, my-app-a, app-a_2, app-?, db-?");
+  });
+
+  it("keeps accounts, generic placeholders and hidden emails as they are", () => {
+    expect(realNames("account-1 · site.example · preview.example · db-b", b)).toBe("account-1 · site.example · preview.example · [email hidden]'s Project");
+  });
+
+  it("is the reverse of maskText for the names it covers", () => {
+    const text = "web.example.com/ is down; orders-db paused on web";
+    expect(realNames(maskText(text, b), b)).toBe(text);
+  });
+
+  it("leaves text alone with an empty book", () => {
+    expect(realNames("app-a db-a", { db: [], app: [] })).toBe("app-a db-a");
   });
 });

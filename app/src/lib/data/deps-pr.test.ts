@@ -13,7 +13,7 @@ vi.mock("./provider-action-db", () => ({ finish: vi.fn(), targetQuota: h.targetQ
 vi.mock("./actions-lockfile-db", () => ({ dispatchLockfileUpdate: h.dispatch }));
 vi.mock("@/lib/extensions", () => ext);
 
-import { autoBumpReady, bumpPrAs, frameworkFixes, NEED_WRITE_TOKEN } from "./deps-pr";
+import { autoBumpReady, bumpPrAs, frameworkFixes, NEED_WRITE_TOKEN, productionMismatches } from "./deps-pr";
 
 const APP = "22222222-2222-4222-8222-222222222222";
 const REPO = "33333333-3333-4333-8333-333333333333";
@@ -267,6 +267,128 @@ describe("bumpPrAs, the PR's base branch", () => {
   });
 });
 
+// Watchbell 1.2.2 (D15, incident 25 Oct): production was deployed by the CLI from web-revamp while the project's production
+// branch was main; the update PR went to main, was merged, and Vercel deployed stale main. Fix round 1: the PR targets the
+// Git branch production was built from when the repository has it; otherwise (a CLI deploy, a missing branch, a reading
+// older than 30 minutes) it never opens on its own, and an approved one opens as a draft with the warning on top.
+describe("bumpPrAs and productionMismatches, what production was really built from", () => {
+  const AUTO = { auto: { severities: ["critical", "high"] as ("critical" | "high")[] } };
+  const REVAMP_SHA = "e".repeat(40);
+  const fresh = () => new Date(Date.now() - 5 * 60_000).toISOString();
+  const recorded = (o: { revamp?: boolean; draft422?: boolean } = {}) => {
+    const base = github();
+    const fetch = (async (url: string, init: RequestInit) => {
+      const u = new URL(url);
+      const method = String(init.method ?? "GET");
+      if (method === "GET" && u.pathname === "/repos/acme/acme-shop/git/ref/heads/web-revamp") {
+        base.seen.push({ url, method, body: null });
+        return o.revamp ? json({ object: { sha: REVAMP_SHA } }) : json({ message: "Not Found" }, 404);
+      }
+      if (method === "GET" && u.pathname.startsWith("/repos/acme/acme-shop/git/ref/heads/watchpost") && base.seen.some((s) => s.method === "POST" && s.url.endsWith("/pulls"))) {
+        return json({ object: { sha: "c".repeat(40) } });
+      }
+      if (o.draft422 && method === "POST" && u.pathname === "/repos/acme/acme-shop/pulls" && init.body && JSON.parse(String(init.body)).draft) {
+        base.seen.push({ url, method, body: JSON.parse(String(init.body)) });
+        return json({ message: "Draft pull requests are not supported in this repository." }, 422);
+      }
+      return base.fetch(url, init);
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, seen: base.seen };
+  };
+  const withSource = (productionSource: unknown) => ({ ...link, meta: { productionBranch: "main", productionSource } });
+  const pulls = (g: ReturnType<typeof recorded>) => g.seen.filter((s) => s.method === "POST" && s.url.endsWith("/pulls"));
+
+  it("a CLI deploy, a branch the repository doesn't have, or an old reading: no automatic PR, nothing written", async () => {
+    for (const [src, want] of [
+      [{ kind: "cli", at: fresh() }, "Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live."],
+      [{ kind: "git", ref: "web-revamp", at: fresh() }, "Production was built from web-revamp, not main. Merging this PR would deploy main to production and replace what is live."],
+      [{ kind: "git", ref: "main", at: new Date(Date.now() - 31 * 60_000).toISOString() }, "Watchbell can't confirm what production is built from (no reading in the last 30 minutes). Merging this PR could deploy main to production and replace what is live."],
+    ] as const) {
+      h.current = fakeDb([[writeAcc], [withSource(src)], [vuln]]);
+      const g = recorded({ revamp: false });
+      const r = await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch, ...AUTO });
+      expect(r).toEqual({ ok: false, error: `Automatic PR not opened: ${want} The proposal waits for your approval.` });
+      expect(g.seen.filter((s) => s.method !== "GET")).toEqual([]);
+    }
+  });
+
+  it("built from a branch the repository has: the PR (automatic too) branches from it and targets it, the branch the scan read", async () => {
+    const f = fakeDb([[writeAcc], [withSource({ kind: "git", ref: "web-revamp", at: fresh() })], [vuln]], [[]]);
+    h.current = f;
+    const g = recorded({ revamp: true });
+    expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch, ...AUTO })).toMatchObject({ ok: true });
+    expect(g.seen.find((s) => s.method === "POST" && s.url.endsWith("/git/refs"))?.body?.sha).toBe(REVAMP_SHA);
+    expect(pulls(g)[0].body).toMatchObject({ base: "web-revamp" });
+    expect(pulls(g)[0].body?.draft).toBeUndefined();
+    expect(f.writes[0].calls.find((c) => c.method === "values")?.args[0]).toMatchObject({ baseBranch: "web-revamp" });
+  });
+
+  it("built from the PR's base and read lately: the automatic PR opens as before (not a draft)", async () => {
+    h.current = fakeDb([[writeAcc], [withSource({ kind: "git", ref: "main", sha: "f".repeat(40), at: fresh() })], [vuln]], [[]]);
+    const g = recorded();
+    expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch, ...AUTO })).toMatchObject({ ok: true });
+    expect(pulls(g)[0].body).toMatchObject({ base: "main" });
+    expect(String(pulls(g)[0].body?.body)).not.toContain("[!WARNING]");
+  });
+
+  it("the owner approved it with a CLI deploy: a draft PR with the warning on top", async () => {
+    h.current = fakeDb([[writeAcc], [withSource({ kind: "cli", at: fresh() })], [vuln]], [[]]);
+    const g = recorded();
+    const r = await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch });
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("Opened as a draft: Production was deployed from the CLI, not built from main.") });
+    expect(pulls(g)[0].body).toMatchObject({ base: "main", draft: true });
+    expect(String(pulls(g)[0].body?.body)).toMatch(/^> \[!WARNING\]\n> Production was deployed from the CLI, not built from main\. Merging this PR would deploy main to production and replace what is live\./);
+  });
+
+  it("a repository that can't have draft PRs (422): opened as a normal PR, the warning still on top", async () => {
+    h.current = fakeDb([[writeAcc], [withSource({ kind: "cli", at: fresh() })], [vuln]], [[]]);
+    const g = recorded({ draft422: true });
+    const r = await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch });
+    expect(r).toMatchObject({ ok: true, message: expect.stringContaining("Opened as a normal pull request (this repository can't have drafts), with the warning on top: Production was deployed from the CLI") });
+    expect(r.ok && r.message).not.toContain("Opened as a draft");
+    expect(pulls(g).map((p) => p.body?.draft)).toEqual([true, undefined]);
+    expect(String(pulls(g)[1].body?.body)).toContain("[!WARNING]");
+  });
+
+  // Fix round 2 (re-review minor 4): the plan comes from the scan; the scan's key says which branch it read.
+  it("the stored scan read another branch than the PR's base: refused with 'scan again', nothing written", async () => {
+    for (const [lockfileSha, src, revamp, want] of [
+      ["br:web-revamp:abc123", { kind: "cli", at: fresh() }, false, "read web-revamp, but this pull request would go to main"],
+      ["abc123", { kind: "git", ref: "web-revamp", at: fresh() }, true, "read main, but this pull request would go to web-revamp"],
+    ] as const) {
+      h.current = fakeDb([[writeAcc], [{ ...withSource(src), lockfileSha }], [vuln]]);
+      const g = recorded({ revamp });
+      const r = await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch });
+      expect(r).toEqual({ ok: false, error: `The dependency scan of acme-shop ${want}. Scan again (Dependencies › Scan now on the app page), then ask again.` });
+      expect(g.seen.filter((s) => s.method !== "GET")).toEqual([]);
+    }
+    // The same branch: opened.
+    h.current = fakeDb([[writeAcc], [{ ...withSource({ kind: "git", ref: "web-revamp", at: fresh() }), lockfileSha: "br:web-revamp:abc123" }], [vuln]], [[]]);
+    expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: recorded({ revamp: true }).fetch })).toMatchObject({ ok: true });
+  });
+
+  it("productionMismatches: per app, against the base prBase would pick", async () => {
+    const A2 = "66666666-6666-4666-8666-666666666666";
+    const A3 = "77777777-7777-4777-8777-777777777777";
+    const A4 = "88888888-8888-4888-8888-888888888888";
+    const now = new Date();
+    const at = new Date(now.getTime() - 60_000).toISOString();
+    h.current = fakeDb([[
+      { appId: APP, repoId: REPO, defaultBranch: "main", meta: { productionBranch: "main", productionSource: { kind: "cli", at } } },
+      { appId: A2, repoId: REPO, defaultBranch: "main", meta: { productionBranch: "web-revamp", productionSource: { kind: "git", ref: "web-revamp", at } } },
+      // Built from a branch other than the production branch: the PR targets that branch, so nothing against it here.
+      { appId: A3, repoId: REPO, defaultBranch: "main", meta: { productionBranch: "main", productionSource: { kind: "git", ref: "web-revamp", at } } },
+      { appId: A4, repoId: REPO, defaultBranch: "main", meta: { productionBranch: "main", productionSource: { kind: "git", ref: "main" } } },
+    ]]);
+    const m = await productionMismatches([{ appId: APP, repoId: REPO }, { appId: A2, repoId: REPO }, { appId: A3, repoId: REPO }, { appId: A4, repoId: REPO }, { appId: "nope", repoId: REPO }], now);
+    expect([...m.keys()]).toEqual([APP, A4]);
+    expect(m.get(APP)).toBe("Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live.");
+    expect(m.get(A4)).toContain("can't confirm");
+    h.current = fakeDb([]);
+    expect(await productionMismatches([], now)).toEqual(new Map());
+  });
+});
+
 // The lockfile of a recorded update PR: the VM runner (private edition, registry r1) queues a job and GitHub Actions in
 // the owner's actions repository is asked as well (each skips when not set up); without a runner, Actions alone.
 describe("bumpPrAs, the lockfile hand-off", () => {
@@ -301,6 +423,25 @@ describe("bumpPrAs, the lockfile hand-off", () => {
     });
     expect(h.dispatch).toHaveBeenCalledWith("github_pat_WRITE_TESTONLY_0123456789", dispatched);
     expect(runner.queueLockfileJob.mock.invocationCallOrder[0]).toBeLessThan(h.dispatch.mock.invocationCallOrder[0]);
+  });
+
+  // Watchbell 1.2.2 (D18): the result asks for npm install only when nothing will update the lockfile.
+  it("drops the npm install hint when the workflow or the runner took the lockfile, and keeps it otherwise", async () => {
+    const message = async () => {
+      h.current = fakeDb([[writeAcc], [link], [vuln]], [[]]);
+      const r = await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: branchShaFetch() });
+      return r.ok ? r.message : r.error;
+    };
+    expect(await message()).toBe("Pull request #12 opened for acme-shop: next ^15.0.0 → ^15.2.3. Run npm install on the branch before merging.");
+    h.dispatch.mockResolvedValue({ sent: true });
+    expect(await message()).toBe("Pull request #12 opened for acme-shop: next ^15.0.0 → ^15.2.3.");
+    // Set up but not sent (a lockfile the workflow can't update, or GitHub refused): the hint stays.
+    h.dispatch.mockResolvedValue({ sent: false, why: "invalid" });
+    expect(await message()).toContain("Run npm install on the branch before merging.");
+    ext.extensions.runner = { queueLockfileJob: vi.fn().mockResolvedValue({ queued: true, jobId: "job-1" }), lockfileJobActive: vi.fn() };
+    expect(await message()).toBe("Pull request #12 opened for acme-shop: next ^15.0.0 → ^15.2.3.");
+    ext.extensions.runner = { queueLockfileJob: vi.fn().mockResolvedValue({ queued: false, why: "no runner" }), lockfileJobActive: vi.fn() };
+    expect(await message()).toContain("Run npm install on the branch before merging.");
   });
 
   it("a runner that throws doesn't stop the Actions dispatch or fail the opened PR", async () => {
@@ -372,6 +513,15 @@ describe("bumpPrAs, Next.js from the Security card, in the app's Root Directory"
     expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch, framework: true })).toMatchObject({ ok: true, message: expect.stringContaining("next 16.3.8 → 16.4.1.") });
     const pr = g.seen.find((s) => s.method === "POST" && s.url.endsWith("/pulls"));
     expect(pr?.body).toMatchObject({ title: "Watchbell: update next to 16.4.1 in apps/web (security fix)" });
+  });
+
+  // D15 (re-review r2 minor 5): a framework PR's plan is the Next.js check, not the scan: no "scan again".
+  it("a framework PR isn't refused when the stored scan read another branch", async () => {
+    h.current = fakeDb([[writeAcc], [{ ...mono, lockfileSha: "br:web-revamp:abc123" }], [sec()]], [[]]);
+    const g = monoGithub(JSON.stringify({ dependencies: { next: "16.3.8" } }));
+    expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: g.fetch, framework: true })).toMatchObject({ ok: true });
+    h.current = fakeDb([[writeAcc], [{ ...mono, lockfileSha: "br:web-revamp:abc123" }], [vuln]]);
+    expect(await bumpPrAs(actor, APP, REPO, finisher().fin, { fetch: monoGithub().fetch })).toMatchObject({ ok: false, error: expect.stringContaining("Scan again") });
   });
 
   it("refuses when the check isn't vulnerable any more, or package.json already allows the fix; nothing written", async () => {

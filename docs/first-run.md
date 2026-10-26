@@ -20,6 +20,7 @@ Where to read it:
 | Linux service | `cat app/data/setup-code`, or `journalctl --user -u watchbell` |
 | Windows Scheduled Task | `Get-Content app\data\setup-code`, or `app\data\watchbell.log` |
 | Started by hand | The terminal where you ran `npm run start:selfhost` |
+| npm package (`watchbell`) | The start screen (`First run: setup code ...`), `~/.watchbell/data/setup-code`, or `~/.watchbell/logs/watchbell.log` |
 
 The code is valid for 24 hours. Restarting Watchbell replaces it with a new one (and clears failed attempts). Dashes
 and spaces don't matter when you type it, and it never contains 0, O, 1, I or L.

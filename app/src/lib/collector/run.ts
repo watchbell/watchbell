@@ -14,13 +14,14 @@ import { openOrNull } from "@/lib/crypto";
 import { taskLogs } from "@/lib/data/logs-db";
 import { deliverPending, taskDigest } from "@/lib/data/notify-db";
 import { pausedSections } from "@/lib/data/sections-db";
+import { type DeploymentOrigin, recordProductionSources } from "@/lib/data/production-source-db";
 import { taskPageViews } from "@/lib/data/pageviews-db";
 import { markAfterDeploy, marksPending, taskSecurity } from "@/lib/data/security-task";
 import { taskStatus } from "@/lib/data/provider-status-db";
 import { serverEnv } from "@/lib/env";
 import { activeFor, type Window } from "@/lib/maintenance";
 import { AFTER_DEPLOY_SETTING, type AfterDeploy, type DeployMark, deployToMark, parseAfterDeploy } from "@/lib/security/after-deploy";
-import { type DeploymentState, getDeployment, listDeployments, listProjects, listTeams, type VercelFailure } from "@/lib/providers/vercel";
+import { type DeploymentState, getDeployment, listDeployments, listProjects, listTeams, type VercelDeployment, type VercelFailure } from "@/lib/providers/vercel";
 import type { State } from "@/lib/status";
 import { currentToFetch, deploymentChanged, missesAfter, pathOf, pickFlags, skippedIds } from "./deploy-sync";
 import { appsWithPausedDatabase, type Ctx, taskFirebase, taskFirebaseUsage, taskNeon, taskSupabase, taskSupabaseUsage } from "./db-tasks";
@@ -28,6 +29,7 @@ import { taskExtraDbs } from "./extra-db-tasks";
 import { checkUrl, mapLimit } from "./http-check";
 import { acquireLease, releaseLease } from "./lease";
 import { NETWORK_TASKS, refreshNetworkStates, taskCloudflare, taskDomains, taskEol, taskRdap, taskTls } from "./network";
+import { taskNode } from "./node-runtime";
 import { ruleFrom } from "@/lib/body-rule";
 import { writeCheckResult } from "./monitor-write";
 import { appState, deploymentEvent, monitorEvent, type NewEvent, nextMonitorState } from "./rules";
@@ -176,6 +178,25 @@ export async function updateCurrentFlags(
   }
 }
 
+// The branch origin of these deployments as Vercel gave them (toDeployment), by deployment id.
+export const originsOf = (list: readonly VercelDeployment[]): Map<string, DeploymentOrigin> =>
+  new Map(list.map((d) => [d.id, { ...(d.branchFrom ? { branchFrom: d.branchFrom } : {}), ...(d.gitDirty ? { gitDirty: true } : {}) }]));
+
+// Watchbell 1.2.2 (D15): what the live production deployment of each of these apps was built from (a Git branch or the
+// CLI) and when it was read, for the update PRs' base checks. Called by taskVercel after the current flags. A failed
+// write is an error line, never a failed task; the next run tries again (and an old reading means "can't confirm").
+// seen: where the branch came from, for the deployments read from Vercel in this run (fix round 3).
+export async function saveProductionSources(
+  apps: readonly { id: string; meta: Record<string, unknown> | null }[], now: Date, errors: string[], label: string,
+  seen: ReadonlyMap<string, DeploymentOrigin> = new Map(), record: typeof recordProductionSources = recordProductionSources,
+): Promise<void> {
+  try {
+    await record(apps, now, seen);
+  } catch (e) {
+    errors.push(`vercel/${label}: production source not saved: ${safeError(e)}`);
+  }
+}
+
 async function taskVercel(now: Date, deadline: number, errors: string[], afterDeploy: AfterDeploy): Promise<void> {
   if (await backingOff(now)) return;
   const key = serverEnv().OPS_ENCRYPTION_KEY;
@@ -215,6 +236,8 @@ async function taskVercel(now: Date, deadline: number, errors: string[], afterDe
       }
       const current = new Map(projects.data.map((p) => [p.id, p.currentDeploymentId]));
       const mine = deps.data.filter((d) => byProject.has(d.projectId));
+      const seen = originsOf(mine); // D15 fix round 3: where each deployment's branch came from
+
       // Only new or changed deployments are written, which keeps the write volume of a minutely collector low.
       const stored = new Map((mine.length
         ? await db().select({
@@ -263,6 +286,7 @@ async function taskVercel(now: Date, deadline: number, errors: string[], afterDe
           continue;
         }
         const d = one.data;
+        for (const [k, v] of originsOf([d])) seen.set(k, v);
         const row = {
           resourceId: want.appId, externalId: d.id, state: d.state, target: d.target, branch: d.branch, commitSha: d.sha, commitMessage: d.message,
           source: d.source, url: d.url, buildingAt: d.buildingAt, readyAt: d.readyAt, createdAtProvider: d.createdAt, updatedAt: now,
@@ -274,6 +298,7 @@ async function taskVercel(now: Date, deadline: number, errors: string[], afterDe
       }
       await saveMisses();
       await updateCurrentFlags(teamApps, ready, current, { now, afterDeploy, errors, label: team.name });
+      await saveProductionSources(teamApps, now, errors, team.name, seen);
     }
   }
 }
@@ -468,6 +493,7 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
       if (task === "tls") await taskTls(new Date(), workDeadline, errors);
       if (task === "rdap") await taskRdap(new Date(), workDeadline, errors);
       if (task === "eol") await taskEol(new Date(), workDeadline, errors);
+      if (task === "node") await taskNode(new Date(), workDeadline, errors);
       if (task === "status") await taskStatus(new Date());
       if (task === "logs") await taskLogs(new Date(), workDeadline, errors);
       if (task === "pageviews") await taskPageViews(new Date(), workDeadline, errors);

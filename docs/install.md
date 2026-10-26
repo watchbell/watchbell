@@ -60,8 +60,38 @@ watchbell
 ```
 
 The first start creates `~/.watchbell/` (on Windows `%USERPROFILE%\.watchbell\`) with `.env` (your settings, with
-fresh secrets, readable by your user only) and `data/` (the database), prints a one-time setup code and opens
-http://localhost:3100/setup. Set `WATCHBELL_HOME` to use another folder. `watchbell --help` lists every command:
+fresh secrets, readable by your user only) and `data/` (the database), shows a one-time setup code and opens
+http://localhost:3100/setup. Set `WATCHBELL_HOME` to use another folder.
+
+In a terminal, `watchbell` then shows a short start screen with a menu:
+
+```
+  Watchbell 1.2.2
+  http://localhost:3100
+  First run: setup code ABCDE-FGH23
+
+  ❯ Open in browser
+    Keep running in the background
+    Show live log
+    Stop and exit
+```
+
+Move with ↑ and ↓ and press Enter, or press the first letter: `o` opens the browser and `k` keeps it running, while
+`s` moves between the two items that start with S (press Enter to run the one you picked). **Keep running in the
+background** leaves Watchbell running after you close the terminal; stop it later with `watchbell stop`. **Show live
+log** follows the log until you press a key. **Stop and exit** and Ctrl+C stop Watchbell cleanly. The setup code line
+shows only until the owner account exists. When Watchbell listens on your network (`--host 0.0.0.0`), the screen lists
+its addresses and a two-line warning: finish setup first, and put HTTPS in front before you open it to the internet.
+
+The server's own messages (the Next.js banner, the collector's progress lines) go to `~/.watchbell/logs/watchbell.log`,
+not the terminal. The log keeps at most two files of about 5 MB (`watchbell.log` and `watchbell.log.1`). An error still
+shows in the terminal as one line with the log's path. `watchbell start --verbose` prints everything in the terminal as
+before 1.2.2, without the menu. Without a terminal (piped output, CI) there is no menu and no colour: `watchbell` prints
+the address and the setup code and runs until you stop it. `watchbell run`, which the services use, prints like before,
+so a service's messages stay where they were (journald, or `~/.watchbell/watchbell.log` for the Scheduled Task and the
+launchd agent).
+
+`watchbell --help` lists every command:
 `stop`, `status`, `update`, `service install|uninstall` (start at login with a systemd user service, a Scheduled Task
 or a launchd agent on macOS; no admin rights), `reset-login <email>`. After you change Node.js (nvm, fnm, volta,
 Homebrew), run `watchbell service install` again; `watchbell status` warns when the service's Node.js is gone.
@@ -71,13 +101,22 @@ ignored, so a shell that sets them for other programs can't move Watchbell onto 
 `WATCHBELL_HOST` or `WATCHBELL_PORT` to override the file on purpose, or `--host` and `--port` for one run (see
 [Open it from another computer](#open-it-from-another-computer)).
 
-Update with `watchbell update`. It runs `npm install -g watchbell@latest` with the npm next to your Node.js; a service
-you installed with `watchbell service install` is stopped first and started again after, and a Watchbell you started
-in a terminal must be stopped first (`watchbell stop`). If npm's global folder belongs to root (a Node.js from your
-distribution's packages), stop Watchbell and run `sudo npm install -g watchbell@latest` instead. `watchbell` and
+`watchbell status` shows the address Watchbell really listens on, also when you started it with `--port` for one run,
+and where the log is. An option it doesn't know, such as a typo like `--no-openen`, stops it with
+`Unknown option --no-openen (see watchbell --help)` instead of being ignored.
+
+Update with `watchbell update`. It runs `npm install -g watchbell@latest` with the npm next to your Node.js, into the
+folder the running copy was installed in (`--prefix`, taken from where `watchbell` runs: `<prefix>/lib/node_modules/watchbell`
+on Linux and macOS, `<prefix>\node_modules\watchbell` on Windows). So a second Node.js on your PATH (nvm next to a copy
+in `~/.local`, for example) can't take the update while the old version keeps running. A service you installed with
+`watchbell service install` is stopped first and started again after, and a Watchbell you started in a terminal must
+be stopped first (`watchbell stop`). If npm's global folder belongs to root (a Node.js from your distribution's
+packages), stop Watchbell and run the `sudo npm install -g ...` command it names instead. `watchbell` and
 `watchbell status` tell you when a newer version is out: they ask registry.npmjs.org at most once a day (a plain
-request for the version number, nothing about you); `WATCHBELL_NO_UPDATE_CHECK=1`, in `~/.watchbell/.env` or in the
-environment, turns that off.
+request for the version number, nothing about you). They also warn in one line when the Node.js they run on has a
+security fix waiting or is past end of life. For that they read nodejs.org's release list and endoflife.date at most
+twice a day. The running Watchbell reads the same two lists every 12 hours for its Settings › Collector line.
+`WATCHBELL_NO_UPDATE_CHECK=1`, in `~/.watchbell/.env` or in the environment, turns all of it off.
 
 From 1.0.x, update once by hand, because 1.0 has no `watchbell update`: `watchbell stop` (or stop the service you set
 up), then `npm install -g watchbell@latest`, then start it again. From 1.1 on, `watchbell update` does it.
@@ -106,8 +145,10 @@ To open it to your network instead, give it an address for one run (`0.0.0.0` me
 watchbell --host 0.0.0.0 --port 3100
 ```
 
-It prints the addresses other computers can use, such as `http://192.168.1.20:3100`, and a warning: everyone who can
-reach them gets the sign-in page, and plain http sends passwords readable on the network. So finish `/setup` (the
+The start screen shows the addresses other computers can use, such as `http://192.168.1.20:3100`, and a two-line
+warning; the longer explanation below, with the SSH tunnel and the `SITE_URL` note, goes to
+`~/.watchbell/logs/watchbell.log` (or to the terminal with `--verbose`). Everyone who can reach those addresses gets
+the sign-in page, and plain http sends passwords readable on the network. So finish `/setup` (the
 owner account) before you share the address, keep it to networks you trust, and never open it to the internet without
 HTTPS in front (see [Behind a reverse proxy](configuration.md#behind-a-reverse-proxy)). Signing in works from any of
 those addresses. Links in alerts and messages use `SITE_URL`, so set `SITE_URL=http://192.168.1.20:3100` (your

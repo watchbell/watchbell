@@ -64,6 +64,36 @@ watchbell
 Saat pertama kali dijalankan, ia membuat `~/.watchbell/` (di Windows `%USERPROFILE%\.watchbell\`) berisi `.env`
 (pengaturan Anda, dengan secret baru, hanya bisa dibaca oleh user Anda) dan `data/` (database), menampilkan kode setup
 sekali pakai, lalu membuka http://localhost:3100/setup. Set `WATCHBELL_HOME` untuk memakai folder lain.
+
+Di terminal, `watchbell` lalu menampilkan layar awal yang singkat dengan menu:
+
+```
+  Watchbell 1.2.2
+  http://localhost:3100
+  First run: setup code ABCDE-FGH23
+
+  ❯ Open in browser
+    Keep running in the background
+    Show live log
+    Stop and exit
+```
+
+Pindah dengan ↑ dan ↓ lalu tekan Enter, atau tekan huruf pertamanya: `o` membuka browser dan `k` membiarkannya tetap
+berjalan, sedangkan `s` berpindah di antara dua item yang diawali S (tekan Enter untuk menjalankan yang Anda pilih).
+**Keep running in the background** membuat Watchbell tetap berjalan setelah terminal ditutup; hentikan nanti dengan
+`watchbell stop`. **Show live log** mengikuti log sampai Anda menekan tombol apa pun. **Stop and exit** dan Ctrl+C
+menghentikan Watchbell dengan bersih. Baris kode setup hanya muncul sampai akun owner dibuat. Kalau Watchbell
+mendengarkan di jaringan Anda (`--host 0.0.0.0`), layar itu menampilkan alamat-alamatnya dan peringatan dua baris:
+selesaikan setup dulu, dan pasang HTTPS di depannya sebelum membukanya ke internet.
+
+Pesan server sendiri (banner Next.js, baris progres collector) masuk ke `~/.watchbell/logs/watchbell.log`, bukan ke
+terminal. Log menyimpan paling banyak dua file sekitar 5 MB (`watchbell.log` dan `watchbell.log.1`). Error tetap muncul
+di terminal sebagai satu baris dengan path log-nya. `watchbell start --verbose` menampilkan semuanya di terminal seperti
+sebelum 1.2.2, tanpa menu. Tanpa terminal (output di-pipe, CI) tidak ada menu dan tidak ada warna: `watchbell`
+menampilkan alamat dan kode setup lalu berjalan sampai Anda menghentikannya. `watchbell run`, yang dipakai service,
+tetap menampilkan seperti sebelumnya, jadi pesan service tetap di tempatnya (journald, atau `~/.watchbell/watchbell.log`
+untuk Scheduled Task dan launchd agent).
+
 `watchbell --help` menampilkan semua perintah: `stop`, `status`, `update`, `service install|uninstall` (berjalan
 otomatis saat login lewat systemd user service, Scheduled Task, atau launchd agent di macOS; tanpa hak admin),
 `reset-login <email>`. Setelah Anda mengganti Node.js (nvm, fnm, volta, Homebrew), jalankan lagi
@@ -74,14 +104,24 @@ Anda diabaikan, jadi shell yang men-set variabel itu untuk program lain tidak bi
 Anda atau ke port lain; set `WATCHBELL_HOST` atau `WATCHBELL_PORT` untuk sengaja menimpa isi file, atau `--host` dan
 `--port` untuk satu kali jalan (lihat [Membukanya dari komputer lain](#membukanya-dari-komputer-lain)).
 
+`watchbell status` menampilkan alamat yang benar-benar dipakai Watchbell, juga kalau Anda menjalankannya dengan
+`--port` untuk satu kali jalan, dan lokasi log-nya. Opsi yang tidak dikenal, misalnya salah ketik seperti
+`--no-openen`, menghentikannya dengan `Unknown option --no-openen (see watchbell --help)`, tidak diabaikan diam-diam.
+
 Update dengan `watchbell update`. Perintah ini menjalankan `npm install -g watchbell@latest` dengan npm yang ada di
-samping Node.js Anda; service yang Anda pasang dengan `watchbell service install` dihentikan dulu lalu dijalankan
-lagi sesudahnya, sedangkan Watchbell yang Anda jalankan di terminal harus dihentikan dulu (`watchbell stop`). Kalau
-folder global npm dimiliki root (Node.js dari paket distribusi Anda), hentikan Watchbell lalu jalankan
-`sudo npm install -g watchbell@latest`. `watchbell` dan `watchbell status` memberi tahu Anda kalau ada versi yang lebih
+samping Node.js Anda, ke folder tempat salinan yang sedang berjalan dipasang (`--prefix`, diambil dari lokasi
+`watchbell`: `<prefix>/lib/node_modules/watchbell` di Linux dan macOS, `<prefix>\node_modules\watchbell` di Windows).
+Jadi Node.js kedua di PATH Anda (misalnya nvm di samping salinan di `~/.local`) tidak bisa mengambil update-nya
+sementara versi lama tetap berjalan. Service yang Anda pasang dengan `watchbell service install` dihentikan dulu lalu
+dijalankan lagi sesudahnya, sedangkan Watchbell yang Anda jalankan di terminal harus dihentikan dulu
+(`watchbell stop`). Kalau folder global npm dimiliki root (Node.js dari paket distribusi Anda), hentikan Watchbell lalu
+jalankan perintah `sudo npm install -g ...` yang disebutkannya. `watchbell` dan `watchbell status` memberi tahu Anda kalau ada versi yang lebih
 baru: keduanya bertanya ke registry.npmjs.org paling banyak sekali sehari (request biasa untuk nomor versi, tanpa
-informasi apa pun tentang Anda); `WATCHBELL_NO_UPDATE_CHECK=1`, di `~/.watchbell/.env` atau di environment, mematikan
-pengecekan ini.
+informasi apa pun tentang Anda). Keduanya juga memberi peringatan satu baris kalau Node.js yang menjalankannya punya
+perbaikan keamanan yang belum dipasang atau sudah lewat end-of-life. Untuk itu keduanya membaca daftar rilis nodejs.org
+dan endoflife.date paling banyak dua kali sehari. Watchbell yang sedang berjalan membaca kedua daftar yang sama setiap
+12 jam untuk baris di Settings › Collector. `WATCHBELL_NO_UPDATE_CHECK=1`, di `~/.watchbell/.env` atau di environment,
+mematikan semuanya.
 
 Dari 1.0.x, update sekali secara manual, karena 1.0 belum punya `watchbell update`: `watchbell stop` (atau hentikan
 service yang Anda pasang), lalu `npm install -g watchbell@latest`, lalu jalankan lagi. Mulai 1.1, `watchbell update`
@@ -112,8 +152,10 @@ Untuk membukanya ke jaringan Anda, beri alamat untuk satu kali jalan (`0.0.0.0` 
 watchbell --host 0.0.0.0 --port 3100
 ```
 
-Ia menampilkan alamat yang bisa dipakai komputer lain, misalnya `http://192.168.1.20:3100`, beserta peringatan: siapa
-pun yang bisa menjangkau alamat itu akan mendapat halaman sign-in, dan http biasa mengirim password yang bisa dibaca
+Layar awalnya menampilkan alamat yang bisa dipakai komputer lain, misalnya `http://192.168.1.20:3100`, beserta
+peringatan dua baris; penjelasan yang lebih panjang di bawah ini, dengan SSH tunnel dan catatan `SITE_URL`, masuk ke
+`~/.watchbell/logs/watchbell.log` (atau ke terminal dengan `--verbose`). Siapa pun yang bisa menjangkau alamat itu
+akan mendapat halaman sign-in, dan http biasa mengirim password yang bisa dibaca
 di jaringan. Jadi selesaikan `/setup` (akun owner) sebelum Anda membagikan alamatnya, batasi ke jaringan yang Anda
 percayai, dan jangan pernah membukanya ke internet tanpa HTTPS di depannya (lihat
 [Di belakang reverse proxy](configuration.md#di-belakang-reverse-proxy)). Sign-in bisa dilakukan dari alamat mana pun

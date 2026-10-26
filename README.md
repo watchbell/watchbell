@@ -166,11 +166,13 @@ watchbell
 ```
 
 That's it: no clone and no build. The first start creates `~/.watchbell/` with your settings (fresh secrets) and the
-database, prints a one-time setup code and opens http://localhost:3100/setup in your browser.
+database, shows a one-time setup code and opens http://localhost:3100/setup in your browser. In a terminal a short
+menu follows: open in the browser, keep running in the background, show the live log, or stop. The server's own
+messages go to `~/.watchbell/logs/watchbell.log`.
 
 | Command | What it does |
 |---|---|
-| `watchbell` | Start Watchbell (`--no-open` skips the browser) |
+| `watchbell` | Start Watchbell (`--no-open` skips the browser, `--verbose` prints the server's messages instead of the menu) |
 | `watchbell --host 0.0.0.0` | Open it to your network for this run (`--port <n>` for another port); prints the addresses and what to secure first |
 | `watchbell stop` / `watchbell status` | Stop it cleanly / show whether it runs and where |
 | `watchbell update` | Update to the latest version (a service is stopped and started again) |
@@ -179,8 +181,12 @@ database, prints a one-time setup code and opens http://localhost:3100/setup in 
 
 Update with `watchbell update`; your settings and data stay in `~/.watchbell/`. From 1.0.x, update once by hand
 (1.0 has no `watchbell update`): `watchbell stop` or stop the service, then `npm install -g watchbell@latest`. No
-telemetry: the only request of its own is a once-a-day check of registry.npmjs.org for a newer version
-(`WATCHBELL_NO_UPDATE_CHECK=1` turns it off).
+telemetry. Its only requests of its own are plain GETs of public lists:
+- `watchbell` and `watchbell status` check registry.npmjs.org at most once a day for a newer version.
+- To warn about a vulnerable or end-of-life Node.js, the running Watchbell reads nodejs.org's release list and
+  endoflife.date's Node.js dates every 12 hours (two requests a day to each). `watchbell` and `watchbell status` read
+  the same two lists at most twice a day on their own. That makes up to four requests a day to each site.
+- `WATCHBELL_NO_UPDATE_CHECK=1` in `~/.watchbell/.env` turns all of them off.
 
 ### From the source, with the installers
 
@@ -242,8 +248,10 @@ flowchart LR
   encrypts tokens with your `OPS_ENCRYPTION_KEY` and uses them only to talk to that provider.
 - **Nothing phones home.** Watchbell talks only to the providers, notification channels, AI provider and Google Drive
   you set up, plus public status pages and RDAP. There is no telemetry, and no account with the Watchbell project.
-  The npm package also checks registry.npmjs.org once a day for a newer version (`WATCHBELL_NO_UPDATE_CHECK=1` turns
-  it off).
+  To warn when the Node.js it runs on has a security fix waiting or is past end of life, Watchbell reads nodejs.org's
+  release list and endoflife.date's Node.js dates every 12 hours (two requests a day to each). The npm package's
+  `watchbell` and `watchbell status` also check registry.npmjs.org once a day for a newer version, and read those two
+  lists at most twice a day themselves. `WATCHBELL_NO_UPDATE_CHECK=1` turns all of these off.
 
 ## Requirements
 

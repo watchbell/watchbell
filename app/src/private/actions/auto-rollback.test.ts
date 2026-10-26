@@ -13,7 +13,7 @@ const check = (o: Partial<RollbackCheck> = {}, d: Partial<NonNullable<RollbackCh
     currentId: "dpl_new00000001", currentSha: "abcdef1234567", liveAt: min(12), currentCreatedAt: min(15), newestProdCreatedAt: min(15),
     previousId: "dpl_prev0000001", previousState: "ready", previousCreatedAt: day(3), ...d,
   },
-  rolledOrPromotedLately: false, autoLately: false, sameDeployBefore: false, inFlight: false, ...o,
+  rolledOrPromotedLately: false, autoLately: false, sameDeployBefore: false, inFlight: false, previousNext: "ok", ...o,
 });
 const why = (c: RollbackCheck) => { const r = autoRollbackDecision(c, now); return r.ok ? "ok" : r.why; };
 
@@ -49,6 +49,11 @@ describe("autoRollbackDecision", () => {
     expect(why(check({}, { previousState: "READY" }))).toBe("ok");
     expect(why(check({}, { previousCreatedAt: day(31) }))).toBe("previous too old");
     expect(why(check({}, { previousCreatedAt: day(29) }))).toBe("ok");
+  });
+  // Watchbell 1.2.2 (D17): never back to a Next.js with known advisories, and never alone when that isn't known.
+  it("never to a previous deployment whose Next.js is vulnerable or unknown", () => {
+    expect(why(check({ previousNext: "vulnerable" }))).toBe("previous Next.js has advisories");
+    expect(why(check({ previousNext: "unknown" }))).toBe("previous Next.js unknown");
   });
   it("never twice for one app within 2 h, never twice for one deployment, one in flight at a time", () => {
     expect(why(check({ autoLately: true }))).toBe("auto-rollback within 2 h");

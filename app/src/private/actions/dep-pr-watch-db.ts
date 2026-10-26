@@ -14,10 +14,11 @@ import {
   checksVerdict, type HttpProbe, httpVerdict, isAuthWall, logsVerdict, MAX_REVIEW_COMMITS, type MergeReview, OPEN_STAGES, type PrCommit, type PrStage,
   SMOKE_TIMEOUT_MS, smokePaths, WATCH_TIMEOUT_MS, type SmokeVerdict, stageLine, unexpectedChange, lockfileChangeProblem, lockfileMissing, manifestChangeProblem, watchDue, type WatchStep, watchStep,
 } from "@/lib/deps/pr-watch";
+import { type ProductionSource, productionMismatch, productionSourceOf, readProductionSource } from "@/lib/deps/branch";
 import { cleanRootDir, inDir } from "@/lib/deps/root-dir";
 import { runsForCommit } from "@/lib/providers/github";
 import { commitChecks, commitFiles, isNpmLockfilePath, lockfileAt, manifestAt, mergeWatchpostPull, pullCommits, pullFiles, pullState, tokenLogin } from "@/lib/providers/github-write";
-import { deploymentsForCommit } from "@/lib/providers/vercel";
+import { deploymentsForCommit, getDeployment, productionDeployments, productionServing, runningProductionBuild, type VercelDeployment } from "@/lib/providers/vercel";
 import { readRequestLogs } from "@/lib/providers/vercel-request-logs";
 import { appAlias, EMPTY_BOOK } from "@/lib/view/display-name";
 import { actionProposals } from "@/private/db/schema";
@@ -33,6 +34,7 @@ import { readAutoRollback, readAutoSecurity } from "./proposals-settings";
 // on. Never throws; a provider hiccup leaves the PR as it was for the next round.
 
 const MAX_PRS = 10;
+const WAIT_VERCEL = "waiting: Vercel didn't say which deployment is live";
 const MIN_LEFT_MS = 15_000;
 
 type Row = {
@@ -41,6 +43,10 @@ type Row = {
   fullName: string; appName: string | null;
   // For the allow-list (1.2.1, audit M1): the app's Vercel Root Directory (meta.rootDirectory) and the scan's lockfile.
   meta?: Record<string, unknown> | null; lockfilePath?: string | null;
+  // 1.2.2 (D15, review minor 3): the app still watched and not gone (left out in older callers: treated as watched).
+  appMonitored?: boolean | null; appGone?: Date | null;
+  // The stage text the last round saved (fix round 4: whether it already waited for Vercel).
+  stageText?: string | null;
 };
 
 export type WatchDeps = {
@@ -64,6 +70,9 @@ export type WatchDeps = {
   notify: (n: DepPrNotice) => Promise<void>;
   audit: (message: string, appId: string | null) => Promise<void>;
   lockfileBusy?: (repoId: string, branch: string, fullName: string) => Promise<boolean>;
+  // 1.2.2 (D15 fix round 2): what the app's live production deployment was built from, read from Vercel now (null: the
+  // read failed; source null: the deployment names no source).
+  liveSource: (appId: string) => Promise<{ source: ProductionSource | null } | null>;
   book: () => Promise<{ app: { name: string; alias: string; id: string }[]; db: { id: string; name: string; alias: string }[] }>;
 };
 
@@ -130,12 +139,58 @@ export async function reviewPr(token: string, row: Row): Promise<MergeReview | n
   return { manifest, lockfile, lockfileRequired: !!row.lockfilePath, manifestProblem, lockfileProblem, headSha: row.headSha, tokenLogin: login, files: files.data, commits };
 }
 
+// 1.2.2 (D15 fix round 2): the project's current production deployment (the one Vercel serves) and its source, read live
+// right before a merge or a "ready to merge" stop: two GETs, only then. Fix round 3: when the latest production build
+// failed, the deployment still served (two more GETs); its branch origin (a CLI deploy redeployed or promoted) counts.
+// Null when Vercel can't be read, serves nothing, or a production build is still on its way.
+// Fix round 4 (re-review r3 I1 and minor 1): the fallback only when the latest production build failed or was canceled
+// and none is running. A build that is queued, initializing or building is about to go live (a CLI deploy in progress):
+// null, so the PR waits for it. After a succeeded promote, the newest READY production deployment created after it, else
+// the promote's target (the newest READY one before it isn't served any more).
+export async function liveProductionSource(
+  appId: string,
+  o: {
+    vercel?: WatchDeps["vercel"]; serving?: typeof productionServing; deployment?: typeof getDeployment; ready?: typeof productionDeployments;
+    running?: typeof runningProductionBuild;
+  } = {},
+): Promise<{ source: ProductionSource | null } | null> {
+  const v = await (o.vercel ?? DEPS.vercel)(appId);
+  if (!v) return null;
+  const s = await (o.serving ?? productionServing)(v.token, v.teamId, v.projectId);
+  if (!s.ok) return null;
+  let id = s.data.currentId;
+  let dep: VercelDeployment | null = null;
+  if (!id) {
+    const state = s.data.latest?.readyState ?? null;
+    if (state !== "ERROR" && state !== "CANCELED") return null;
+    const running = await (o.running ?? runningProductionBuild)(v.token, v.teamId, v.projectId);
+    if (!running.ok || running.data) return null;
+    const list = await (o.ready ?? productionDeployments)(v.token, v.teamId, v.projectId);
+    if (!list.ok) return null;
+    const newest = [...list.data].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+    const p = s.data.promote;
+    if (!p) dep = newest[0] ?? null;
+    else {
+      dep = newest.find((d) => d.createdAt.getTime() > p.requestedAt) ?? null;
+      if (!dep) id = p.toDeploymentId;
+    }
+  }
+  if (!dep && id) {
+    const one = await (o.deployment ?? getDeployment)(v.token, { id: v.teamId, slug: v.teamId, name: v.teamId }, id);
+    if (!one.ok) return null;
+    dep = one.data;
+  }
+  if (!dep) return null;
+  return { source: productionSourceOf({ source: dep.source, branch: dep.branch, sha: dep.sha, branchFrom: dep.branchFrom ?? null, gitDirty: dep.gitDirty === true }) };
+}
+
 const DEPS: WatchDeps = {
   rows: async () => (await db().select({
     id: dependencyPrs.id, repoId: dependencyPrs.repoId, appId: dependencyPrs.appId, proposalId: dependencyPrs.proposalId, number: dependencyPrs.number,
     branch: dependencyPrs.branch, baseBranch: dependencyPrs.baseBranch, headSha: dependencyPrs.headSha, title: dependencyPrs.title, packages: dependencyPrs.packages,
     auto: dependencyPrs.auto, stage: dependencyPrs.stage, smokeMode: dependencyPrs.smokeMode, previewReadyAt: dependencyPrs.previewReadyAt, openedAt: dependencyPrs.openedAt,
     fullName: githubRepos.fullName, appName: resources.name, meta: resources.meta, lockfilePath: dependencyScans.lockfilePath,
+    appMonitored: resources.monitored, appGone: resources.goneAt, stageText: dependencyPrs.stageText,
   }).from(dependencyPrs).innerJoin(githubRepos, eq(githubRepos.id, dependencyPrs.repoId)).leftJoin(resources, eq(resources.id, dependencyPrs.appId))
     .leftJoin(dependencyScans, eq(dependencyScans.repoId, dependencyPrs.repoId))
     .where(inArray(dependencyPrs.stage, [...OPEN_STAGES])).orderBy(asc(dependencyPrs.openedAt)).limit(MAX_PRS)) as Row[],
@@ -162,6 +217,7 @@ const DEPS: WatchDeps = {
     if (proposalId) await db().update(actionProposals).set({ result: stageText }).where(eq(actionProposals.id, proposalId)).catch(() => undefined);
   },
   notify: (n) => notifyDepPr(n),
+  liveSource: (appId) => liveProductionSource(appId),
   lockfileBusy: async (repoId, branch, fullName) => (await runnerLockfileActive(repoId, branch)) || (await actionsLockfilePending(fullName, branch)),
   audit: (message, appId) => recordAction({ kind: "ok", message, resourceId: appId, actorUserId: null }),
   book: () => readAliasBook(),
@@ -234,6 +290,23 @@ async function oneRound(row: Row, now: Date, token: string, rollbackOn: boolean,
   return { step, smoke, previewReadyAt: preview.readyAt, headSha: pr.data.headSha };
 }
 
+// Why the watcher must not merge this PR itself (null: nothing against it). Exported for the tests.
+export function mergeBlock(row: Pick<Row, "appId" | "appMonitored" | "appGone" | "meta" | "baseBranch">, now: Date): string | null {
+  if (!row.appId || row.appMonitored === false || row.appGone) {
+    return "the app is gone or no longer watched, so Watchbell can't confirm what production is built from. Merging this PR could replace what is live";
+  }
+  const mismatch = productionMismatch(row.meta?.productionSource, row.baseBranch, now);
+  if (mismatch) return mismatch;
+  // Fix round 1b (coordinator): production was promoted from a preview of the PR's base, which isn't the Vercel project's
+  // production branch. Merging there builds a preview only; the owner promotes it.
+  const src = readProductionSource(row.meta?.productionSource);
+  const prodBranch = row.meta?.productionBranch;
+  if (src?.kind === "git" && src.ref === row.baseBranch && typeof prodBranch === "string" && prodBranch !== row.baseBranch) {
+    return `Merging into ${row.baseBranch} won't deploy to production by itself: production was promoted from a ${row.baseBranch} preview. Merge, then promote the new preview.`;
+  }
+  return null;
+}
+
 async function apply(row: Row, seen: Seen, app: string, windowMin: number, now: Date, token: string, d: WatchDeps, out: WatchRound): Promise<void> {
   const { step } = seen;
   const smokeSet = seen.smoke ? { smokeMode: seen.smoke.mode } : {};
@@ -253,6 +326,47 @@ async function apply(row: Row, seen: Seen, app: string, windowMin: number, now: 
     await d.save(row.id, { stage: "checks" }, row.proposalId, stageLine(row.number, "checks", "waiting for the lockfile from the runner"));
     return;
   }
+  // Watchbell 1.2.2 (D15, incident 25 Oct): never merged automatically, and never announced as "ready to merge" (also
+  // with auto-rollback off, fix round 2), when production wasn't built from the PR's base (a CLI deploy, another branch),
+  // when that can't be confirmed lately, when the app is gone or no longer watched (its source isn't read any more), or
+  // when production was only promoted from the base (1b). "Needs a look" with the reason; the PR stays open for the owner.
+  const stopBlocked = async (blocked: string) => {
+    await d.save(row.id, { stage: "failed", finishedAt: now, ...smokeSet }, row.proposalId, stageLine(row.number, "failed", blocked));
+    out.stopped++;
+    await d.notify({ ...n, kind: "stopped", reason: blocked.replace(/\.$/, "") }).catch(() => undefined);
+  };
+  const blocked = step.kind === "merge" || (step.kind === "stop" && step.stage === "ready-manual") ? mergeBlock(row, now) : null;
+  if (blocked) return stopBlocked(blocked);
+  // Fix rounds 2 and 3: one live read of what production is built from right now, checked like the stored one, right
+  // before a merge and before a "ready to merge (manual)" stop. It covers a source never recorded, and a CLI deploy since
+  // the collector's last read. A failed read: nothing merged or announced; the stage says Vercel didn't answer and the
+  // next round tries again, until WATCH_TIMEOUT_MS after the preview was ready: needs a look. A deployment that names no
+  // source can't be confirmed: needs a look. True: handled (the caller stops here).
+  const liveGate = async (): Promise<boolean> => {
+    const live = row.appId ? await d.liveSource(row.appId).catch(() => null) : null;
+    if (!live) {
+      // The 45 minutes count from the preview's ready time (no column keeps the first failed read: that needs a
+      // migration), and fix round 4: never on the first failed read, only when the previous round already waited for
+      // Vercel (its stage text says so), so one transient failure can't stop a PR.
+      const since = seen.previewReadyAt ?? row.previewReadyAt ?? row.openedAt;
+      const waitedBefore = (row.stageText ?? "").includes(WAIT_VERCEL);
+      if (waitedBefore && now.getTime() - since.getTime() > WATCH_TIMEOUT_MS) {
+        await stopBlocked("Vercel didn't say which deployment is live for 45 minutes, so Watchbell can't confirm what production is built from. Check it, then merge yourself");
+        return true;
+      }
+      const stage: PrStage = row.stage === "checks" || row.stage === "preview" || row.stage === "smoke" ? row.stage : "smoke";
+      await d.save(row.id, { stage, ...smokeSet, ...ready }, row.proposalId, stageLine(row.number, stage, WAIT_VERCEL));
+      return true;
+    }
+    const fresh = live.source ? mergeBlock({ ...row, meta: { ...(row.meta ?? {}), productionSource: { ...live.source, at: now.toISOString() } } }, now)
+      : `Watchbell can't confirm what production is built from (Vercel names no branch for it). Merging this PR could deploy ${row.baseBranch} to production and replace what is live.`;
+    if (fresh) {
+      await stopBlocked(fresh);
+      return true;
+    }
+    return false;
+  };
+  if (step.kind === "stop" && step.stage === "ready-manual" && (await liveGate())) return;
   if (step.kind === "stop") {
     await d.save(row.id, { stage: step.stage, finishedAt: now, ...smokeSet }, row.proposalId, stageLine(row.number, step.stage, step.stage === "ready-manual" ? null : step.reason));
     out.stopped++;
@@ -280,6 +394,7 @@ async function apply(row: Row, seen: Seen, app: string, windowMin: number, now: 
     await d.notify({ ...n, kind: "stopped", reason: unexpected }).catch(() => undefined);
     return;
   }
+  if (await liveGate()) return;
   // Merge: the head must still be the one the checks were read at (GitHub refuses otherwise too).
   await d.save(row.id, { stage: "merging", ...smokeSet, ...ready }, row.proposalId, stageLine(row.number, "merging"));
   const r = await d.merge(token, row.fullName, row.number, row.branch, row.baseBranch, row.headSha, row.title);

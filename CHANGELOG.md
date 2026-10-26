@@ -2,6 +2,109 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.2
+
+### Security fixes
+
+- Watchbell checks the Node.js it runs on itself: Vercel's function runtime in the cloud edition, the machine's
+  Node.js when self-hosted. Settings › Collector has a **Watchbell runtime** line, for example "Node 24.12.0: security
+  fix available (24.22.1)", from nodejs.org's release list and endoflife.date's Node.js dates, read every 12 hours; a
+  line past end of life says so, and it says unknown, never ok, without a successful recent read. Self-hosted,
+  `watchbell start` and `watchbell status` print a one-line warning for a vulnerable or end-of-life Node.js, and
+  `status` also checks the Node.js an installed service runs. The lists are fetched with gzip, never Brotli.
+  `WATCHBELL_NO_UPDATE_CHECK=1` turns off both the server's reads and the commands' check. See
+  [Pages › Manage](docs/pages.md#manage).
+- Update pull requests follow what production is really built from. Before, a pull request could go to a stale
+  production branch while production had been deployed from another branch or the Vercel CLI, and merging it deployed
+  that stale branch over what was live. Watchbell now reads the live production deployment's source every few minutes
+  and shows it on the app page as **Production built from**. When production was built from a Git branch the repository
+  has, the dependency scan reads that branch and the update pull request targets it. When it was deployed from the CLI,
+  built from a branch the repository doesn't have, or not confirmed in the last 30 minutes, the proposal still appears
+  with the consequence first ("Production was deployed from the CLI, not built from main. Merging this PR would deploy
+  main to production and replace what is live."). It never opens by itself and is never merged automatically: the
+  merge watcher stops with "needs a look" and the reason (never "ready to merge", also with auto-rollback off), and an
+  approved pull request opens as a draft with that warning on top. Just before an automatic merge or a "ready to merge"
+  the watcher also reads the live production deployment from Vercel once and applies the same rules (a redeploy or
+  promote of a CLI deployment counts as a CLI deploy). A pull request isn't opened while
+  the last dependency scan read another branch than its base; scan again first. Apps deployed to production from CI
+  with the Vercel CLI keep their update pull requests for your approval. See
+  [Auto-actions](docs/auto-actions.md#automatic-security-fixes).
+- zod 4.6.7 (fixes GHSA-mrhx-c7xc-m3w5: memory exhaustion while validating oversized collections). `npm audit
+  --omit=dev` reports nothing. Four moderate advisories remain in development tools only (esbuild inside drizzle-kit,
+  used to generate migrations); they aren't part of the installed package.
+
+### Auto-actions
+
+- A rollback is proposed for a down or slow app only when the problem started after its live deployment went live and
+  within the auto-rollback window. Earlier HighLatency episodes on the same check, each ending less than a day before
+  the next, count as the same problem, so days of HighLatency no longer get a rollback; for MonitorDown only an outage
+  still going when the deployment went live (or ended up to 15 minutes before) counts. **Check again now** then says
+  what it likely is ("Slow since …, not tied to a deploy …: check the app."). A site that stays down outside the window
+  gets a redeploy proposal only, and none when it was down before the live deployment went live. See
+  [Auto-actions](docs/auto-actions.md#which-alerts-propose-what).
+- A rollback never goes back to a deployment known to have Next.js advisories from the Security card's history
+  (MonitorDown, HighLatency, DeploymentFailed and LogErrorSpike); a failed check counts with the version it last read,
+  and an app that isn't a Next.js site counts as fine. When it can't be told, the rollback still waits for your approval
+  with "Previous deployment's Next.js version is unknown" first in its reason, and auto-rollback skips it. A `next`
+  update pull request merged by Automatic security fixes therefore has no rollback: the preview test is its only check.
+
+### AI
+
+- When an AI provider can't be reached (its endpoint or tunnel is down, a timeout, or a 502, 503, 504, 52x or 530), is
+  rate limited, fails with another server error or sends an unreadable answer, every background and owner-triggered AI
+  call now tries the next enabled provider once, except a model you picked by name (Playground, or a model chosen in
+  Ask). That includes calls that start from a preferred model, such as the advisor notes' own model. A call with a time
+  limit stays inside it: the first provider gets two thirds of it (for limits of 9 seconds or more), so one that hangs
+  leaves time for the second. The error names the provider in plain words, for example
+  `AI provider "my-router" is unreachable (its endpoint or tunnel is down).`, and says whether another provider was
+  tried or where to add one; a refused key says so and is never retried. See [AI](docs/ai.md#what-uses-ai).
+
+### Notifications
+
+- Fewer and clearer Telegram messages. A proposal or an automatic action for an alert is a reply to the message that
+  opened the alert, so one incident reads as one thread; an automatic **Check again now** that ran sends nothing (the
+  alert's own messages say whether it is still down or resolved); Telegram names apps, databases and hosts by their real
+  names instead of app-a or db-a; and an update pull request's result no longer asks you to run `npm install` when the
+  lockfile workflow (the GitHub Actions repository set in Settings) took the update. See
+  [Notifications](docs/notifications.md#what-gets-sent).
+
+### Console
+
+- The Overview Health card reads in plain words. **Sites reachable**, **Response time**, **Server errors** and **New
+  versions** replace "Avg uptime", "p95 response", "5xx responses" and "Deployments", each with a one-line explanation
+  and its technical name (uptime, p95, HTTP 5xx, production deployments) on hover. Counts say "in 24 h", and the
+  data-source badges say **Checked by Watchbell** or **From Vercel**. The Neon cell reads "is asleep" and "compute
+  hours used this month". See [Pages › Overview](docs/pages.md).
+
+### CLI
+
+- `watchbell` in a terminal shows a short start screen (the version, the address, the setup code until the owner
+  account exists, and for a network address a two-line warning) and a menu: **Open in browser**, **Keep running in the
+  background**, **Show live log**, **Stop and exit**. Use ↑/↓ and Enter or a first letter. **Keep running in the
+  background** leaves Watchbell running after the terminal closes; `watchbell stop` and `watchbell status` work as
+  before. **Stop and exit** and Ctrl+C stop it cleanly. See [Install](docs/install.md#quick-install-with-npm).
+- The server's own messages (the Next.js banner, the collector's progress lines) go to
+  `~/.watchbell/logs/watchbell.log` instead of the terminal, at most two files of about 5 MB. An error still shows as
+  one line with the log's path. `watchbell start --verbose` prints everything in the terminal as before. Without a
+  terminal (piped output, CI) there is no menu and no colour, and `watchbell run`, which the services use, prints as
+  before, so journald, launchd and the Scheduled Task keep their logs.
+- `watchbell update` installs into the folder the running copy was installed in (`npm install -g --prefix ...`). Before,
+  a second Node.js on the PATH (nvm next to a copy in `~/.local`) could take the update while the old version kept
+  running. When the running copy still holds the old version afterwards, it says so and what to check.
+- An unknown option, such as `--no-openen`, stops with `Unknown option --no-openen (see watchbell --help)` and exit
+  code 2. `--timeout=<seconds>` works like `--timeout <seconds>`.
+- `watchbell status` shows the port Watchbell really listens on (started with `--port 3261`, it said 3100 before), and
+  `watchbell stop` asks that port too.
+- A self-hosted start no longer warns "SITE_URL points at localhost": on your own machine that is the normal setup.
+
+### Fixes
+
+- Last deploy (Overview, Applications, the app page) is the deployment production serves. After a promote or roll back
+  to an older deployment it showed the newest one instead; a newer production build that is still building or failed
+  is still shown. Each change of the serving deployment (a deploy, a promote or a roll back) runs the after-deploy Next.js check
+  once.
+  See [Pages › Deployments](docs/pages.md#hosting).
+
 ## 1.2.1
 
 ### Uptime

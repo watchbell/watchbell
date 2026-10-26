@@ -3,7 +3,7 @@ import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cancelDeployment, chooseProductionDomain, currentProduction, discoverVercel, domainConfig, getDeployment, listDeployments, listProjectDomains, listProjects,
-  mapDeploymentState, productionDeployments, promote, promotePreview, redeploy, rollback, runningProductionBuild, tokenExpiry,
+  mapDeploymentState, productionDeployments, productionServing, promote, promotePreview, redeploy, rollback, runningProductionBuild, tokenExpiry,
 } from "./vercel";
 
 // MSW lets unhandled requests for common assets (.js, .json, .html…) through to the real network even with
@@ -18,7 +18,7 @@ afterAll(() => server.close());
 
 const token = "tok_abcdefghijklmnopqrstuvwxyz";
 const team = { id: "team_a", slug: "acme-team", name: "Acme' projects" };
-const project = (id: string, name: string, current: { id: string; readyState: string } | null = null) => ({
+const project = (id: string, name: string, current: { id: string; readyState: string; createdAt?: number } | null = null) => ({
   id, name, framework: "nextjs", createdAt: 1_760_000_000_000, link: { productionBranch: "main" },
   targets: current ? { production: current } : {},
 });
@@ -155,9 +155,24 @@ describe("listDeployments", () => {
     const r = await listDeployments(token, team, { since: 0 });
     expect(r.ok && r.data).toEqual([
       { id: "d1", projectId: "p1", state: "ready", rawState: "READY", target: "production", branch: "main", sha: "abcdef1234", message: "feat: x", source: "git", url: "a.vercel.app",
-        createdAt: new Date(1000), buildingAt: new Date(1100), readyAt: new Date(5000) },
+        createdAt: new Date(1000), buildingAt: new Date(1100), readyAt: new Date(5000), branchFrom: "github" },
       { id: "d2", projectId: "p1", state: "building", rawState: "BUILDING", target: "preview", branch: "dev", sha: "1234567890", message: "wip", source: "cli", url: null,
-        createdAt: new Date(2000), buildingAt: null, readyAt: null },
+        createdAt: new Date(2000), buildingAt: null, readyAt: null, branchFrom: "cli" },
+    ]);
+  });
+  // D15 fix round 3: which field named the branch, so a redeploy of a CLI deployment isn't taken for a Git build.
+  it("says where the branch came from, and whether the CLI deployed a dirty tree", async () => {
+    server.use(http.get("https://api.vercel.com/v7/deployments", () => HttpResponse.json({
+      deployments: [
+        { uid: "r1", projectId: "p1", state: "READY", target: "production", source: "redeploy", createdAt: 1000, meta: { gitCommitRef: "main", gitCommitSha: "1234567890" } },
+        { uid: "r2", projectId: "p1", state: "READY", target: "production", source: "cli", createdAt: 1000, meta: { gitCommitRef: "main", gitDirty: "1" } },
+        { uid: "r3", projectId: "p1", state: "READY", target: "production", source: "redeploy", createdAt: 1000, meta: { githubCommitRef: "main", gitCommitRef: "main" } },
+        { uid: "r4", projectId: "p1", state: "READY", target: "production", source: "cli", createdAt: 1000, meta: {} },
+      ],
+    })));
+    const r = await listDeployments(token, team, { since: 0 });
+    expect(r.ok && r.data.map((d) => [d.id, d.branchFrom ?? null, d.gitDirty ?? false])).toEqual([
+      ["r1", "cli", false], ["r2", "cli", true], ["r3", "github", false], ["r4", null, false],
     ]);
   });
 });
@@ -178,7 +193,33 @@ describe("getDeployment", () => {
     expect(r.ok && r.data).toEqual({
       id: "dpl_old", projectId: "p1", state: "ready", rawState: "READY", target: "production", branch: "main", sha: "abcdef1234", message: "feat: x",
       source: "git", url: "shortly-abc.vercel.app", createdAt: new Date(1_752_900_000_000), buildingAt: new Date(1_752_900_010_000), readyAt: new Date(1_752_900_060_000),
+      branchFrom: "github",
     });
+  });
+  // Watchbell 1.2.2 (D15): the branch and commit production was built from, also when only gitSource names them.
+  it("falls back to gitSource.ref / gitSource.sha when the meta has no commit fields", async () => {
+    server.use(http.get("https://api.vercel.com/v13/deployments/dpl_src", () => HttpResponse.json({
+      id: "dpl_src", projectId: "p1", readyState: "READY", target: "production", source: "git", createdAt: 1000,
+      gitSource: { type: "github", ref: "web-revamp", sha: "abcdef1234", repoId: 1 }, meta: {},
+    })));
+    const r = await getDeployment(token, team, "dpl_src");
+    expect(r.ok && [r.data.branch, r.data.sha]).toEqual(["web-revamp", "abcdef1234"]);
+    server.use(http.get("https://api.vercel.com/v13/deployments/dpl_odd", () => HttpResponse.json({
+      id: "dpl_odd", projectId: "p1", readyState: "READY", target: "production", source: "cli", createdAt: 1000, gitSource: "weird",
+    })));
+    const odd = await getDeployment(token, team, "dpl_odd");
+    expect(odd.ok && [odd.data.branch, odd.data.sha]).toEqual([null, null]);
+  });
+  // Review minor 1: a GitLab or Bitbucket Git deployment names its branch too (not mistaken for a CLI deploy).
+  it("reads GitLab and Bitbucket commit fields", async () => {
+    server.use(http.get("https://api.vercel.com/v7/deployments", () => HttpResponse.json({
+      deployments: [
+        { uid: "g1", projectId: "p1", state: "READY", target: "production", source: "git", createdAt: 1000, meta: { gitlabCommitRef: "main", gitlabCommitSha: "1111111111", gitlabCommitMessage: "gl" } },
+        { uid: "b1", projectId: "p1", state: "READY", target: "production", source: "git", createdAt: 1000, meta: { bitbucketCommitRef: "release", bitbucketCommitSha: "2222222222", bitbucketCommitMessage: "bb" } },
+      ],
+    })));
+    const r = await listDeployments(token, team, { since: 0 });
+    expect(r.ok && r.data.map((d) => [d.branch, d.sha, d.message])).toEqual([["main", "1111111111", "gl"], ["release", "2222222222", "bb"]]);
   });
   it("reports a 404 as transient and a body without an id as a format problem", async () => {
     server.use(http.get("https://api.vercel.com/v13/deployments/gone", () => new HttpResponse(null, { status: 404 })));
@@ -444,12 +485,34 @@ describe("live reads before a write", () => {
     expect(await answer({ id: "dpl_new1234567", readyState: "READY", createdAt: 4000 }, { odd: true })).toBe("dpl_new1234567");
   });
 
+  // D15 fix round 4: what the merge watcher needs when servingId can't say: the latest's state and the last promote.
+  it("productionServing: the serving id, the latest production deployment's state, and a succeeded promote", async () => {
+    const promoted = { type: "promote", jobStatus: "succeeded", fromDeploymentId: "dpl_prv1234567", toDeploymentId: "dpl_stg1234567", requestedAt: 5000 };
+    server.use(http.get("https://api.vercel.com/v9/projects/:p", () => HttpResponse.json(projectWith({ id: "dpl_nxt1234567", readyState: "BUILDING", createdAt: 6000 }, promoted))));
+    expect(await productionServing(token, TEAM, P)).toEqual({ ok: true, data: {
+      currentId: null, latest: { id: "dpl_nxt1234567", readyState: "BUILDING", createdAt: 6000 }, promote: { toDeploymentId: "dpl_stg1234567", requestedAt: 5000 },
+    } });
+    server.use(http.get("https://api.vercel.com/v9/projects/:p", () => HttpResponse.json(projectWith({ id: "dpl_cur1234567", readyState: "READY", createdAt: 6000 }, { ...promoted, jobStatus: "failed" }))));
+    expect(await productionServing(token, TEAM, P)).toEqual({ ok: true, data: { currentId: "dpl_cur1234567", latest: { id: "dpl_cur1234567", readyState: "READY", createdAt: 6000 }, promote: null } });
+    server.use(http.get("https://api.vercel.com/v9/projects/:p", () => HttpResponse.json({ id: P, name: "web" })));
+    expect(await productionServing(token, TEAM, P)).toEqual({ ok: true, data: { currentId: null, latest: null, promote: null } });
+  });
+
   it("listProjects places current the same way, so the collector's Current flag follows a roll back (A9)", async () => {
     server.use(http.get("https://api.vercel.com/v10/projects", () => HttpResponse.json({
       projects: [{ ...project("p1", "one", { id: "dpl_new1234567", readyState: "READY" }), lastAliasRequest: rolledBack }], pagination: { next: null },
     })));
     const r = await listProjects(token, team);
     expect(r.ok && r.data[0].currentDeploymentId).toBe("dpl_prv1234567");
+  });
+
+  it("listProjects: a promote to an older deployment makes that one current (1.2.2, D16)", async () => {
+    const promoted = { type: "promote", jobStatus: "succeeded", fromDeploymentId: "dpl_new1234567", toDeploymentId: "dpl_old1234567", requestedAt: 5000 };
+    server.use(http.get("https://api.vercel.com/v10/projects", () => HttpResponse.json({
+      projects: [{ ...project("p1", "one", { id: "dpl_new1234567", readyState: "READY", createdAt: 4000 }), lastAliasRequest: promoted }], pagination: { next: null },
+    })));
+    const r = await listProjects(token, team);
+    expect(r.ok && r.data[0].currentDeploymentId).toBe("dpl_old1234567");
   });
 
   it("productionDeployments asks v6 for the 5 newest READY production deployments", async () => {

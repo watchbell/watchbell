@@ -210,6 +210,14 @@ describe("message text", () => {
     expect(text.split("\n").pop()).toBe("Status: ⏳ waiting");
     expect(statusLine(proposal({ status: "failed", result: "<b>no</b>" }), BOOK)).toBe("Status: ❌ failed — &lt;b&gt;no&lt;/b&gt;");
   });
+  // Watchbell 1.2.2 (D18): the edited notice reads the real names, like the alert messages in the same chat.
+  it("names the real app and database, in English and Indonesian", () => {
+    const named = { db: [{ id: "d1", name: "orders-db", alias: "db-a" }], app: [{ id: "a1", name: "shop", alias: "app-a" }] };
+    const p = proposal({ title: "Redeploy production app-a", status: "done", result: "Redeploy of app-a started; db-a untouched." });
+    expect(statusLine(p, named)).toBe("Status: ✅ done — Redeploy of shop started; orders-db untouched.");
+    expect(statusLine(p, named, "id")).toBe("Status: ✅ selesai — Redeploy of shop started; orders-db untouched.");
+    expect(noticeText(p, named, SITE)).toContain("Redeploy production shop");
+  });
 });
 
 describe("Indonesian (notify.language = id)", () => {

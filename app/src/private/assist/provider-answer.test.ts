@@ -101,6 +101,24 @@ describe("answerWithProvider", () => {
     unmatched.length = 0;
   });
 
+  it("a model with fallback (the office's preference) moves to another enabled provider when its own is down (owner item #19)", async () => {
+    const backup = { ...conn, id: "p-backup", slug: "backup", name: "Backup", isDefault: false, baseUrl: "https://backup.example.test/v1", models: [{ id: "b-1", upstream: "b-1", enabled: true }] } as OpenConnection;
+    h.openConnections.mockResolvedValue([conn, backup]);
+    let backupHits = 0;
+    server.use(
+      http.post(`${BASE}/chat/completions`, () => new HttpResponse(null, { status: 530 })),
+      http.post("https://backup.example.test/v1/chat/completions", () => { backupHits++; return HttpResponse.json({ choices: [{ message: { content: "from backup" } }] }); }),
+    );
+    await expect(answerWithProvider("q", { model: "test/prrojects", fallback: true, now: NOW })).resolves.toMatchObject({ text: "from backup", model: "backup/b-1" });
+    expect(backupHits).toBe(1);
+    // the same model picked by name (Ask with a chosen model) stays on its provider and says so
+    const e = (await answerWithProvider("q", { model: "test/prrojects", now: NOW }).catch((x: unknown) => x)) as Error;
+    expect(e.name).toBe("GatewayError");
+    expect(e.message).toBe('AI provider "test" is unreachable (its endpoint or tunnel is down). This model was picked by name, so no other provider was tried.');
+    expect(backupHits).toBe(1);
+    await settle();
+  });
+
   it("an empty completion is an error, not an empty answer", async () => {
     answerWith("   ");
     await expect(answerWithProvider("q", { now: NOW })).rejects.toThrow("The model returned no text. Try again.");

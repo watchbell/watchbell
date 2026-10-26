@@ -68,7 +68,7 @@ export async function runAdvisorNotes(now: Date, opts: { force?: boolean; deadli
   const snap = await consoleSnapshot(now);
   const apps = pickAdvisorApps(snap);
   if (apps.length === 0) return { status: "skipped", reason: "no-apps" };
-  const r = await withDeadline(complete(advisorPrompt(snap, apps), { ...(s.model ? { model: s.model } : {}), purpose: "summary", maxTokens: 1500, temperature: 0.2 }), opts.deadlineMs ?? ADVISOR_DEADLINE_MS);
+  const r = await withDeadline(complete(advisorPrompt(snap, apps), { ...(s.model ? { model: s.model, fallback: true } : {}), purpose: "summary", maxTokens: 1500, temperature: 0.2 }), opts.deadlineMs ?? ADVISOR_DEADLINE_MS);
   const notes = parseAdvisorNotes(r.text, apps);
   if (notes.length === 0) return { status: "skipped", reason: "no-valid-notes" };
   const refs = await appRefs();

@@ -6,9 +6,12 @@ import { Status } from "@/components/status";
 import { td, tableClass, TableHead } from "@/components/table";
 import { db } from "@/db/client";
 import { collectorRuns } from "@/db/schema";
+import { readNodeAdvisories } from "@/lib/collector/node-runtime";
 import { aliasBook } from "@/lib/data/cached";
+import { isCloud } from "@/lib/mode";
+import { nodeCheckOff, runtimeLine } from "@/lib/security/node-runtime";
 import { EMPTY_BOOK, hideNames } from "@/lib/view/display-name";
-import { zoneName } from "@/lib/time";
+import { ago, zoneName } from "@/lib/time";
 import { runRows, taskScheduleRows, zoneSetting } from "@/lib/view/settings";
 import { SchedulersCard } from "../connections/schedulers-card";
 
@@ -22,6 +25,12 @@ export async function CollectorTab() {
   const book = await aliasBook().catch(() => EMPTY_BOOK);
   const rows = runRows(runs, (t) => hideNames(t, book));
   const zone = zoneSetting();
+  // 1.2.2 (D20): the Node.js this server runs on (process.version), against the 12-hourly "node" task's data.
+  const node = await readNodeAdvisories().catch(() => null);
+  const now = new Date();
+  const off = nodeCheckOff();
+  const runtime = runtimeLine(process.version, node, now, off);
+  const read = off.off ? `Not read: ${off.name} is set.` : node?.indexCheckedAt ? `Read ${ago(new Date(node.indexCheckedAt), now)}.` : "Not read yet.";
   return (
     <div className="flex flex-col gap-4">
       <SchedulersCard />
@@ -54,6 +63,18 @@ export async function CollectorTab() {
             <span className="mt-0.5 block text-[12.5px] font-normal text-ink-soft">{zone.follows}</span>
           </div>
           <span className="text-ink-soft">{zone.text}</span>
+        </div>
+        <div className="grid grid-cols-[260px_minmax(0,1fr)] items-center gap-4 border-t border-line px-[18px] py-3 max-[720px]:grid-cols-1 max-[720px]:gap-1">
+          <div className="font-medium">
+            Watchbell runtime
+            <span className="mt-0.5 block text-[12.5px] font-normal text-ink-soft">
+              {isCloud() ? "The Node.js of Vercel's functions that run this console" : "The Node.js of this machine"}, against the security releases on nodejs.org and the end-of-life dates on endoflife.date, every 12 h. {read}
+            </span>
+          </div>
+          <span>
+            {runtime.state === "unknown" || runtime.state === "off" ? <span className="text-ink-faint">{runtime.text}</span> : <Status state={runtime.state}>{runtime.text}</Status>}
+            {runtime.note && <span className="block text-[12px] text-ink-faint">{runtime.note}</span>}
+          </span>
         </div>
       </Card>
       <Card title="Last 20 runs" flush meta={`Times in ${zoneName()}`}>

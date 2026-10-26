@@ -53,6 +53,16 @@ Once a provider is connected:
 - **Playground**: try a model with your owner session. "Plain" sends only your messages; "Ask the console" adds a
   scrubbed snapshot of your apps. Nothing is stored.
 
+If the provider a call goes to can't be reached (its endpoint or tunnel is down: a timeout, a network error, or a
+502, 503, 504, 52x or 530), is rate limited (429), fails with another server error (such as 500) or sends an answer
+Watchbell can't read, Watchbell tries the next enabled provider once. A refused key (401 or 403) or a request the
+provider rejects is never retried, a provider you switched off is never used, and a model you picked by name
+(Playground, or a model chosen in Ask) stays on its own provider. A call with a time limit stays inside it: while
+another provider is enabled, the first one gets two thirds of the time (for limits of 9 seconds or more), so one that
+hangs still leaves time for the second. When nothing answers, the message names the provider, for example
+`AI provider "my-router" is unreachable (its endpoint or tunnel is down).`, and says whether another provider was tried
+or that there is none to try (add one on **Bring your own key**).
+
 ## Models, quota and logs
 
 - **Models** lists the models each connected provider offers (its `/models`). Turn a model off and requests for it are

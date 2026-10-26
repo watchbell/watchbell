@@ -3,11 +3,12 @@ import { areaForAlert, type ActionArea, proposedBy } from "./areas";
 import { ACTIONS_COPY } from "@/lib/copy/edition";
 import { cleanLine } from "@/private/console/clean-text";
 import { ACTIONS, type AutoRun, type DecideBody, type Proposal, type ProposalAction, PROPOSAL_TTL_MS, type ProposalStatus } from "./proposals-types";
+import { notTiedNote, type PreviousNext, UNKNOWN_NOTE, vulnerableNote } from "./rollback-guard";
 
 // Stage 9 slice 1 (owner 15 Oct): which existing console action an officer proposes for a firing alert, and how a
 // proposal reads in the office. Pure. Which alert gets what:
 //   DeploymentFailed (an app)        → vercel_redeploy of the live production deployment, plus vercel_rollback when a
-//                                      previous ready production deployment exists
+//                                      previous ready production deployment exists (and its Next.js isn't vulnerable)
 //   DatabasePaused (Supabase)        → supabase_restore
 //   AutoPauseRisk (Supabase)         → supabase_keepalive
 //   VulnerableDependency (an app)    → github_bump_pr (Stage 9 slice 5), when a direct package of the app's linked
@@ -19,7 +20,15 @@ import { ACTIONS, type AutoRun, type DecideBody, type Proposal, type ProposalAct
 //   MonitorDown / HighLatency (HTTP) → recheck (a heartbeat can't be checked from here); and neon_wake when the app's
 //                                      linked database (uses_db) is a Neon compute that is suspended and can be woken;
 //                                      never vercel_redeploy / vercel_rollback for a monitor on a host the app no longer
-//                                      has (monitorMoves, Watchbell 1.2.1: a moved domain isn't a broken deploy)
+//                                      has (monitorMoves, Watchbell 1.2.1: a moved domain isn't a broken deploy).
+//                                      Watchbell 1.2.2 (D17): vercel_rollback only when the problem started after the
+//                                      live deployment went live (problemSince, the alert's earlier episodes included)
+//                                      and inside the auto-rollback window; vercel_redeploy only for a down HTTP check
+//                                      that didn't start before the live deployment; neither for HighLatency outside
+//                                      that. Never a rollback to a deployment whose Next.js has known advisories
+//                                      (previousNext); an unknown one is proposed with that said first in its reason.
+//                                      Otherwise the recheck's reason says what it likely is ("Slow since …, not tied to
+//                                      a deploy …: check the app.").
 //   MonitorDomainMoved (HTTP)        → monitor_update_url (Watchbell 1.2.1): the monitor on the app's new domain, same path
 //   anything else, or a silenced alert → nothing
 // Text: display names / aliases as the office alarms show them (apps app-a, databases db-a), scrubbed, never an email,
@@ -39,6 +48,7 @@ export type ProposalAlert = {
   silencedUntil: Date | null; silencedUntilResolved: boolean;
   // An account alert's account (CredentialExpiring), so a paused section's credential gets no proposal (Watchbell 1.2).
   accountId?: string | null;
+  startedAt?: Date | null; // Watchbell 1.2.2: when the alert opened (a rollback needs it to have started after the deploy)
 };
 
 export type SuspendedNeon = { resourceId: string; resourceKind: "neon_project" | "neon_branch"; endpointId: string };
@@ -56,6 +66,13 @@ export type ProposalFacts = {
   // Watchbell 1.2.1: monitor id → its host and the app's primary domain, for an HTTP monitor whose host no watched project
   // lists any more (lib/domain-move.ts, from the monitor's URL host and the apps' stored domains).
   monitorMoves?: ReadonlyMap<string, { from: string; to: string }>;
+  // Watchbell 1.2.2 (D17, rollback-guard.ts): alert id → when its problem started (earlier episodes of the same rule on
+  // the same check included), and app id → its previous production deployment's Next.js status (missing: unknown).
+  problemSince?: ReadonlyMap<string, Date>;
+  previousNext?: ReadonlyMap<string, PreviousNext>;
+  // Watchbell 1.2.2 (D15): app id → what merging its update PR would do to production (deployed from the CLI, built from
+  // another branch than the PR's base, or not confirmed lately; lib/data/deps-pr.ts productionMismatches). Leads the reason.
+  productionMismatch?: ReadonlyMap<string, string>;
 };
 
 export type ProposalDraft = {
@@ -108,7 +125,9 @@ export function proposalReason(a: ProposalAlert, book: AliasBook): string {
 
 const silenced = (a: ProposalAlert, now: Date) => a.silencedUntilResolved || (a.silencedUntil !== null && a.silencedUntil.getTime() > now.getTime());
 
-type Pick1 = { action: ProposalAction; room?: ActionArea; resourceKind: string | null; resourceId: string | null; targetRef: string };
+// note: said before the alert's own reason (D17: why there is no rollback, or that the previous Next.js is unknown).
+type Pick1 = { action: ProposalAction; room?: ActionArea; resourceKind: string | null; resourceId: string | null; targetRef: string; note?: string };
+const UNKNOWN_NEXT: PreviousNext = { status: "unknown", version: null };
 
 // A new production deploy younger than the window, with a previous ready deployment to go back to (auto-rollback rule).
 export function freshDeploy(d: { currentId: string | null; previousId: string | null; liveAt?: Date | null } | undefined, windowMs: number, now: Date): boolean {
@@ -124,7 +143,11 @@ function picks(a: ProposalAlert, f: ProposalFacts, now: Date): Pick1[] {
       const d = app ? f.deploys.get(app) : undefined;
       if (!app || !d?.currentId || !DPL.test(d.currentId)) return [];
       const out: Pick1[] = [{ action: "vercel_redeploy", resourceKind: "app", resourceId: app, targetRef: d.currentId }];
-      if (d.previousId && DPL.test(d.previousId) && d.previousId !== d.currentId) out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d.previousId });
+      const prev = f.previousNext?.get(app) ?? UNKNOWN_NEXT;
+      if (d.previousId && DPL.test(d.previousId) && d.previousId !== d.currentId) {
+        if (prev.status === "vulnerable") out[0].note = vulnerableNote(prev.version);
+        else out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d.previousId, ...(prev.status === "unknown" ? { note: UNKNOWN_NOTE } : {}) });
+      }
       return out;
     }
     case "DatabasePaused": case "AutoPauseRisk": {
@@ -158,14 +181,30 @@ function picks(a: ProposalAlert, f: ProposalFacts, now: Date): Pick1[] {
       // Watchbell 1.2.1: a monitor on a host the app no longer has says nothing about the deploy: no redeploy, no rollback.
       if (f.monitorMoves?.has(a.subject)) return out;
       const d = app ? f.deploys.get(app) : undefined;
-      if (app && freshDeploy(d, f.rollbackWindowMs ?? ROLLBACK_WINDOW_MS_DEFAULT, now)) {
-        out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d!.previousId! });
-      } else if (a.ruleKey === "MonitorDown" && app && d?.currentId && DPL.test(d.currentId) && f.monitorKinds.get(a.subject) === "http") {
-        // Owner 17 Oct: a site that stays down outside that window gets the risky fixes too, waiting for the owner's
-        // approval (Telegram buttons). The auto-rollback rule refuses them outside its window, so neither runs alone.
-        out.push({ action: "vercel_redeploy", resourceKind: "app", resourceId: app, targetRef: d.currentId });
-        if (d.previousId && DPL.test(d.previousId) && d.previousId !== d.currentId) out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d.previousId });
+      // D17: did the problem start after the live deployment went live? null: can't tell (no start or no deploy time).
+      const since = f.problemSince?.get(a.id) ?? a.startedAt ?? null;
+      const liveAt = d?.liveAt ?? null;
+      const afterDeploy = since && liveAt ? since.getTime() >= liveAt.getTime() : null;
+      const prev = (app && f.previousNext?.get(app)) || UNKNOWN_NEXT;
+      const windowMs = f.rollbackWindowMs ?? ROLLBACK_WINDOW_MS_DEFAULT;
+      const caused = !!app && afterDeploy === true && freshDeploy(d, windowMs, now);
+      if (caused && prev.status !== "vulnerable") {
+        out.push({ action: "vercel_rollback", resourceKind: "app", resourceId: app, targetRef: d!.previousId!, ...(prev.status === "unknown" ? { note: UNKNOWN_NOTE } : {}) });
+        return out;
       }
+      const blocked = caused ? vulnerableNote(prev.version) : undefined;
+      if (a.ruleKey === "MonitorDown" && app && d?.currentId && DPL.test(d.currentId) && f.monitorKinds.get(a.subject) === "http" && afterDeploy !== false) {
+        // Owner 17 Oct: a site that stays down outside that window gets a redeploy, waiting for the owner's approval
+        // (Telegram buttons). D17: only when it didn't start before the live deployment (a redeploy can't fix that), and
+        // no rollback outside the window any more.
+        out.push({ action: "vercel_redeploy", resourceKind: "app", resourceId: app, targetRef: d.currentId, ...(blocked ? { note: blocked } : {}) });
+        return out;
+      }
+      // No deploy action fits: the recheck says what it likely is.
+      const pastWindow = !!liveAt && now.getTime() - liveAt.getTime() > windowMs;
+      const note = blocked ?? (since && liveAt && d?.currentId ? notTiedNote(a.ruleKey, since, liveAt, pastWindow) : undefined);
+      const recheck = out.find((p) => p.action === "recheck");
+      if (recheck && note) recheck.note = note;
       return out;
     }
     // Owner 17 Oct: a certificate close to expiry is usually renewed already (Vercel, Caddy) and the console's copy is
@@ -208,10 +247,13 @@ export function proposalsFor(a: ProposalAlert, f: ProposalFacts, book: AliasBook
     const name = p.action === "neon_wake" ? shownName(p.resourceKind, p.resourceId, null, book) : shownName(a.resourceKind, a.resourceId, a.resourceName, book);
     const fw = a.ruleKey === "FrameworkVulnerable" && p.action === "github_bump_pr";
     const move = p.action === "monitor_update_url" ? f.monitorMoves?.get(p.targetRef) : undefined;
+    const reason = fw ? frameworkReason(p.resourceId ? f.frameworkFixes?.get(p.resourceId) : undefined, name) : p.action === "github_bump_pr" ? bumpReason(a, name, book)
+      : p.note ? clip(`${p.note} ${alertReason}`) : alertReason;
+    const mismatch = p.action === "github_bump_pr" && p.resourceId ? f.productionMismatch?.get(p.resourceId) : undefined;
     return {
       alertId: a.id, ruleKey: a.ruleKey, room, action: p.action, risk: ACTIONS[p.action].risk,
       title: fw ? frameworkTitle(name) : move ? clip(`Point the ${name ?? "app's"} monitor at ${move.to}`) : proposalTitle(p.action, name),
-      reason: fw ? frameworkReason(p.resourceId ? f.frameworkFixes?.get(p.resourceId) : undefined, name) : p.action === "github_bump_pr" ? bumpReason(a, name, book) : alertReason,
+      reason: mismatch ? clip(`${cleanLine(mismatch, book, TEXT_MAX)} ${reason}`) : reason,
       resourceKind: p.resourceKind, resourceId: p.resourceId, resourceName: name, targetRef: p.targetRef, proposedBy: proposedBy(room),
       expiresAt: new Date(now.getTime() + PROPOSAL_TTL_MS),
     };

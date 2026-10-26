@@ -28,6 +28,7 @@ import { pausedSections } from "@/lib/data/sections-db";
 import { type AppRepoView, appRepoView } from "@/lib/data/github-db";
 import { readEol } from "@/lib/data/network-db";
 import { suggestRepo } from "@/lib/github/links";
+import { productionSourceLine } from "@/lib/deps/branch";
 import { actionsStatus, linkSourceText, suggestionWhy } from "@/lib/view/github";
 import { isUuid } from "@/lib/ids";
 import { suggestDatabase } from "@/lib/links";
@@ -121,6 +122,7 @@ export default async function AppPage({ params, searchParams }: { params: Promis
     return d ? { id: d.externalId, sha: shortSha(d.commitSha).replace("—", "") } : null;
   };
   const staged = refOf(targets.stagedId);
+  const builtFrom = productionSourceLine(app.productionSource, app.productionBranch, now);
   const askedTab = TAB_IDS.find((t) => t === sp.tab) ?? "details";
   const startTab = askedTab === "logs" && member.role === "viewer" ? "details" : askedTab;
   const zoneDomain = domains.find((d) => d.appId === app.id && d.zoneName);
@@ -161,6 +163,14 @@ export default async function AppPage({ params, searchParams }: { params: Promis
                 <dt>Framework</dt><dd>{app.framework ?? "—"}</dd>
                 <dt>Function region</dt><dd className={cn(mono, !app.functionRegions.length && "text-ink-faint")}>{app.functionRegions.join(", ") || "—"}</dd>
                 <dt>Production branch</dt><dd className={mono}>{app.productionBranch ?? "—"}</dd>
+                {/* Watchbell 1.2.2 (D15): what the live production deployment was really built from */}
+                {builtFrom && <>
+                  <dt>Production built from</dt>
+                  <dd>
+                    <span className={mono}>{builtFrom.text}</span>
+                    {builtFrom.warning && <span className="ml-2 rounded border border-warn-icon/40 bg-warn-soft px-1.5 py-px text-[11.5px] text-warn" title={builtFrom.warning}>Update PRs need your approval</span>}
+                  </dd>
+                </>}
                 <dt>Repository</dt><dd className={cn(mono, !app.repo && "text-ink-faint")}>{app.repo ? <Masked kind="repo" real={app.repo} /> : "—"}</dd>
                 <dt>Created</dt><dd>{app.createdAt ? longDate(app.createdAt) : "—"}</dd>
               </dl>

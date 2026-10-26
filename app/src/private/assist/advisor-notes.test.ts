@@ -9,7 +9,7 @@ const MAIN = "main-site";
 
 const h = vi.hoisted(() => ({
   settingsValue: undefined as unknown, claimed: true, executes: [] as string[], inserts: [] as unknown[],
-  openConnections: vi.fn(), consoleSnapshot: vi.fn(), insertNote: vi.fn(), appRefs: vi.fn(), recordCall: vi.fn(),
+  openConnections: vi.fn(), resolveModel: vi.fn(), consoleSnapshot: vi.fn(), insertNote: vi.fn(), appRefs: vi.fn(), recordCall: vi.fn(),
 }));
 vi.mock("next/server", () => ({ after: (fn: () => Promise<unknown>) => { void fn(); } }));
 vi.mock("@/db/client", () => ({
@@ -19,7 +19,7 @@ vi.mock("@/db/client", () => ({
     execute: async (q: { queryChunks?: unknown[] }) => { h.executes.push(JSON.stringify(q.queryChunks ?? "")); return h.claimed ? [{ claimed: 1 }] : []; },
   }),
 }));
-vi.mock("@/private/ai/providers/providers-db", () => ({ openConnections: h.openConnections, consoleDefaultModel: async () => null, resolveModel: vi.fn() }));
+vi.mock("@/private/ai/providers/providers-db", () => ({ openConnections: h.openConnections, consoleDefaultModel: async () => null, resolveModel: h.resolveModel }));
 vi.mock("@/private/ai/extras", async (orig) => ({ ...(await orig<typeof import("@/private/ai/extras")>()), readAgSettings: vi.fn() }));
 vi.mock("@/private/ai/usage", async (orig) => ({ ...(await orig<typeof import("@/private/ai/usage")>()), recordCall: h.recordCall }));
 vi.mock("@/private/console/snapshot", () => ({ consoleSnapshot: h.consoleSnapshot }));
@@ -61,6 +61,7 @@ beforeEach(() => {
   h.executes.length = 0;
   h.inserts.length = 0;
   h.openConnections.mockReset().mockResolvedValue([conn]);
+  h.resolveModel.mockReset();
   h.consoleSnapshot.mockReset().mockResolvedValue(snap);
   h.insertNote.mockReset().mockResolvedValue({ ok: true, id: "n1" });
   h.appRefs.mockReset().mockResolvedValue([{ id: "uuid-portfolio", name: MAIN }, { id: "uuid-a", name: "web-a" }]);
@@ -68,6 +69,18 @@ beforeEach(() => {
 });
 
 describe("runAdvisorNotes", () => {
+  it("with its own model set, a down provider still falls back to another enabled one (owner item #19)", async () => {
+    const backup = { ...conn, id: "p2", slug: "backup", name: "Backup", isDefault: false, baseUrl: "https://backup.example.test/v1", models: [{ id: "b-1", upstream: "b-1", enabled: true }] } as OpenConnection;
+    h.openConnections.mockResolvedValue([conn, backup]);
+    h.resolveModel.mockResolvedValue({ conn, upstream: "prrojects", publicId: "test/prrojects" });
+    h.settingsValue = { enabled: true, model: "test/prrojects" };
+    server.use(
+      http.post(`${BASE}/chat/completions`, () => new HttpResponse(null, { status: 530 })),
+      http.post("https://backup.example.test/v1/chat/completions", () => HttpResponse.json({ choices: [{ message: { content: JSON.stringify(notes) } }] })),
+    );
+    expect(await runAdvisorNotes(IN)).toEqual({ status: "written", count: 2, model: "backup/b-1" });
+  });
+
   it("in the window: claims the marker, one provider call, writes the valid notes as watchpost with the provider model", async () => {
     provider(JSON.stringify(notes));
     expect(await runAdvisorNotes(IN)).toEqual({ status: "written", count: 2, model: "test/prrojects" });

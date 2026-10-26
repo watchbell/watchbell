@@ -109,7 +109,8 @@ export function recordRun(s: AfterDeploy, r: RunOutcome): AfterDeploy {
 // The Vercel task: the deployment to mark for an app, or null. A deployment that just became current (the flag update
 // changed its row: a deploy, a promote or a rollback), or (fix round 1, review minor 2) a current one created within the
 // TTL that is neither waiting nor checked, so a mark whose write failed is made again on the next run. Never one that is
-// already waiting or checked.
+// already waiting or checked. Known gap (1.2.2 review M2): a promote or roll back to a deployment created before the TTL
+// whose mark write fails is not marked again (its row no longer changes); the 6-hourly check covers that app.
 export function deployToMark(o: { appId: string; currentId: string | null; changedIds: readonly string[]; createdAt: Date | null; state: AfterDeploy; now: Date }): string | null {
   const id = o.currentId;
   if (!id || o.state.checked[o.appId] === id || o.state.pending[o.appId]?.id === id) return null;

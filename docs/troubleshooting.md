@@ -9,6 +9,7 @@ Start with the server log; most problems print a clear line there.
 | Linux service | `journalctl --user -u watchbell -f` |
 | Windows Scheduled Task | `app\data\watchbell.log` |
 | Started by hand | The terminal where you ran `npm run start:selfhost` |
+| npm package, `watchbell` in a terminal | `~/.watchbell/logs/watchbell.log` (**Show live log** in the start menu follows it); `watchbell start --verbose` prints it in the terminal |
 
 - [Installing](#installing)
   - [Port already in use](#port-already-in-use)

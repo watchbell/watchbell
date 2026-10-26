@@ -194,6 +194,132 @@ describe("complete (console)", () => {
   });
 });
 
+describe("complete: fallback and plain errors (owner item #19)", () => {
+  // The office's call: a preferred model on the default connection (officeModel) with fallback allowed.
+  const router: OpenConnection = {
+    ...conn, id: "r1", slug: "my-router", kind: "custom", name: "my-router", isDefault: true, baseUrl: "https://my-router.example/v1",
+    secret: { apiKey: "sk-router-000000", baseUrl: "https://my-router.example/v1" }, models: [{ id: "llama-3.3", upstream: "llama-3.3", enabled: true }],
+  };
+  const backup: OpenConnection = { ...router, id: "b1", slug: "backup", name: "Backup", isDefault: false, baseUrl: "https://backup.example/v1", models: [{ id: "b-1", upstream: "b-1", enabled: true }] };
+  const off: OpenConnection = { ...backup, id: "o1", slug: "switched-off", name: "Switched off", enabled: false, baseUrl: "https://off.example/v1" };
+  const office = { model: "my-router/llama-3.3", fallback: true, purpose: "office-dev" as const, timeoutMs: 40_000 };
+  const msgs = [{ role: "user" as const, content: "x" }];
+  const hits = { router: 0, backup: 0, off: 0 };
+  const routerAnswers = (status: number) => http.post("https://my-router.example/v1/chat/completions", () => { hits.router++; return HttpResponse.text("<html>origin down</html>", { status }); });
+  const backupAnswers = (r: () => Response) => http.post("https://backup.example/v1/chat/completions", () => { hits.backup++; return r(); });
+  const offAnswers = http.post("https://off.example/v1/chat/completions", () => { hits.off++; return HttpResponse.json({ choices: [{ message: { content: "never" } }] }); });
+  const failure = async (p: Promise<unknown>) => { try { await p; } catch (e) { return e as GatewayError; } throw new Error("expected a GatewayError"); };
+
+  beforeEach(() => {
+    hits.router = 0; hits.backup = 0; hits.off = 0;
+    h.openConnections.mockResolvedValue([router, off, backup]);
+    h.resolveModel.mockResolvedValue({ conn: router, upstream: "llama-3.3", publicId: "my-router/llama-3.3" });
+  });
+
+  it("530 → the next enabled provider answers (never the switched-off one) and is recorded as the one that answered", async () => {
+    server.use(routerAnswers(530), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "from backup" } }], usage: { prompt_tokens: 3, completion_tokens: 2 } })), offAnswers);
+    const r = await complete(msgs, office);
+    expect(r).toMatchObject({ text: "from backup", model: "backup/b-1" });
+    expect(hits).toEqual({ router: 1, backup: 1, off: 0 });
+    await settle();
+    expect(h.recordCall.mock.calls.map((c) => [c[0].providerId, c[0].status, c[0].errorClass])).toEqual([["r1", 502, "upstream_error · server_error"], ["b1", 200, null]]);
+  });
+  it("530 with no other enabled provider → the plain message naming the provider and the page", async () => {
+    h.openConnections.mockResolvedValue([router, off]);
+    server.use(routerAnswers(530), offAnswers);
+    const e = await failure(complete(msgs, office));
+    expect(e).toBeInstanceOf(GatewayError);
+    expect(e.message).toBe('AI provider "my-router" is unreachable (its endpoint or tunnel is down). No other provider is enabled: add one on Bring your own key (/ai/providers), or check the endpoint.');
+    expect(e.status).toBe(502);
+    expect(e.failure).toEqual({ first: expect.objectContaining({ provider: "my-router", status: 530, errorClass: "server_error" }), next: { kind: "none" } });
+    expect(hits.off).toBe(0);
+  });
+  it("a network failure (tunnel gone, DNS, refused) is unreachable too and falls back", async () => {
+    server.use(http.post("https://my-router.example/v1/chat/completions", () => { hits.router++; return HttpResponse.error(); }), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "ok" } }] })));
+    await expect(complete(msgs, office)).resolves.toMatchObject({ text: "ok", model: "backup/b-1" });
+    expect(hits).toMatchObject({ router: 1, backup: 1 });
+  });
+  it("401 → no fallback; the message says the key was refused", async () => {
+    server.use(routerAnswers(401), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "never" } }] })));
+    const e = await failure(complete(msgs, office));
+    expect(e.message).toBe('AI provider "my-router" refused the key (401). Replace it on Bring your own key (/ai/providers).');
+    expect(hits).toMatchObject({ router: 1, backup: 0 });
+    server.use(routerAnswers(400));
+    await failure(complete(msgs, office));
+    expect(hits.backup).toBe(0);
+  });
+  it("the fallback fails too → the message names both providers", async () => {
+    server.use(routerAnswers(530), backupAnswers(() => HttpResponse.json({ error: { message: "sk-leak" } }, { status: 503 })));
+    const e = await failure(complete(msgs, office));
+    expect(e.message).toBe('AI provider "my-router" is unreachable (its endpoint or tunnel is down). Tried "Backup" instead, and that failed too (unreachable).');
+    expect(e.failure?.next).toEqual({ kind: "tried", fallback: expect.objectContaining({ provider: "Backup", status: 503 }) });
+    expect(JSON.stringify(e.failure)).not.toContain("sk-leak");
+    expect(e.message).not.toContain("example");
+  });
+  it("a pinned model (no fallback flag) is never moved; the message says why", async () => {
+    server.use(routerAnswers(530), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "never" } }] })));
+    const e = await failure(complete(msgs, { model: "my-router/llama-3.3", purpose: "playground" }));
+    expect(e.message).toContain("This model was picked by name, so no other provider was tried");
+    expect(hits.backup).toBe(0);
+  });
+  it("no fallback once the caller's time limit is nearly spent", async () => {
+    server.use(http.post("https://my-router.example/v1/chat/completions", async () => { hits.router++; await new Promise((r) => setTimeout(r, 60)); return new HttpResponse(null, { status: 530 }); }), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "never" } }] })));
+    const e = await failure(complete(msgs, { ...office, timeoutMs: 3_050 }));
+    expect(e.message).toMatch(/There was no time left to try another provider\.$/);
+    expect(hits.backup).toBe(0);
+  });
+  it("a provider that hangs: the first try gets 2/3 of the time limit, so the fallback still fits in the same limit", async () => {
+    // the first try's own timeout fires (an already-timed-out signal stands in for the hang)
+    server.use(routerAnswers(200), backupAnswers(() => HttpResponse.json({ choices: [{ message: { content: "from backup" } }] })), offAnswers);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementationOnce(() => AbortSignal.abort(new DOMException("The operation timed out.", "TimeoutError")));
+    try {
+      const r = await complete(msgs, { ...office, timeoutMs: 30_000 });
+      expect(r).toMatchObject({ text: "from backup", model: "backup/b-1" });
+      const [firstMs, secondMs] = spy.mock.calls.map((c) => c[0]);
+      expect(firstMs).toBe(20_000);
+      expect(secondMs).toBeGreaterThan(20_000);
+      expect(secondMs).toBeLessThanOrEqual(30_000); // never beyond the caller's own limit
+    } finally {
+      spy.mockRestore();
+    }
+    await settle();
+    expect(h.recordCall.mock.calls[0][0]).toMatchObject({ providerId: "r1", errorClass: "upstream_error · timeout" });
+  });
+  it("the time limit is not shared when nothing else could answer: a pinned model, or no other enabled provider", async () => {
+    server.use(http.post("https://my-router.example/v1/chat/completions", () => HttpResponse.json({ choices: [{ message: { content: "ok" } }] })));
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await complete(msgs, { model: "my-router/llama-3.3", purpose: "playground", timeoutMs: 30_000 });
+      expect(spy).toHaveBeenLastCalledWith(30_000);
+      h.openConnections.mockResolvedValue([router, off]);
+      await complete(msgs, { ...office, timeoutMs: 30_000 });
+      expect(spy).toHaveBeenLastCalledWith(30_000);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("the share starts at a 9 s limit: below it the first try keeps the whole limit; without a limit, the adapter's 60 s", async () => {
+    server.use(http.post("https://my-router.example/v1/chat/completions", () => HttpResponse.json({ choices: [{ message: { content: "ok" } }] })));
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await complete(msgs, { ...office, timeoutMs: 8_000 }); // backup enabled, but a third (2 666 ms) is under 3 s
+      expect(spy).toHaveBeenLastCalledWith(8_000);
+      await complete(msgs, { ...office, timeoutMs: 9_000 }); // the boundary: 6 s first, 3 s kept for the fallback
+      expect(spy).toHaveBeenLastCalledWith(6_000);
+      await complete(msgs, { model: office.model, fallback: true, purpose: office.purpose });
+      expect(spy).toHaveBeenLastCalledWith(60_000);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it("the default model (no model given) falls back as before, with the plain message when there is none", async () => {
+    h.openConnections.mockResolvedValue([router]);
+    server.use(routerAnswers(522));
+    const e = await failure(complete(msgs, { purpose: "summary" }));
+    expect(e.message).toMatch(/^AI provider "my-router" is unreachable/);
+  });
+});
+
 describe("consoleTarget (owner's ai.defaultModel)", () => {
   const two: OpenConnection = { ...conn, models: [{ id: "gemini-3.8-flash", upstream: "gemini-3.8-flash", enabled: true }, { id: "gemini-2.5-pro", upstream: "gemini-2.5-pro", enabled: true }, { id: "gemini-3.1-pro-preview", upstream: "gemini-3.1-pro-preview", enabled: false }] };
   const cf: OpenConnection = {

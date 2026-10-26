@@ -31,6 +31,14 @@ yang ditemukan collector, create request yang menunggu approval, dan setiap apli
 deployment terakhir, dan database yang terhubung. Operator dan owner mendapat tombol Refresh yang langsung menjalankan
 collector.
 
+Kartu Health merangkum 24 jam terakhir dengan bahasa sehari-hari: **Sites reachable** (berapa persen pengecekan yang
+dijawab, yaitu uptime), **Response time** (kebanyakan pengecekan, 95 dari 100, dijawab lebih cepat dari angka ini:
+p95), **Server errors** (halaman yang rusak di sisi server: respons HTTP 5xx), dan **New versions** (deploy yang naik
+ke production). Hitungannya ditulis "in 24 h" karena jendelanya 24 jam terakhir, bukan hari kalender. Arahkan kursor ke
+barisnya untuk melihat nama teknisnya. Saat tag sumber data dinyalakan, badge-nya berbunyi **Checked by Watchbell**
+atau **From Vercel**. Sel Neon di atasnya menulis "is asleep" untuk compute yang idle dan menghitung "compute hours used
+this month".
+
 **Topology.** Peta yang menunjukkan bagaimana setiap domain sampai ke sebuah aplikasi dan database mana yang dipakai
 tiap aplikasi. Domain diambil dari Vercel; hubungan ke database diambil dari link Edit di tiap aplikasi. Pilih sebuah
 node untuk melihat detailnya.
@@ -51,9 +59,10 @@ satunya untuk melihat:
 
 - Detail: status, response time, page view, response 5xx, uptime, security advisory untuk dependency-nya, serta
   repository GitHub dan status Actions-nya kalau GitHub sudah terhubung. Kartu Security menampilkan versi Next.js yang
-  dijalankan situs live beserta advisory yang diketahui, dicek setiap 6 jam dan tepat setelah setiap deployment
-  production baru; versi yang rentan memunculkan alert FrameworkVulnerable dan, dengan repository yang ditautkan, usulan
-  pull request update (lihat [Auto-actions](auto-actions.md#alert-mana-mengusulkan-apa)). Di monorepo, kartu
+  dijalankan situs live beserta advisory yang diketahui, dicek setiap 6 jam dan tepat setelah production mulai
+  melayani deployment lain (deploy baru, promote, atau roll back); versi yang rentan memunculkan alert FrameworkVulnerable dan, dengan repository yang ditautkan, usulan
+  pull request update (lihat [Auto-actions](auto-actions.md#alert-mana-mengusulkan-apa)). Node.js tempat Watchbell
+  sendiri berjalan dicek di Settings › Collector (Watchbell runtime). Di monorepo, kartu
   Dependencies men-scan Root Directory project Vercel (misalnya `apps/web/package-lock.json`), dan Scan now men-scan
   folder aplikasi itu. "None known" hanya muncul setelah scan berhasil; kalau tidak, kartunya menulis **Not scanned**
   beserta alasannya (belum ada repository yang ditautkan, DevOps mati, tidak ada lockfile atau package.json, atau scan
@@ -63,7 +72,10 @@ satunya untuk melihat:
   (dengan konfirmasi yang sama) dan View logs (tab Logs aplikasi itu).
 
 **Deployments.** Deployment terbaru dari aplikasi yang dipantau, dibaca dari Vercel API. Paket gratis Hobby di Vercel
-hanya bisa roll back ke deployment production sebelumnya. **View build logs** (operator dan owner: tombol pada deployment
+hanya bisa roll back ke deployment production sebelumnya. **Current** menandai deployment yang dilayani production,
+dan Last deploy (Overview, Applications, halaman aplikasi) menampilkan deployment itu, juga setelah promote atau roll
+back ke deployment yang lebih lama; build production yang lebih baru dan masih building atau gagal ditampilkan di sana
+sebagai gantinya. Waktunya adalah saat build itu dibuat, bukan saat di-promote. **View build logs** (operator dan owner: tombol pada deployment
 yang sedang building atau gagal, di menu baris untuk deployment yang ready) membuka log build terbaru di drawer samping,
 dibaca dari Vercel saat Anda membukanya (2.000 baris terakhir, tidak disimpan), dengan baris error disorot dan link
 "Jump to first error".
@@ -172,7 +184,18 @@ Supabase yang dijaga tidak pernah di-pause gara-gara sakelar ini.
 
 **Settings** (khusus owner). Tab-tabnya:
 
-- Collector: seberapa sering tiap task collector berjalan, dan catatan keep-alive database.
+- Collector: seberapa sering tiap task collector berjalan, catatan keep-alive database, dan **Watchbell runtime**:
+  Node.js tempat Watchbell ini berjalan (runtime function Vercel di edisi cloud, Node.js mesin itu kalau self-host).
+  Setiap 12 jam Watchbell membaca daftar rilis di nodejs.org dan tanggal end-of-life Node.js di endoflife.date. Versi
+  yang di line-nya sudah ada rilis security yang lebih baru tertulis, misalnya, "Node 24.12.0: security fix available
+  (24.22.1)" dengan tanda peringatan; line yang sudah lewat end-of-life tertulis "end of life"; selain itu "ok".
+  - Statusnya unknown, tidak pernah ok, kalau nodejs.org belum berhasil dibaca dalam 36 jam terakhir, atau
+    endoflife.date belum pernah terbaca. Perbaikan atau end-of-life yang sudah diketahui tetap tampil.
+  - Kalau `WATCHBELL_NO_UPDATE_CHECK=1` diset untuk server, tidak ada yang dibaca dan tertulis "check turned off".
+  - Di self-host dengan paket npm, `watchbell start` dan `watchbell status` juga mencetak peringatan satu baris kalau
+    Node.js-nya rentan atau sudah lewat end-of-life. `watchbell status` juga memeriksa Node.js yang dijalankan service
+    yang terpasang. Peringatan itu tidak dicetak kalau ada `WATCHBELL_NO_UPDATE_CHECK`, `NO_UPDATE_NOTIFIER`, atau
+    `CI`, dan service (`watchbell run`) tidak pernah mencetaknya.
 - Free tier budget: batas paket gratis yang dipakai sebagai pembanding oleh meter. Koreksi di sini kalau sebuah
   provider mengubah paket gratisnya. Slot Supabase, CU-hour Neon, QStash, dan cron-job.org menampilkan apa yang dibaca
   Watchbell; pemakaian bulanan Vercel dan jumlah event Web Analytics tidak dibaca, jadi baris itu menulis "not read"

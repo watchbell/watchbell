@@ -9,7 +9,7 @@ const values = (x: Health) => healthRows(x).map((r) => [r.label, r.value, r.unit
 describe("healthRows", () => {
   it("shows the figures with their units", () => {
     expect(values(h({}))).toEqual([
-      ["Avg uptime", "99.50%", ""], ["p95 response", "412", "ms"], ["5xx responses", "3", "/24h"], ["Deployments", "2", "/24h"],
+      ["Sites reachable", "99.50%", ""], ["Response time", "412", "ms"], ["Server errors", "3", "in 24 h"], ["New versions", "2", "in 24 h"],
     ]);
   });
 
@@ -19,11 +19,24 @@ describe("healthRows", () => {
 
   it("shows — for uptime, p95 and 5xx before any check exists, without units (task 12 M3)", () => {
     expect(values(h({ uptime: null, p95: null, s5xx: 0, deploys: 0 }))).toEqual([
-      ["Avg uptime", "—", ""], ["p95 response", "—", ""], ["5xx responses", "—", ""], ["Deployments", "0", "/24h"],
+      ["Sites reachable", "—", ""], ["Response time", "—", ""], ["Server errors", "—", ""], ["New versions", "0", "in 24 h"],
     ]);
   });
 
   it("a real 0 5xx with checks is still 0", () => {
     expect(healthRows(h({ s5xx: 0 }))[2].value).toBe("0");
+  });
+
+  it("explains each figure in plain words and keeps the technical name for the tooltip (D22)", () => {
+    expect(healthRows(h({})).map((r) => [r.label, r.hint, r.term])).toEqual([
+      ["Sites reachable", "Share of checks that got an answer, last 24 h", "Uptime: average of every monitor's successful checks"],
+      ["Response time", "Most checks (95 of 100) answered faster than this", "p95 response time"],
+      ["Server errors", "Pages that broke on the server side", "HTTP 5xx responses"],
+      ["New versions", "Deploys put live in the last 24 h", "Production deployments"],
+    ]);
+  });
+
+  it("badges say who produced the figure, not 'Own check' / 'API' (D22)", () => {
+    expect(healthRows(h({})).map((r) => r.srcText)).toEqual(["Checked by Watchbell", "Checked by Watchbell", "Checked by Watchbell", "From Vercel"]);
   });
 });

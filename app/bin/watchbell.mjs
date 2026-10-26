@@ -9,8 +9,9 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import readlineCore from "node:readline";
 import readline from "node:readline/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 // The default import, not { parseEnv }: on an old Node.js a missing named export fails before any code runs, and the
 // "needs Node.js 24" message below would never print.
 import util from "node:util";
@@ -26,6 +27,18 @@ import {
   staleLockHint,
   superviseChild,
 } from "../scripts/selfhost-lib.mjs";
+import {
+  NODE_CHECK_EVERY_MS,
+  NODE_EOL_URL,
+  NODE_INDEX_URL,
+  nodeVerdict,
+  nodeWarningLine,
+  parseNodeEol,
+  parseNodeIndex,
+  storedNodeCycles,
+  storedNodeIndex,
+} from "../scripts/node-runtime.mjs";
+import { LOG_MAX_BYTES, rotateLog } from "../scripts/selfhost-log.mjs";
 
 const SERVICE = "watchbell.service";
 const TASK = "Watchbell";
@@ -37,15 +50,16 @@ const READY_TIMEOUT_MS = 120_000;
 
 // [usage, description]: --help prints them all (a test checks that every command is listed).
 export const COMMANDS = [
-  ["watchbell [start] [--no-open]", "Start Watchbell (the default). First run creates ~/.watchbell, prints the setup code and opens /setup."],
+  ["watchbell [start] [--no-open]", "Start Watchbell (the default). First run creates ~/.watchbell, shows the setup code and opens /setup. In a terminal it shows a short menu: open, keep running in the background, live log, stop."],
+  ["watchbell start --verbose", "Show the server's own messages here, as before 1.2.2 (otherwise they go to ~/.watchbell/logs/watchbell.log)."],
   ["watchbell start --new-key", "Start with a new OPS_ENCRYPTION_KEY when it was lost (tokens saved with the old key can't be read)."],
   ["watchbell start --host <addr> --port <n>", "Listen on this address and port for this run (also with run). 0.0.0.0 opens it to your network."],
   ["watchbell run", "Start in the foreground for a service manager (never opens a browser)."],
   ["watchbell stop [--timeout <seconds>]", "Ask the running Watchbell to stop cleanly (default wait 30 s)."],
-  ["watchbell status", "Show whether Watchbell runs, its address and folders (exit 0 running, 3 not running)."],
+  ["watchbell status", "Show whether Watchbell runs, the address it really listens on, and its folders (exit 0 running, 3 not running)."],
   ["watchbell service install [--yes]", "Start Watchbell when you log in: a systemd user service (Linux), a Scheduled Task (Windows) or a launchd agent (macOS)."],
   ["watchbell service uninstall [--yes]", "Remove that service or task. Your settings and data stay."],
-  ["watchbell update", "Update to the latest version with the npm next to this Node.js (an installed service is stopped and started again)."],
+  ["watchbell update", "Update to the latest version with the npm next to this Node.js, into the folder this copy runs from (an installed service is stopped and started again)."],
   ["watchbell reset-login <email>", "Give an account a new temporary password and remove its authenticator (Watchbell stopped)."],
   ["watchbell --version", "Print the version."],
   ["watchbell --help", "Print this help."],
@@ -65,15 +79,23 @@ export function helpText(version) {
     "environment override them. Other variables set in the environment win over the file, except DATABASE_URL, which",
     "is read from the file only.",
     "",
+    "watchbell start writes the server's messages to ~/.watchbell/logs/watchbell.log (two files of about 5 MB at most);",
+    "errors still show in the terminal as one line. watchbell run (for a service manager) prints them as before.",
+    "",
     "watchbell start and watchbell status ask registry.npmjs.org at most once a day whether a newer version exists (a",
-    "plain GET of the version number, nothing about you). WATCHBELL_NO_UPDATE_CHECK=1 turns that off.",
+    "plain GET of the version number, nothing about you), and nodejs.org and endoflife.date at most twice a day whether",
+    "this Node.js has a security fix waiting or is past end of life (plain GETs of their public lists; a warning is",
+    "printed only then). The running Watchbell reads those two lists every 12 h as well, for its Settings › Collector",
+    "page. WATCHBELL_NO_UPDATE_CHECK=1 turns all of it off; NO_UPDATE_NOTIFIER=1 or CI turn off the commands' part.",
   ].join("\n");
 }
 
 // ---------------------------------------------------------------------------------------------------- arguments
 
 const COMMAND_NAMES = ["start", "run", "stop", "status", "service", "reset-login", "update"];
-const OPTION_OWNER = { "--no-open": "start", "--new-key": "start", "--timeout": "stop", "--yes": "service", "--host": ["start", "run"], "--port": ["start", "run"] };
+const OPTION_OWNER = { "--no-open": "start", "--new-key": "start", "--verbose": "start", "--timeout": "stop", "--yes": "service", "--host": ["start", "run"], "--port": ["start", "run"] };
+/** What an option the CLI doesn't know prints (exit 2): a typo such as --no-openen is never ignored. */
+export const unknownOption = (a) => `Unknown option ${a} (see watchbell --help)`;
 // An IPv4 or IPv6 address (brackets allowed) or a host name; never something that looks like an option.
 const HOST_ARG = /^(?:\[[0-9A-Fa-f:.]+\]|[0-9A-Fa-f.]*:[0-9A-Fa-f:.]*|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)$/;
 // Brackets off, IPv6 in lower case, every spelling of the all-zero IPv6 address as "::" (the health check knows that one).
@@ -85,7 +107,7 @@ const normalizeHostArg = (v) => {
 const isPortArg = (v) => /^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535;
 
 export function parseArgs(argv) {
-  const opts = { command: null, args: [], open: true, newKey: false, yes: false, timeout: null, help: false, version: false, host: null, port: null };
+  const opts = { command: null, args: [], open: true, newKey: false, verbose: false, yes: false, timeout: null, help: false, version: false, host: null, port: null };
   const errors = [];
   const used = [];
   for (let i = 0; i < argv.length; i++) {
@@ -98,14 +120,19 @@ export function parseArgs(argv) {
     } else if (a === "--new-key") {
       opts.newKey = true;
       used.push("--new-key");
+    } else if (a === "--verbose") {
+      opts.verbose = true;
+      used.push("--verbose");
     } else if (a === "--yes" || a === "-y") {
       opts.yes = true;
       used.push("--yes");
-    } else if (a === "--timeout") {
-      const v = argv[i + 1];
+    } else if (/^--timeout(=|$)/.test(a)) {
+      // --timeout <seconds> or --timeout=<seconds>, like --host and --port.
+      const inline = a.length > 9 ? a.slice(10) : undefined;
+      const v = inline ?? argv[i + 1];
       if (v !== undefined && /^\d{1,4}$/.test(v) && Number(v) > 0) {
         opts.timeout = Number(v);
-        i++;
+        if (inline === undefined) i++;
       } else errors.push("--timeout needs a number of seconds (1-9999)");
       used.push("--timeout");
     } else if (/^--(host|port)(=|$)/.test(a)) {
@@ -120,7 +147,7 @@ export function parseArgs(argv) {
       } else if (v !== undefined && isPortArg(v)) opts.port = String(Number(v));
       else errors.push("--port needs a port number (1-65535)");
       used.push(`--${name}`);
-    } else if (a.startsWith("-")) errors.push(`unknown option ${a}`);
+    } else if (a.startsWith("-")) errors.push(unknownOption(a));
     else if (opts.command === null) opts.command = a;
     else opts.args.push(a);
   }
@@ -192,6 +219,10 @@ export function defaultDeps() {
     cliPath: fileURLToPath(import.meta.url),
     out: (m) => console.log(m),
     err: (m) => console.error(m),
+    // The menu (1.2.2): raw writes for the cursor codes, and the keyboard. Both ends must be a terminal for it.
+    write: (s) => process.stdout.write(s),
+    stdin: process.stdin,
+    stdoutTty: Boolean(process.stdout.isTTY),
     spawn,
     runSync: runSyncDefault,
     fetch: globalThis.fetch,
@@ -490,7 +521,7 @@ function noteIgnoredShellAddress(ctx, d) {
   }
 }
 
-async function cmdStart(first, d, { open, foreground, newKey, track }) {
+async function cmdStart(first, d, { open, foreground, newKey, track, verbose = false }) {
   let ctx = first;
   const serverJs = path.join(ctx.serverDir, "server.js");
   if (!fs.existsSync(serverJs)) {
@@ -503,12 +534,13 @@ async function cmdStart(first, d, { open, foreground, newKey, track }) {
     // start (and a service would restart it in a loop), so it goes.
     if (removeStaleLock(ctx.lockFile, lock.pid)) d.out(`Removed a leftover database lock (${ctx.lockFile}): process ${lock.pid} is now ${lock.name}, not Watchbell.`);
   } else if (lock.state === "held") {
-    const probe = await probeHealth(ctx.healthUrl, d.fetch);
+    const live = runningContext(ctx, d).ctx; // the address it really runs on (--port), not only the .env one
+    const probe = await probeHealth(live.healthUrl, d.fetch);
     if (probe?.service === "watchbell") {
-      d.err(`Watchbell is already running (process ${lock.pid}, data in ${ctx.dataDir}) at ${ctx.siteUrl}`);
+      d.err(`Watchbell is already running (process ${lock.pid}, data in ${ctx.dataDir}) at ${live.siteUrl}`);
       d.err('Stop it first with "watchbell stop" if you want to start it again.');
     } else {
-      d.err(`The database in ${ctx.dataDir} is locked by process ${lock.pid}${lock.name ? ` (${lock.name})` : ""}, but no Watchbell answers at ${ctx.healthUrl}.`);
+      d.err(`The database in ${ctx.dataDir} is locked by process ${lock.pid}${lock.name ? ` (${lock.name})` : ""}, but no Watchbell answers at ${live.healthUrl}.`);
       d.err('If Watchbell is still starting, wait a moment. If it runs with other settings, stop it with "watchbell stop".');
       d.err(staleLockHint(ctx.lockFile));
     }
@@ -527,6 +559,8 @@ async function cmdStart(first, d, { open, foreground, newKey, track }) {
   if (!made) return 1;
   if (made.created || made.filled.length) ctx = resolveContext(d); // the server needs what was just written
   const version = packageVersion(d.pkgRoot);
+  // 1.2.2: `start` is quiet unless --verbose. `run` (a service manager's log) and --verbose print as before.
+  if (!foreground && !verbose) return startQuiet(ctx, d, { open, made, version, serverJs });
   d.out(`Watchbell ${version}`);
   if (made.created) d.out(`Created ${ctx.envFile} with new secrets (they are not shown).`);
   else if (made.filled.length) d.out(`Added missing settings to ${ctx.envFile}: ${made.filled.join(", ")}.`);
@@ -537,9 +571,11 @@ async function cmdStart(first, d, { open, foreground, newKey, track }) {
   d.out(`Starting on ${ctx.siteUrl} ...`);
   // Asked while the server starts, so it never delays the start; said once the server is ready (start only, not run).
   const update = foreground ? null : checkForUpdate(ctx, d, { background: true });
+  const runtime = foreground ? null : checkNodeRuntime(ctx, d, { background: true }); // D20, the same way
 
   if (track) track.spawned = true;
   const child = d.spawn(d.execPath, [serverJs], { cwd: ctx.serverDir, env: serverEnv(ctx), stdio: "inherit" });
+  writeRuntime(ctx, child.pid, d);
   const unsupervise = superviseChild(child, { platform: d.platform, proc: d.proc });
   let exited = false;
   const exit = new Promise((resolve) => {
@@ -559,6 +595,7 @@ async function cmdStart(first, d, { open, foreground, newKey, track }) {
       announce(ctx, d, { open, foreground });
       announceNetwork(ctx, d);
       await sayUpdate(update, d);
+      await sayNodeRuntime(runtime, d);
       break;
     }
     if (d.now() >= deadline) {
@@ -569,6 +606,7 @@ async function cmdStart(first, d, { open, foreground, newKey, track }) {
   }
   const code = await exit;
   unsupervise();
+  removeRuntime(ctx, child.pid);
   return code;
 }
 
@@ -582,6 +620,517 @@ function announce(ctx, d, { open, foreground }) {
   }
   if (!foreground) d.out('Stop it with Ctrl+C here, or run "watchbell stop" in another terminal.');
   if (open && !foreground) d.openUrl(code ? `${ctx.siteUrl}/setup` : ctx.siteUrl);
+}
+
+// ---------------------------------------------------------------------------------------------------- runtime file
+
+// <data>/runtime.json: the pid and the address of the server the CLI started (start, run), so status and stop find a
+// server started with --port or WATCHBELL_PORT even when .env names another port. It counts only while its pid holds
+// the database lock: a file left by a crash names a pid that no longer does.
+const RUNTIME_FILE = "runtime.json";
+const runtimeFileOf = (ctx) => path.join(ctx.dataDir, RUNTIME_FILE);
+
+function writeRuntime(ctx, pid, d) {
+  if (!Number.isInteger(pid)) return;
+  try {
+    fs.writeFileSync(runtimeFileOf(ctx), `${JSON.stringify({ pid, host: ctx.host, port: ctx.port, siteUrl: ctx.siteUrl, startedAt: new Date(d.now()).toISOString() })}\n`, { mode: 0o600 });
+  } catch {
+    // a read-only data folder: status falls back to the .env address
+  }
+}
+
+function readRuntime(ctx) {
+  try {
+    const r = JSON.parse(fs.readFileSync(runtimeFileOf(ctx), "utf8"));
+    const ok = Number.isInteger(r?.pid) && typeof r.host === "string" && HOST_ARG.test(r.host) && isPortArg(String(r.port)) && /^https?:\/\/\S+$/.test(String(r.siteUrl));
+    return ok ? { pid: r.pid, host: r.host, port: String(r.port), siteUrl: String(r.siteUrl) } : null;
+  } catch {
+    return null;
+  }
+}
+
+function removeRuntime(ctx, pid) {
+  if (readRuntime(ctx)?.pid !== pid) return; // another start wrote it since
+  try {
+    fs.rmSync(runtimeFileOf(ctx), { force: true });
+  } catch {
+    // left behind: it no longer matches the lock, so it is ignored
+  }
+}
+
+/** { ctx, pid }: ctx with the address of the Watchbell that holds the database now, when the CLI started it. */
+function runningContext(ctx, d) {
+  const lock = inspectLock(ctx.lockFile, lockOpts(d));
+  if (lock.state !== "held") return { ctx, pid: null };
+  const rt = readRuntime(ctx);
+  if (!rt || rt.pid !== lock.pid) return { ctx, pid: lock.pid };
+  return { ctx: { ...ctx, host: rt.host, port: rt.port, siteUrl: rt.siteUrl, healthUrl: healthUrlOf(rt.host, rt.port) }, pid: lock.pid };
+}
+
+// ---------------------------------------------------------------------------------------------------- quiet start (1.2.2)
+
+const LOG_DIR = "logs";
+/** <home>/logs/watchbell.log: what the server prints under `watchbell start` (watchbell.log.1 holds the older part). */
+export const logFileOf = (home) => path.join(home, LOG_DIR, "watchbell.log");
+const STOP_WAIT_MS = 30_000;
+const ERROR_REPEAT_MS = 10 * 60 * 1000; // the same error line is shown again after 10 minutes at the earliest
+
+/** Every terminal control character out (a log or error line can hold text from a monitored site). */
+const plain = (s) => String(s).replace(/\x1b\[[0-?]*[ -/]*[@-~]|\x1b[\]PX^_][^\x07\x1b]*(?:\x07|\x1b\\)?|[\x00-\x08\x0b-\x1f\x7f\x9b]/g, "");
+
+/** A terminal the menu can use: both ends a TTY, raw mode available, not CI and not TERM=dumb. */
+const interactive = (d) => Boolean(d.stdin?.isTTY && d.stdoutTty && typeof d.stdin.setRawMode === "function") && d.env.TERM !== "dumb" && !switchedOn(d.env.CI);
+
+/** The addresses to show: this machine's for a loopback host, else the network addresses (SITE_URL first when it is its own). */
+export function shownAddresses(ctx, interfaces) {
+  if (isLoopbackHost(ctx.host)) return [ctx.siteUrl];
+  let urls = [];
+  try {
+    urls = networkUrls(ctx.host, ctx.port, interfaces());
+  } catch {
+    // no list of addresses
+  }
+  let site = null;
+  try {
+    site = new URL(ctx.siteUrl);
+  } catch {
+    // an unreadable SITE_URL is the server's own error
+  }
+  if (site && !isLoopbackHost(site.hostname)) urls = [ctx.siteUrl, ...urls.filter((u) => u !== ctx.siteUrl)];
+  return urls.length ? urls : [ctx.siteUrl];
+}
+const addressText = (urls) => (urls.length > 1 ? `${urls[0]}   (also ${urls.slice(1).join(", ")})` : urls[0]);
+export const NETWORK_WARNING = ["! Open on your network over plain http. Finish setup first,", "  and put HTTPS in front before opening it to the internet."];
+
+export const MENU = ["Open in browser", "Keep running in the background", "Show live log", "Stop and exit"];
+
+function prepareLog(file, d) {
+  const dir = path.dirname(file);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  if (d.platform !== "win32") fs.chmodSync(dir, 0o700); // the log holds the setup code
+  rotateLog(file, { maxBytes: d.logMaxBytes ?? LOG_MAX_BYTES });
+}
+
+function appendLog(file, lines) {
+  try {
+    fs.appendFileSync(file, lines.map((l) => `${l}\n`).join(""), { mode: 0o600 });
+  } catch {
+    // the log is a help, never a reason to fail
+  }
+}
+
+/** The last non-empty line of the log (for a server that stopped before it was ready), or null. */
+function lastLogLine(file) {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const buf = Buffer.alloc(Math.min(size, 16 * 1024));
+      fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+      const lines = buf.toString("utf8").split(/\r?\n/).map((l) => plain(l).trim()).filter(Boolean);
+      return lines.at(-1)?.slice(0, 300) ?? null;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
+
+/** The last `count` lines of `file` and its size (where following it starts). */
+function tailOf(file, count) {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const buf = Buffer.alloc(Math.min(size, 64 * 1024));
+      fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+      const lines = buf.toString("utf8").split(/\r?\n/);
+      if (lines.at(-1) === "") lines.pop();
+      return { lines: lines.slice(-count), offset: size };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { lines: [], offset: 0 };
+  }
+}
+
+/** Calls onLines with what is appended to `file` (a rotation starts it over). Returns the function that stops it. */
+function followFile(file, { offset, everyMs, onLines }) {
+  let at = offset;
+  let partial = "";
+  const timer = setInterval(() => {
+    try {
+      const size = fs.statSync(file).size;
+      if (size < at) {
+        at = 0; // rotated: the new file from its start
+        partial = "";
+      }
+      if (size === at) return;
+      const fd = fs.openSync(file, "r");
+      try {
+        const buf = Buffer.alloc(Math.min(size - at, 1024 * 1024));
+        const n = fs.readSync(fd, buf, 0, buf.length, at);
+        at += n;
+        const parts = (partial + buf.subarray(0, n).toString("utf8")).split(/\r?\n/);
+        partial = parts.pop();
+        if (parts.length) onLines(parts);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      // gone for a moment (rotation): the next tick tries again
+    }
+  }, everyMs);
+  return () => clearInterval(timer);
+}
+
+/** Resolves with the promise's value, or null after `ms` (the timer is cleared either way). */
+const within = (promise, ms) =>
+  new Promise((resolve) => {
+    const t = setTimeout(() => resolve(null), ms);
+    promise.then((v) => {
+      clearTimeout(t);
+      resolve(v);
+    });
+  });
+
+/**
+ * Lines printed above a block that is redrawn in place (the "Starting" line, the menu). Without a terminal there is
+ * no block and no cursor code: lines are printed as they come.
+ */
+function makeScreen(d) {
+  let block = [];
+  const erase = () => {
+    if (block.length) d.write(`\r\x1b[${block.length}A\x1b[J`);
+  };
+  const draw = () => {
+    if (block.length) d.write(`${block.join("\n")}\n`);
+  };
+  return {
+    print(lines) {
+      erase();
+      d.write(lines.map((l) => `${l}\n`).join(""));
+      draw();
+    },
+    setBlock(lines) {
+      erase();
+      block = lines;
+      draw();
+    },
+  };
+}
+
+async function startQuiet(ctx, d, { open, made, version, serverJs }) {
+  const tty = interactive(d);
+  const logFile = logFileOf(ctx.home);
+  let showError = (line) => d.err(line); // in a terminal: above the "Starting" line or the menu
+  try {
+    prepareLog(logFile, d);
+  } catch (e) {
+    d.err(`watchbell: could not set up ${path.dirname(logFile)}: ${e?.code ?? (e instanceof Error ? e.message : String(e))}`);
+    return 1;
+  }
+  appendLog(logFile, [
+    "",
+    `--- watchbell start, Watchbell ${version}, ${new Date(d.now()).toISOString()}`,
+    ...(made.created ? [`Created ${ctx.envFile} with new secrets (they are not shown).`] : []),
+    ...(made.filled.length && !made.created ? [`Added missing settings to ${ctx.envFile}: ${made.filled.join(", ")}.`] : []),
+    `Settings: ${ctx.envFile}`,
+    `Data: ${ctx.dataDir}`,
+    `Starting on ${ctx.siteUrl} (listening on ${ctx.host}, port ${ctx.port})`,
+  ]);
+  // New secrets are worth one line (first run only); the folders are in the log and in watchbell status.
+  if (made.created) d.out(`Created ${ctx.envFile} with new secrets (they are not shown).`);
+  else if (made.filled.length) d.out(`Added missing settings to ${ctx.envFile}: ${made.filled.join(", ")}.`);
+  warnPortMismatch(ctx, d);
+  noteIgnoredShellAddress(ctx, d);
+  const screen = tty ? makeScreen(d) : null;
+  if (screen) screen.setBlock([`  Starting Watchbell ${version} ...`]);
+  else {
+    d.out(`Watchbell ${version}`);
+    d.out(`Starting on ${ctx.siteUrl} ...`);
+  }
+  const update = checkForUpdate(ctx, d, { background: true });
+  const runtime = checkNodeRuntime(ctx, d, { background: true });
+
+  // The server's output goes to the log file: through scripts/selfhost-log.mjs (rotation, errors to the menu) when
+  // the package has it, and the file itself is the server's stdout and stderr for whatever bypasses that.
+  const hook = path.join(d.pkgRoot, "scripts", "selfhost-log.mjs");
+  const args = fs.existsSync(hook) ? ["--import", pathToFileURL(hook).href, serverJs] : [serverJs];
+  let fd;
+  try {
+    fd = fs.openSync(logFile, "a", 0o600);
+  } catch (e) {
+    d.err(`watchbell: could not open ${logFile}: ${e?.code ?? String(e)}`);
+    return 1;
+  }
+  let child;
+  try {
+    // In a terminal the server runs detached from it from the start (its own session on POSIX, no console on
+    // Windows), so "Keep running in the background" only has to let go; the menu is a thin front-end.
+    child = d.spawn(d.execPath, args, {
+      cwd: ctx.serverDir,
+      env: { ...serverEnv(ctx), WATCHBELL_LOG_FILE: logFile },
+      stdio: ["ignore", fd, fd, "ipc"],
+      detached: tty,
+      windowsHide: true,
+    });
+  } finally {
+    fs.closeSync(fd);
+  }
+  writeRuntime(ctx, child.pid, d);
+
+  let exited = false;
+  const exit = new Promise((resolve) => {
+    child.on("exit", (code, signal) => resolve(exitCodeOf(code, signal)));
+    child.on("error", (e) => {
+      showError(`Could not start the server: ${e.message}`);
+      resolve(1);
+    });
+  }).finally(() => {
+    exited = true;
+  });
+
+  // An error the server prints: one line on the screen (the same line at most every 10 minutes), the rest in the log.
+  const shown = new Map();
+  let lastError = null;
+  const onMessage = (m) => {
+    if (!m || m.watchbell !== "error" || typeof m.line !== "string") return;
+    const line = plain(m.line).trim().slice(0, 300);
+    if (!line) return;
+    lastError = line;
+    const now = d.now();
+    if (shown.has(line) && now - shown.get(line) < ERROR_REPEAT_MS) return;
+    shown.set(line, now);
+    showError(`! ${line} (see the log: ${logFile})`);
+  };
+  child.on("message", onMessage);
+  if (screen) showError = (line) => screen.print([`  ${line}`]);
+
+  // Ctrl+C before the menu is up, a closed terminal, a kill: the same clean stop as "Stop and exit" (in a terminal
+  // the server is detached, so no signal reaches it). Without a terminal the server is this process's child as before.
+  let stopping = null;
+  const stop = () =>
+    (stopping ??= (async () => {
+      try {
+        fs.mkdirSync(ctx.dataDir, { recursive: true });
+        fs.writeFileSync(path.join(ctx.dataDir, "stop-request"), `${new Date().toISOString()}\n`); // as watchbell stop
+      } catch (e) {
+        d.err(`watchbell: could not ask Watchbell to stop (${e?.code ?? e}). Run: watchbell stop`);
+      }
+      const waitMs = d.stopWaitMs ?? STOP_WAIT_MS;
+      const first = await within(exit, waitMs);
+      if (first !== null) return first;
+      if (d.platform !== "win32") {
+        child.kill("SIGTERM"); // the server's own clean stop on SIGTERM
+        const second = await within(exit, waitMs);
+        if (second !== null) return second;
+      }
+      d.err(`Watchbell did not stop within ${Math.round(waitMs / 1000)} s; it may still be closing its database. Check with: watchbell status`);
+      return 1;
+    })());
+  const signals = tty ? (d.platform === "win32" ? ["SIGINT", "SIGTERM", "SIGBREAK", "SIGHUP"] : ["SIGINT", "SIGTERM", "SIGHUP"]) : [];
+  const onSignal = () => void stop();
+  for (const s of signals) d.proc.on(s, onSignal);
+  const unsupervise = tty ? () => {} : superviseChild(child, { platform: d.platform, proc: d.proc });
+  const release = () => {
+    for (const s of signals) d.proc.removeListener(s, onSignal);
+    unsupervise();
+  };
+
+  const deadline = d.now() + d.readyTimeoutMs;
+  while (!exited) {
+    const probe = await probeHealth(ctx.healthUrl, d.fetch);
+    if (probe?.status === 200) break;
+    if (d.now() >= deadline) {
+      // Still starting after the wait: the screen and the menu come anyway (stop, or the log to see why).
+      const line = `Watchbell did not answer at ${ctx.healthUrl} within ${Math.round(d.readyTimeoutMs / 1000)} s (see the log: ${logFile}).`;
+      if (screen) screen.print([`  ${line}`]);
+      else d.err(line);
+      break;
+    }
+    await Promise.race([d.sleep(500), exit]);
+  }
+  if (exited) {
+    const code = await exit;
+    if (screen) screen.setBlock([]);
+    release();
+    removeRuntime(ctx, child.pid);
+    if (stopping || [0, 130, 143].includes(code)) return code; // stopped while it was starting (Ctrl+C, a signal)
+    d.err(`Watchbell could not start: ${lastError ?? lastLogLine(logFile) ?? `exit ${code}`} (see the log: ${logFile})`);
+    return code || 1;
+  }
+
+  const setupCode = readSetupCode(ctx.dataDir);
+  const urls = shownAddresses(ctx, d.networkInterfaces ?? os.networkInterfaces);
+  const lan = !isLoopbackHost(ctx.host);
+  // The update notice and the Node.js warning come when they come: a slow registry never holds the screen back.
+  const notes = (async () => {
+    const lines = [];
+    await sayUpdate(update, { out: (l) => lines.push(l) });
+    await sayNodeRuntime(runtime, { err: (l) => lines.push(l) });
+    return lines;
+  })();
+  // The long network text (the addresses, SSH tunnel, SITE_URL) is kept in the log; the screen gets two lines.
+  if (lan) {
+    const note = [];
+    announceNetwork(ctx, { ...d, out: (l) => note.push(l), err: (l) => note.push(l) });
+    appendLog(logFile, note.filter(Boolean));
+  }
+  const openTarget = () => (readSetupCode(ctx.dataDir) ? `${ctx.siteUrl}/setup` : ctx.siteUrl);
+  if (open) d.openUrl(openTarget());
+
+  if (!screen) {
+    d.out(`Watchbell is running at ${addressText(urls)}`);
+    if (setupCode) d.out(`First run: open ${ctx.siteUrl}/setup and enter the setup code ${setupCode}`);
+    if (lan) for (const l of NETWORK_WARNING) d.err(l);
+    d.out(`Log: ${logFile}`);
+    d.out('Stop it with Ctrl+C here, or run "watchbell stop" in another terminal.');
+    void sayUpdate(update, d);
+    void sayNodeRuntime(runtime, d);
+    const code = await exit;
+    release();
+    removeRuntime(ctx, child.pid);
+    if (![0, 130, 143].includes(code)) d.err(`Watchbell stopped with exit code ${code} (see the log: ${logFile}).`);
+    return code;
+  }
+
+  screen.setBlock([]);
+  screen.print([
+    `  Watchbell ${version}`,
+    `  ${addressText(urls)}`,
+    ...(setupCode ? [`  First run: setup code ${setupCode}`] : []),
+    "",
+    ...(lan ? [...NETWORK_WARNING.map((l) => `  ${l}`), ""] : []),
+  ]);
+  return menu(ctx, d, { child, exit, stop, release, screen, logFile, openTarget, notes });
+}
+
+/**
+ * The start screen's menu: ↑/↓ and Enter, or a first letter (o and k run their item at once; s moves between the two
+ * items that start with S, Enter runs it). Resolves with the CLI's exit code.
+ */
+function menu(ctx, d, { child, exit, stop, release, screen, logFile, openTarget, notes }) {
+  const stdin = d.stdin;
+  const pointer = d.platform === "win32" && !d.env.WT_SESSION && d.env.TERM_PROGRAM !== "vscode" ? ">" : "❯"; // the old console lacks ❯
+  let selected = 0;
+  let mode = "menu";
+  let stopFollowing = () => {};
+  const lines = () => MENU.map((label, i) => (i === selected ? `  ${pointer} \x1b[1m${label}\x1b[22m` : `    ${label}`));
+  const redraw = () => screen.setBlock(lines());
+
+  return new Promise((resolve) => {
+    let done = false;
+    let stopRequested = false;
+    const leaveTerminal = () => {
+      stopFollowing();
+      stdin.removeListener("keypress", onKey);
+      try {
+        stdin.setRawMode(false);
+      } catch {
+        // the terminal is gone
+      }
+      stdin.pause?.();
+      screen.setBlock([]);
+    };
+    const finish = (code) => {
+      if (done) return;
+      done = true;
+      leaveTerminal();
+      release();
+      resolve(code);
+    };
+
+    const stopAndExit = async () => {
+      if (done || stopRequested) return;
+      stopRequested = true;
+      leaveTerminal();
+      screen.print(["  Stopping Watchbell ..."]);
+      const code = await stop();
+      if (code === 0) d.out("  Watchbell stopped.");
+      removeRuntime(ctx, child.pid);
+      finish(code);
+    };
+
+    const background = () => {
+      child.removeAllListeners("message");
+      try {
+        child.disconnect?.(); // the server keeps running; its errors go to the log only from now on
+      } catch {
+        // already disconnected
+      }
+      child.unref?.();
+      leaveTerminal();
+      d.out("Running in the background. Stop it with: watchbell stop");
+      finish(0);
+    };
+
+    const showLog = () => {
+      mode = "log";
+      screen.setBlock([]);
+      const { lines: last, offset } = tailOf(logFile, 20);
+      screen.print(["", `  Live log (${logFile}). Press any key to go back to the menu.`, "", ...last.map(plain)]);
+      stopFollowing = followFile(logFile, { offset, everyMs: d.logPollMs ?? 250, onLines: (ls) => screen.print(ls.map(plain)) });
+    };
+
+    const choose = (i) => {
+      if (i === 0) {
+        const url = openTarget();
+        d.openUrl(url);
+        screen.print([`  Opening ${url} in your browser.`]);
+      } else if (i === 1) background();
+      else if (i === 2) showLog();
+      else void stopAndExit();
+    };
+
+    function onKey(str, key = {}) {
+      if (done || stopRequested) return;
+      if (key.ctrl && key.name === "c") return void stopAndExit();
+      if (mode === "log") {
+        stopFollowing();
+        stopFollowing = () => {};
+        mode = "menu";
+        screen.print([""]);
+        return redraw();
+      }
+      if (key.name === "up") selected = (selected + MENU.length - 1) % MENU.length;
+      else if (key.name === "down") selected = (selected + 1) % MENU.length;
+      else if (key.name === "return" || key.name === "enter") return choose(selected);
+      else if (typeof str === "string" && /^[a-z]$/i.test(str)) {
+        const hits = MENU.map((label, i) => [label, i]).filter(([label]) => label[0].toLowerCase() === str.toLowerCase());
+        if (!hits.length) return;
+        selected = (hits.find(([, i]) => i > selected) ?? hits[0])[1];
+        if (hits.length === 1) {
+          redraw();
+          return choose(selected);
+        }
+      } else return;
+      redraw();
+    }
+
+    // A signal (a closed terminal, a kill) or Ctrl+C before the menu: stop() already runs; wait for it here.
+    exit.then((code) => {
+      if (done) return;
+      if (stopRequested) return;
+      // Stopped from elsewhere (watchbell stop in another terminal) or it crashed.
+      leaveTerminal();
+      d.out(code === 0 ? "  Watchbell stopped." : `  Watchbell stopped with exit code ${code} (see the log: ${logFile}).`);
+      removeRuntime(ctx, child.pid);
+      finish(code);
+    });
+
+    // The update notice and the Node.js warning, above the menu once they are known (never after it closed).
+    notes.then((lines) => {
+      if (!done && lines.length) screen.print(lines.map((l) => `  ${plain(l)}`));
+    });
+    (d.keypressEvents ?? readlineCore.emitKeypressEvents)(stdin);
+    stdin.setRawMode(true);
+    stdin.resume?.();
+    stdin.on("keypress", onKey);
+    redraw();
+  });
 }
 
 // ---------------------------------------------------------------------------------------------------- stop / status
@@ -598,7 +1147,8 @@ function waitExit(child, d) {
 
 // The stop is scripts/stop-selfhost.mjs (shipped in the package): it writes <data>/stop-request, the server runs its
 // normal clean stop, and the script waits until the port and the database lock are free.
-function stopServer(ctx, d, timeout) {
+function stopServer(first, d, timeout) {
+  const { ctx } = runningContext(first, d); // asks the address it really runs on (--port), not only the .env one
   if (!fs.existsSync(ctx.home)) {
     d.out(`Watchbell is not running (there are no settings in ${ctx.home} yet).`);
     return Promise.resolve(0);
@@ -609,20 +1159,29 @@ function stopServer(ctx, d, timeout) {
   return waitExit(d.spawn(d.execPath, args, { cwd: d.pkgRoot, env, stdio: "inherit" }), d);
 }
 
-async function cmdStatus(ctx, d) {
-  const pid = runningPid(ctx, d);
+async function cmdStatus(first, d) {
+  // The address of the server that runs now (1.2.2): started with --port 3261 it answers there, whatever .env says.
+  const { ctx, pid } = runningContext(first, d);
   const probe = await probeHealth(ctx.healthUrl, d.fetch);
   const running = pid !== null || probe?.service === "watchbell";
   if (running) {
     d.out(`Watchbell is running${pid !== null ? ` (process ${pid})` : ""} at ${ctx.siteUrl}`);
     if (probe?.service !== "watchbell") d.out(`  Nothing answers at ${ctx.healthUrl} yet. ${staleLockHint(ctx.lockFile)}`);
+    if (ctx.port !== first.port) d.out(`  Port:     ${ctx.port} (for this run; ${first.envFile} says ${first.port})`);
   } else if (probe) d.out(`Watchbell is not running; another program answers on port ${ctx.port}.`);
   else d.out("Watchbell is not running.");
   d.out(`  Version:  ${packageVersion(d.pkgRoot)}`);
   d.out(`  Settings: ${ctx.envFile}${fs.existsSync(ctx.envFile) ? "" : " (created on the first start)"}`);
   d.out(`  Data:     ${ctx.dataDir}`);
-  warnServiceNode(ctx, d);
-  await sayUpdate(checkForUpdate(ctx, d), d);
+  const log = logFileOf(ctx.home);
+  if (fs.existsSync(log)) d.out(`  Log:      ${log}`);
+  const serviceNode = warnServiceNode(ctx, d);
+  const update = checkForUpdate(ctx, d);
+  // Asked at the same time: status waits for the slower of the two. An installed service may run another Node.js than
+  // this CLI (fix round 1, M5), so that one is checked too.
+  const runtime = checkNodeRuntime(ctx, d, { serviceNode });
+  await sayUpdate(update, d);
+  await sayNodeRuntime(runtime, d);
   return running ? 0 : 3;
 }
 
@@ -1102,10 +1661,16 @@ export function serviceNodePath(ctx, d) {
   return null;
 }
 
-/** After a Node.js change (nvm, fnm, volta, an upgrade) the service would fail at every login; say how to fix it. */
+/**
+ * After a Node.js change (nvm, fnm, volta, an upgrade) the service would fail at every login; say how to fix it.
+ * Returns the service's Node.js path when it still exists (status checks that Node.js too, D20), else null.
+ */
 function warnServiceNode(ctx, d) {
   const node = serviceNodePath(ctx, d);
-  if (node && !fs.existsSync(node)) d.err(`The service runs ${node}, which no longer exists. Run: watchbell service install`);
+  if (!node) return null;
+  if (fs.existsSync(node)) return node;
+  d.err(`The service runs ${node}, which no longer exists. Run: watchbell service install`);
+  return null;
 }
 
 async function cmdService(action, ctx, d, yes) {
@@ -1160,29 +1725,33 @@ function readUpdateCache(file) {
   }
 }
 
-/** The registry's latest version; null when offline, slower than 3 s, refused, or answered with something else. */
-async function registryLatest(d, { background = false } = {}) {
+/** A plain GET of a public JSON document; null when offline, slower than `timeoutMs`, refused, or not JSON. */
+async function getJson(d, url, { background = false, timeoutMs, headers = { accept: "application/json" } }) {
   const ac = new AbortController();
   let timer;
   const late = new Promise((resolve) => {
     timer = (d.setTimer ?? setTimeout)(() => {
       ac.abort();
       resolve(null);
-    }, d.updateTimeoutMs ?? UPDATE_TIMEOUT_MS);
+    }, timeoutMs);
     // start does not wait for the answer when the server fails early: the timer must not keep the CLI alive then.
     if (background) timer?.unref?.();
   });
   const ask = (async () => {
-    const res = await d.fetch(REGISTRY_LATEST, { method: "GET", headers: { accept: "application/json" }, signal: ac.signal });
-    if (!res?.ok) return null;
-    const v = (await res.json())?.version;
-    return typeof v === "string" && SEMVER.test(v.trim()) ? v.trim() : null;
+    const res = await d.fetch(url, { method: "GET", headers, signal: ac.signal });
+    return res?.ok ? await res.json() : null;
   })().catch(() => null);
   try {
     return await Promise.race([ask, late]);
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** The registry's latest version; null when offline, slower than 3 s, refused, or answered with something else. */
+async function registryLatest(d, { background = false } = {}) {
+  const v = (await getJson(d, REGISTRY_LATEST, { background, timeoutMs: d.updateTimeoutMs ?? UPDATE_TIMEOUT_MS }))?.version;
+  return typeof v === "string" && SEMVER.test(v.trim()) ? v.trim() : null;
 }
 
 /**
@@ -1223,6 +1792,90 @@ export async function checkForUpdate(ctx, d, { background = false } = {}) {
 async function sayUpdate(check, d) {
   const found = check ? await check : null;
   if (found) d.out(`A newer Watchbell is available: ${found.latest} (this is ${found.current}). Update with: watchbell update`);
+}
+
+// ---------------------------------------------------------------------------------------------------- Node.js runtime (D20)
+
+// 1.2.2: the Node.js under Watchbell. The server runs on the Node.js that runs this CLI (d.execPath), so its version is
+// d.nodeVersion. Two plain GETs at once, nodejs.org's release list and endoflife.date's Node.js lines, at most once per
+// 12 h: the answer, or a failed ask, is kept in <home>/node-check.json like the update check's. The verdict is
+// scripts/node-runtime.mjs, shared with the console's Settings › Collector line. The update check's switches turn this
+// off too (WATCHBELL_NO_UPDATE_CHECK also turns off the server's own 12-hourly reads, src/lib/collector/node-runtime.ts). One warning line for a vulnerable or end-of-life Node.js; offline or an answer it can't read prints nothing,
+// and it never holds the start back.
+const NODE_CACHE = "node-check.json";
+const NODE_TIMEOUT_MS = 4000; // the release list is about 350 kB (about 40 kB gzipped)
+// Fix round 1 (M4): gzip only. Node's fetch would offer br, and Node2Shell, the advisory this check exists for, is in
+// Node's Brotli decoder: a vulnerable Node.js shouldn't Brotli-decode the very lists that flag it.
+const NODE_HEADERS = { accept: "application/json", "accept-encoding": "gzip" };
+const SERVICE_VERSION_TIMEOUT_MS = 1000;
+
+function readNodeCache(file) {
+  try {
+    const c = JSON.parse(fs.readFileSync(file, "utf8"));
+    const at = Date.parse(c?.checkedAt);
+    if (!Number.isFinite(at)) return null;
+    return { at, index: storedNodeIndex(c.index), indexOk: c.indexOk === true, cycles: storedNodeCycles(c.cycles) };
+  } catch {
+    return null; // none yet, or not ours to trust: ask again
+  }
+}
+
+async function lookupNodeAdvisories(ctx, d, { background = false } = {}) {
+  const file = path.join(ctx.home, NODE_CACHE);
+  const cached = readNodeCache(file);
+  const now = d.now();
+  if (cached && now >= cached.at && now - cached.at < NODE_CHECK_EVERY_MS) return cached;
+  const timeoutMs = d.nodeTimeoutMs ?? NODE_TIMEOUT_MS;
+  const [indexBody, eolBody] = await Promise.all([getJson(d, NODE_INDEX_URL, { background, timeoutMs, headers: NODE_HEADERS }), getJson(d, NODE_EOL_URL, { background, timeoutMs, headers: NODE_HEADERS })]);
+  const index = parseNodeIndex(indexBody);
+  const cycles = parseNodeEol(eolBody);
+  // A failed source keeps its last good data; indexOk records whether this ask of nodejs.org worked ("ok" needs it).
+  const next = { at: now, index: index ?? cached?.index ?? null, indexOk: index !== null, cycles: cycles ?? cached?.cycles ?? null };
+  if (fs.existsSync(ctx.home)) {
+    try {
+      fs.writeFileSync(file, `${JSON.stringify({ checkedAt: new Date(now).toISOString(), indexOk: next.indexOk, index: next.index, cycles: next.cycles })}\n`);
+    } catch {
+      // a read-only home: the next start asks again
+    }
+  }
+  return next;
+}
+
+/** The version an installed service's Node.js reports ("v24.12.0"), or null when it can't be run within a second. */
+function serviceNodeVersion(node, d) {
+  const r = d.runSync(node, ["--version"], { timeout: SERVICE_VERSION_TIMEOUT_MS });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+const samePath = (a, b, platform) => {
+  const [x, y] = [path.resolve(a), path.resolve(b)];
+  return platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
+};
+
+/**
+ * D20. Never throws; the warning lines (none when this Node.js is fine, unknown or the check is off). `serviceNode`
+ * (status only): the installed service's Node.js path; when it isn't this one and runs another version, that version
+ * is checked too and named in its own line.
+ */
+export async function checkNodeRuntime(ctx, d, { background = false, serviceNode = null } = {}) {
+  try {
+    if (updateCheckOff(ctx.merged ?? d.env)) return [];
+    const data = await lookupNodeAdvisories(ctx, d, { background });
+    const verdict = (version) => nodeVerdict(String(version), { index: data.index, indexFresh: data.indexOk, cycles: data.cycles }, d.now());
+    const own = verdict(d.nodeVersion);
+    const lines = [nodeWarningLine(own)];
+    if (serviceNode && !samePath(serviceNode, d.execPath, d.platform)) {
+      const theirs = verdict(serviceNodeVersion(serviceNode, d) ?? "");
+      if (theirs.version !== null && theirs.version !== own.version) lines.push(nodeWarningLine(theirs, { service: serviceNode }));
+    }
+    return lines.filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function sayNodeRuntime(check, d) {
+  for (const line of check ? await check : []) d.err(line);
 }
 
 // ---------------------------------------------------------------------------------------------------- network (D10)
@@ -1283,17 +1936,40 @@ function announceNetwork(ctx, d) {
 
 // ---------------------------------------------------------------------------------------------------- update (D9)
 
-const NPM_UPDATE_ARGS = ["install", "-g", "watchbell@latest"];
-const NPM_UPDATE = `npm ${NPM_UPDATE_ARGS.join(" ")}`;
 const PS_START = "Start-ScheduledTask -TaskName $env:WB_TASK";
 
-/** The npm next to the running Node.js (npm.cmd on Windows, run through System32's cmd.exe); null if cmd can't take it. */
-export function npmCommand(d) {
+/**
+ * 1.2.2: the npm prefix this copy was installed into, from its own folder: <prefix>/lib/node_modules/watchbell on
+ * Linux and macOS, <prefix>\node_modules\watchbell on Windows. Null for any other layout (a project's node_modules,
+ * pnpm, a source checkout): npm then installs where it always does, and the "still holds" check catches a miss.
+ */
+export function installPrefix(pkgRoot, platform) {
+  const root = path.resolve(pkgRoot);
+  const name = (p) => (platform === "win32" ? path.basename(p).toLowerCase() : path.basename(p));
+  const modules = path.dirname(root);
+  if (name(root) !== "watchbell" || name(modules) !== "node_modules") return null;
+  if (platform === "win32") return path.dirname(modules);
+  const lib = path.dirname(modules);
+  return name(lib) === "lib" ? path.dirname(lib) : null;
+}
+
+const npmUpdateArgs = (prefix) => ["install", "-g", ...(prefix ? ["--prefix", prefix] : []), "watchbell@latest"];
+/** The update command as a person types it (the prefix quoted when it has a space). */
+const npmUpdateText = (prefix) => `npm ${npmUpdateArgs(prefix).map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(" ")}`;
+
+/**
+ * The npm next to the running Node.js (npm.cmd on Windows, run through System32's cmd.exe), installing into `prefix`
+ * when it is known; null if cmd can't take the paths.
+ */
+export function npmCommand(d, prefix = null) {
   const p = d.platform === "win32" ? path.win32 : path.posix;
   const npm = p.join(p.dirname(d.execPath), d.platform === "win32" ? "npm.cmd" : "npm");
-  if (d.platform !== "win32") return { npm, cmd: npm, args: NPM_UPDATE_ARGS, opts: {} };
-  if (/["%\r\n]/.test(npm)) return null; // cmd expands % even inside quotes
-  return { npm, cmd: system32Tool(d, "cmd.exe"), args: ["/d", "/s", "/c", `""${npm}" ${NPM_UPDATE_ARGS.join(" ")}"`], opts: { windowsVerbatimArguments: true } };
+  const args = npmUpdateArgs(prefix);
+  if (d.platform !== "win32") return { npm, cmd: npm, args, opts: {} };
+  // cmd expands % even inside quotes, and a quoted path ending in \ would escape its closing quote.
+  if (/["%\r\n]/.test(npm + (prefix ?? "")) || prefix?.endsWith("\\")) return null;
+  const line = args.map((a) => (a === prefix ? `"${a}"` : a)).join(" ");
+  return { npm, cmd: system32Tool(d, "cmd.exe"), args: ["/d", "/s", "/c", `""${npm}" ${line}"`], opts: { windowsVerbatimArguments: true } };
 }
 
 const writableDir = (dir) => {
@@ -1369,7 +2045,9 @@ function packageName(pkgRoot) {
 }
 
 /**
- * D9: `npm install -g watchbell@latest` with the npm next to this Node.js, only while Watchbell is stopped. A running
+ * D9: `npm install -g watchbell@latest` with the npm next to this Node.js, only while Watchbell is stopped; since 1.2.2
+ * with `--prefix` of the folder this copy runs from (installPrefix), so a Node.js elsewhere on PATH (nvm next to a
+ * copy in ~/.local) can no longer take the update. A running
  * service of the package is stopped cleanly first and started again after (also when npm failed: the old version
  * then runs on). 0: updated or already the latest; 1: running, npm failed, or the service did not stop.
  */
@@ -1391,9 +2069,11 @@ export async function cmdUpdate({ ctx }, d) {
     return 0;
   }
   if (latest === null) d.out("Could not ask registry.npmjs.org for the latest version; npm will try.");
-  const npm = npmCommand(d);
+  const prefix = installPrefix(d.pkgRoot, d.platform);
+  const NPM_UPDATE = npmUpdateText(prefix);
+  const npm = npmCommand(d, prefix);
   if (!npm) {
-    d.err(`The folder of this Node.js can't go on a cmd command line. Stop Watchbell and run: ${NPM_UPDATE}`);
+    d.err(`The folder of this Node.js or of Watchbell can't go on a cmd command line. Stop Watchbell and run: ${NPM_UPDATE}`);
     return 1;
   }
   const service = await runningService(ctx, d);
@@ -1417,7 +2097,7 @@ export async function cmdUpdate({ ctx }, d) {
       return 1;
     }
   }
-  d.out(`Updating Watchbell ${current}${latest ? ` to ${latest}` : ""}: ${npm.npm} ${NPM_UPDATE_ARGS.join(" ")}`);
+  d.out(`Updating Watchbell ${current}${latest ? ` to ${latest}` : ""}: ${npm.npm} ${NPM_UPDATE.slice(4)}`);
   // POSIX: npm starts with "#!/usr/bin/env node", so this Node.js goes first on PATH, else npm runs (and installs for)
   // whichever node PATH finds first. A large maxBuffer: a verbose .npmrc must not get npm killed mid-install.
   const env = d.platform === "win32" ? d.env : { ...d.env, PATH: [path.posix.dirname(d.execPath), d.env.PATH].filter(isSet).join(":") };
@@ -1436,7 +2116,12 @@ export async function cmdUpdate({ ctx }, d) {
     const now = packageVersion(d.pkgRoot);
     if (now === current && newer !== null && newer > 0) {
       code = 1;
-      d.err(`npm finished, but ${d.pkgRoot} still holds Watchbell ${now}: this npm installs somewhere else (see npm prefix -g).`);
+      d.err(`npm finished, but ${d.pkgRoot} still holds Watchbell ${now}: the new version went to another folder.`);
+      d.err(
+        prefix
+          ? `npm was told to install into ${prefix}, where this copy runs from. A copy made with npm link, or kept by another tool (volta, pnpm), updates its own way; "npm ls -g --prefix ${/\s/.test(prefix) ? `"${prefix}"` : prefix} watchbell" shows what that folder holds.`
+          : `This copy is not in an npm global folder (<prefix>/${d.platform === "win32" ? "" : "lib/"}node_modules/watchbell), so update it the way you installed it. "npm prefix -g" shows where npm installs.`,
+      );
     } else d.out(now === current ? `Watchbell ${now} is up to date.` : `Updated Watchbell ${current} to ${now}.`);
   }
   if (service) {
@@ -1461,8 +2146,10 @@ export async function main(argv, overrides = {}) {
     return 0;
   }
   if (errors.length) {
-    for (const e of errors) d.err(`watchbell: ${e}`);
-    d.err("Run watchbell --help for the commands.");
+    // An unknown option is its own complete line; every other mistake gets the prefix and the pointer to --help.
+    const unknown = (e) => e.startsWith("Unknown option ");
+    for (const e of errors) d.err(unknown(e) ? e : `watchbell: ${e}`);
+    if (!errors.every(unknown)) d.err("Run watchbell --help for the commands.");
     return 2;
   }
   const major = Number.parseInt(String(d.nodeVersion).split(".")[0], 10);
@@ -1480,7 +2167,7 @@ export async function main(argv, overrides = {}) {
   }
   switch (opts.command) {
     case "start":
-      return cmdStart(ctx, d, { open: opts.open, foreground: false, newKey: opts.newKey });
+      return cmdStart(ctx, d, { open: opts.open, foreground: false, newKey: opts.newKey, verbose: opts.verbose });
     case "run":
       if (underLaunchd(d)) return runUnderLaunchd(ctx, d);
       return cmdStart(ctx, d, { open: false, foreground: true, newKey: false });

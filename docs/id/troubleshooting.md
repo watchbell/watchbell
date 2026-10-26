@@ -9,6 +9,7 @@ Mulailah dari log server; sebagian besar masalah menampilkan baris yang jelas di
 | Service Linux | `journalctl --user -u watchbell -f` |
 | Scheduled Task Windows | `app\data\watchbell.log` |
 | Dijalankan manual | Terminal tempat Anda menjalankan `npm run start:selfhost` |
+| Paket npm, `watchbell` di terminal | `~/.watchbell/logs/watchbell.log` (**Show live log** di menu awal mengikutinya); `watchbell start --verbose` menampilkannya di terminal |
 
 - [Instalasi](#instalasi)
   - [Port sudah dipakai](#port-sudah-dipakai)

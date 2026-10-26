@@ -11,6 +11,8 @@ import type { SectionId } from "@/lib/sections";
 // cut to the run's deadline, and in a broad outage they use all of it, which is exactly when the owner's jobs stop
 // pinging too (5b final review I1). It still comes well before `alerts`, which reads the states it writes.
 // Page views (Vercel Web Analytics, two small reads per app) every 30 minutes.
+// Watchbell 1.2.2 (D20): `node`, every 12 hours, reads nodejs.org's release list and endoflife.date's Node.js lines for
+// Watchbell's own runtime (Settings › Collector → Watchbell runtime). It runs after status, which shares its minute.
 // Watchbell 1.2.1: `security` (the Next.js check of every watched app and the dependency scan of their repositories)
 // every 6 hours, and early, for the marked apps only, after a new production deployment (withAfterDeploy). It is the last
 // main task: it works with whatever time the others leave and defers itself with under 11 s left (MIN_LEFT_MS). A slot
@@ -36,6 +38,7 @@ export const TASKS = {
   status: 300,
   logs: 300,
   pageviews: 1800,
+  node: 43_200, // after status (fix round 1, M3): both fall due at :43, and status's 6 s read goes first
   security: 21_600,
   alerts: 60,
   digest: 300,
@@ -60,11 +63,12 @@ const MIN = 60;
 //   hourly:   supabaseUsage :11, extraDbs :16, firebaseUsage :22, cloudflare :33, tls :41, rdap :52
 //   30-minute: pageviews :27/:57 (no hourly task there; only firebase's 5-minute slot shares the minute)
 //   domains:  01:28, 07:28, 13:28, 19:28 UTC · eol: 03:46 UTC (10:46 WIB)
+//   node:     03:43, 15:43 UTC (10:43, 22:43 WIB; :43 is status's 5-minute slot, no hourly task)
 //   security: 04:36, 10:36, 16:36, 22:36 UTC (11:36, 17:36, 23:36, 05:36 WIB; :36 is neon's 5-minute slot, no hourly task)
 export const OFFSETS: Partial<Record<TaskName, number>> = {
   supabase: 0, digest: 0, neon: 1 * MIN, firebase: 2 * MIN, status: 3 * MIN, logs: 4 * MIN, pageviews: 27 * MIN,
   supabaseUsage: 11 * MIN, extraDbs: 16 * MIN, firebaseUsage: 22 * MIN, cloudflare: 33 * MIN, tls: 41 * MIN, rdap: 52 * MIN,
-  domains: 88 * MIN, eol: 226 * MIN, security: 276 * MIN,
+  domains: 88 * MIN, eol: 226 * MIN, node: 223 * MIN, security: 276 * MIN,
 };
 
 // At most this many slower tasks that are late (never ran, or missed their slot: first deploy, a collector outage)
@@ -123,9 +127,10 @@ export function recheckable(lastCheckedAt: Date | null, now: Date, force: boolea
 }
 
 // A task that needs this much of the run left is deferred to the next run instead (not an error, not marked as run).
-// eol makes one read of up to 8 s (cut to what is left), so it needs the same margin as a TLS or RDAP read.
+// eol makes one read of up to 8 s (cut to what is left), so it needs the same margin as a TLS or RDAP read; node makes
+// two reads at once with the same limit.
 // security needs room for a Next.js check (one starts with 3 s left) and two repository scans (2 × 4 s; fix round 1).
-export const MIN_LEFT_MS: Partial<Record<TaskName, number>> = { status: 6_000, logs: 9_000, pageviews: 9_000, digest: 6_000, eol: 6_000, security: 11_000 };
+export const MIN_LEFT_MS: Partial<Record<TaskName, number>> = { status: 6_000, logs: 9_000, pageviews: 9_000, digest: 6_000, eol: 6_000, node: 6_000, security: 11_000 };
 
 // The time the run keeps back for `alerts` (evaluate every rule, then deliver queued notices): the tasks before it get
 // a deadline this much earlier, so a slow Cloudflare or database read can't starve the alert rules (I10).
@@ -145,7 +150,7 @@ export const TASK_SECTION: Record<TaskName, SectionId | null> = {
   heartbeats: "hosting", checks: "hosting", vercel: "hosting", cloudflare: "hosting", domains: "hosting", tls: "hosting", rdap: "hosting",
   logs: "hosting", pageviews: "hosting",
   supabase: "database", supabaseUsage: "database", neon: "database", firebase: "database", firebaseUsage: "database", extraDbs: "database",
-  eol: null, status: null, alerts: null, digest: null,
+  eol: null, node: null, status: null, alerts: null, digest: null,
   security: null, // reads for two sections: TASK_ANY_SECTION
 };
 

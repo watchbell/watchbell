@@ -10,6 +10,7 @@ import { AG_PUBLIC_PREFIX, enabledModels, isFresh, readAgSettings } from "@/priv
 import { ownObservations } from "@/private/ai/quota";
 import type { QuotaObservation } from "@/private/ai/types";
 import { chat, type ChatBody, classifyUpstreamError, type OpenConnection, readQuota, UpstreamError, upstreamMessage } from "./providers/adapter";
+import { type NextStep, type ProviderFailure, providerFailureMessage, triesAnother } from "./providers/failure-text";
 import { PRESETS } from "./providers/presets";
 import { consoleDefaultModel, openConnections, resolveModel } from "./providers/providers-db";
 import { defaultConnection, isOfferedModel, pickDefaultModel, publicId, routeModel } from "./providers/routing";
@@ -228,15 +229,23 @@ export async function handleChat(req: Request): Promise<Response> {
 // ---- The console's own AI (Ask AI, summary, Playground, console chat). No key; agent row "Watchbell console". ----
 
 export type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
-// timeoutMs: the upstream call's own limit (default UPSTREAM_TIMEOUT_MS, 60 s); Patroli gives each room less.
+// timeoutMs: the upstream call's own limit (default UPSTREAM_TIMEOUT_MS, 60 s); Patroli gives each room less. With a
+// fallback the second try gets what is left of it.
+// fallback: `model` is only a preference (the office's model, the advisor's setting), so the call may still move to
+// another provider when that model's provider is down. Without it a given model is pinned: the Playground or a caller
+// that asked for one model by name gets that model or an error.
 export type CompleteOptions = {
-  model?: string; maxTokens?: number; temperature?: number; timeoutMs?: number;
+  model?: string; maxTokens?: number; temperature?: number; timeoutMs?: number; fallback?: boolean;
   purpose: "ask-ai" | "summary" | "playground" | "console-chat" | "office-patrol" | "office-dev";
 };
 export type CompleteResult = { text: string; model: string; usage: { in: number | null; out: number | null }; ms: number };
 
+// failure: set when a provider failed (not for "nothing is connected"); it lets a localised surface (Patroli's report
+// in the notification language) say the same thing in Indonesian with providerFailureMessage.
+export type GatewayFailure = { first: ProviderFailure; next: NextStep };
+
 export class GatewayError extends Error {
-  constructor(public readonly type: ApiErrorType, message: string, public readonly status: number) {
+  constructor(public readonly type: ApiErrorType, message: string, public readonly status: number, public readonly failure?: GatewayFailure) {
     super(message);
     this.name = "GatewayError";
   }
@@ -265,25 +274,31 @@ export async function consoleTarget(model?: string): Promise<{ conn: OpenConnect
   return { conn, upstream: m.upstream, publicId: publicId(conn, m) };
 }
 
-async function completeOn(t: { conn: OpenConnection; upstream: string; publicId: string }, messages: ChatMessage[], opts: CompleteOptions): Promise<CompleteResult> {
+async function completeOn(t: { conn: OpenConnection; upstream: string; publicId: string }, messages: ChatMessage[], opts: CompleteOptions, timeoutMs = opts.timeoutMs): Promise<CompleteResult> {
   const started = Date.now();
   const { conn, upstream, publicId: model } = t;
   const client = { ...CONSOLE_CLIENT, userAgent: `Watchbell console (${opts.purpose})` };
   const base = { at: new Date(started), keyId: null, client, providerId: conn.id, model, kind: "console" as const, tool: null, stream: false };
   const body: ChatBody = { model: upstream, messages, max_tokens: Math.min(Math.max(opts.maxTokens ?? 1024, 1), 8192), ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}) };
+  // Each failure carries what the message mapper needs: the connection's name, the upstream status and the class.
+  // complete() replaces the message with the plain one once it knows whether another provider was tried.
+  const failed = (type: ApiErrorType, status: number, f: Omit<ProviderFailure, "provider">) => {
+    const first: ProviderFailure = { provider: conn.name, ...f };
+    return new GatewayError(type, providerFailureMessage(first, { kind: "none" }), status, { first, next: { kind: "none" } });
+  };
   let res: Response;
   try {
-    res = opts.timeoutMs ? await chat(conn, body, new AbortController().signal, opts.timeoutMs) : await chat(conn, body, new AbortController().signal);
+    res = timeoutMs ? await chat(conn, body, new AbortController().signal, timeoutMs) : await chat(conn, body, new AbortController().signal);
   } catch (e) {
     const info = e instanceof UpstreamError ? e.info : { type: "upstream_error" as const, errorClass: "network", status: 502 };
     later(() => safeRecord({ ...base, latencyMs: Date.now() - started, status: info.status, errorClass: `${info.type} · ${info.errorClass}`, tokensIn: null, tokensOut: null }));
-    throw new GatewayError(info.type, e instanceof UpstreamError ? e.message : upstreamMessage("network", 0, conn.name), info.status);
+    throw failed(info.type, info.status, { status: 0, errorClass: info.errorClass, detail: e instanceof UpstreamError ? e.message : upstreamMessage("network", 0, conn.name) });
   }
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     const info = classifyUpstreamError(res.status, text);
     later(() => safeRecord({ ...base, latencyMs: Date.now() - started, status: info.status, errorClass: `${info.type} · ${info.errorClass}`, tokensIn: null, tokensOut: null }, readQuota(conn, upstream, res.headers, new Date())));
-    throw new GatewayError(info.type, upstreamMessage(info.errorClass, res.status, conn.name), info.status);
+    throw failed(info.type, info.status, { status: res.status, errorClass: info.errorClass, detail: upstreamMessage(info.errorClass, res.status, conn.name) });
   }
   const json = (await res.json().catch(() => null)) as { choices?: { message?: { content?: unknown } }[]; usage?: unknown } | null;
   const content = json?.choices?.[0]?.message?.content;
@@ -292,15 +307,26 @@ async function completeOn(t: { conn: OpenConnection; upstream: string; publicId:
   const ms = Date.now() - started;
   const ok = json !== null;
   later(() => safeRecord({ ...base, latencyMs: ms, status: ok ? 200 : 502, errorClass: ok ? null : "upstream_error · bad_response", tokensIn: usage.in, tokensOut: usage.out }, quotaFor(conn, upstream, usage, res.headers, new Date())));
-  if (!ok) throw new GatewayError("upstream_error", upstreamMessage("bad_response", res.status, conn.name), 502);
+  if (!ok) throw failed("upstream_error", 502, { status: res.status, errorClass: "bad_response", detail: upstreamMessage("bad_response", res.status, conn.name) });
   return { text, model, usage, ms };
 }
 
-// Fallback (owner 16 Oct, "mode tahan banting"; the VM running 9Router goes away by ~31 Dec): when the provider a console
-// call went to is down (network error, 5xx, rate limit), the call is tried ONCE on another enabled provider with a
-// turned-on model. A pinned model (opts.model) never falls back, nor do 4xx answers about the request itself.
+// Fallback (owner 16 Oct, "mode tahan banting"; the VM running 9Router goes away by ~31 Dec; owner item #19, 25 Oct):
+// when the provider a console call went to is down (network error or timeout, 5xx including Cloudflare's 52x/530 for a
+// dropped tunnel, a rate limit, an unreadable answer), the call is tried ONCE on another enabled provider with a
+// turned-on model, in openConnections' order. A refused key (401/403) or a 4xx about the request itself never falls
+// back, and neither does a pinned model (opts.model without opts.fallback). The error then says in plain words what
+// failed and what happened next (another provider tried and failed too, or none to try): providerFailureMessage.
 export const FALLBACK_STATUSES = new Set([429, 500, 502, 503, 504]);
-export const fallsBack = (e: unknown): boolean => e instanceof GatewayError && FALLBACK_STATUSES.has(e.status);
+export const fallsBack = (e: unknown): boolean =>
+  e instanceof GatewayError && (e.failure ? triesAnother(e.failure.first) : FALLBACK_STATUSES.has(e.status));
+
+// The least time worth giving a second provider when the caller set a time limit.
+export const FALLBACK_MIN_MS = 3_000;
+// With a time limit and another provider to move to, the first provider gets this share of the limit, so one that
+// hangs (a half-dead tunnel that answers nothing) times out early enough for the second try to fit in the SAME limit.
+// The caller's overall budget (Patroli's rooms, a dev note's 40 s, the teams' deadline) is never exceeded.
+export const FIRST_TRY_SHARE = 2 / 3;
 
 export async function fallbackTarget(exceptId: string): Promise<{ conn: OpenConnection; upstream: string; publicId: string } | null> {
   const conns = (await openConnections()).filter((c) => c.enabled && c.id !== exceptId);
@@ -311,17 +337,41 @@ export async function fallbackTarget(exceptId: string): Promise<{ conn: OpenConn
   return null;
 }
 
+// The same error with the plain message for what happened after it.
+function explained(e: unknown, next: NextStep): unknown {
+  if (!(e instanceof GatewayError) || !e.failure) return e;
+  return new GatewayError(e.type, providerFailureMessage(e.failure.first, next), e.status, { first: e.failure.first, next });
+}
+
 export async function complete(messages: ChatMessage[], opts: CompleteOptions): Promise<CompleteResult> {
   if (isDemo()) return { text: DEMO_AI_REPLY, model: "demo", usage: { in: null, out: null }, ms: 0 }; // never a provider call
+  const started = Date.now();
   const first = await consoleTarget(opts.model);
+  const movable = !opts.model || opts.fallback === true;
+  // Looked up once (openConnections is cached): before the first try only when a time limit has to be shared.
+  let other: Awaited<ReturnType<typeof fallbackTarget>> | undefined;
+  const otherTarget = async () => (other === undefined ? (other = await fallbackTarget(first.conn.id).catch(() => null)) : other);
+  let firstMs = opts.timeoutMs;
+  if (opts.timeoutMs && movable) {
+    const reserve = Math.floor(opts.timeoutMs * (1 - FIRST_TRY_SHARE));
+    if (reserve >= FALLBACK_MIN_MS && (await otherTarget())) firstMs = opts.timeoutMs - reserve;
+  }
   try {
-    return await completeOn(first, messages, opts);
+    return await completeOn(first, messages, opts, firstMs);
   } catch (e) {
-    if (opts.model || !fallsBack(e)) throw e;
-    const other = await fallbackTarget(first.conn.id).catch(() => null);
-    if (!other) throw e;
-    console.info(`ai: ${first.conn.name} failed, trying ${other.conn.name}`);
-    return completeOn(other, messages, opts);
+    if (!fallsBack(e)) throw e;
+    if (!movable) throw explained(e, { kind: "pinned" });
+    const next = await otherTarget();
+    if (!next) throw explained(e, { kind: "none" });
+    const left = opts.timeoutMs ? opts.timeoutMs - (Date.now() - started) : undefined;
+    if (left !== undefined && left < FALLBACK_MIN_MS) throw explained(e, { kind: "out-of-time" });
+    console.info(`ai: ${first.conn.name} failed, trying ${next.conn.name}`);
+    try {
+      return await completeOn(next, messages, opts, left);
+    } catch (e2) {
+      const second = e2 instanceof GatewayError ? e2.failure?.first : undefined;
+      throw second ? explained(e, { kind: "tried", fallback: second }) : e2;
+    }
   }
 }
 

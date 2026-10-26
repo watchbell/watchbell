@@ -3,15 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fakeDb, limitOf, payloadOf, whereOf } from "@/lib/data/fake-db";
 import { EMPTY_BOOK } from "@/lib/view/display-name";
 import { actionProposals } from "@/private/db/schema";
-import type { ProposalAlert, ProposalDraft } from "./proposals";
+import { type ProposalAlert, type ProposalDraft, proposalsFor } from "./proposals";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("./proposals-run", () => ({ runProposalAction: vi.fn() }));
 
 import {
-  claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, frameworkAskedApps, listProposals, pruneProposals, readLogApps, readProposal, runLogProposals,
-  runProposalsStep, type StepDeps,
+  claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, frameworkAskedApps, listProposals, PROPOSAL_STEP_DEPS, prodMismatchOf,
+  pruneProposals, readLogApps, readProposal, readProposalFacts, readRollbackContext, runLogProposals, runProposalsStep, type StepDeps,
 } from "./proposals-db";
 
 const dialect = new PgDialect();
@@ -26,7 +26,7 @@ const MEMBER = "823e4567-e89b-42d3-a456-426614174000";
 const row = (o: object = {}) => ({
   id: ID, room: "workloads", action: "recheck", risk: "safe", title: "Check app-a again now", reason: "app-a /. Down.", resourceName: "app-a",
   proposedBy: "Workloads officer", status: "pending", auto: false, result: null, createdAt: now, decidedAt: null, expiresAt: new Date(now.getTime() + 7_200_000),
-  resourceId: APP, targetRef: MON, ...o,
+  resourceId: APP, targetRef: MON, alertId: ALERT, ...o,
 });
 const draft = (o: Partial<ProposalDraft> = {}): ProposalDraft => ({
   alertId: ALERT, ruleKey: "MonitorDown", room: "workloads", action: "recheck", risk: "safe", title: "t", reason: "r", resourceKind: "app", resourceId: APP,
@@ -34,6 +34,40 @@ const draft = (o: Partial<ProposalDraft> = {}): ProposalDraft => ({
 });
 
 beforeEach(() => { h.current = null; });
+
+// Watchbell 1.2.2 (D15, review minor 6): the update-PR proposals' production check, from the facts read to the step's gate.
+describe("production source facts and wiring", () => {
+  const REPO = "923e4567-e89b-42d3-a456-426614174000";
+  const at = () => new Date(Date.now() - 60_000).toISOString();
+  const vulnAlert: ProposalAlert = {
+    id: ALERT, ruleKey: "VulnerableDependency", subject: APP, severity: "critical", title: "acme-shop", message: "1 vulnerable package (1 high): lodash 4.17.0 → 4.17.21.",
+    resourceId: APP, resourceKind: "app", resourceName: "acme-shop", causedBy: null, silencedUntil: null, silencedUntilResolved: false,
+  };
+  const lodash = { repoId: REPO, package: "lodash", installedVersion: "4.17.0", fixedVersion: "4.17.21", vulnId: "GHSA-lodash", aliases: [], severity: "high", direct: true };
+  const linkRow = (productionSource: unknown) => ({ appId: APP, repoId: REPO, defaultBranch: "main", meta: { productionBranch: "main", productionSource } });
+
+  it("readProposalFacts reads the mismatch of the fixable app's repository (bumpPairs) into productionMismatch", async () => {
+    h.current = fakeDb([[{ appId: APP, repoId: REPO }], [lodash], [linkRow({ kind: "cli", at: at() })]]);
+    const facts = await readProposalFacts([vulnAlert], new Date());
+    expect(facts.fixableRepos).toEqual(new Map([[APP, REPO]]));
+    expect(facts.productionMismatch?.get(APP)).toBe("Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live.");
+  });
+
+  it("readProposalFacts: built from the base, or a failed read, leaves the reasons alone", async () => {
+    h.current = fakeDb([[{ appId: APP, repoId: REPO }], [lodash], [linkRow({ kind: "git", ref: "main", at: at() })]]);
+    expect((await readProposalFacts([vulnAlert], new Date())).productionMismatch).toBeUndefined();
+    h.current = fakeDb([[{ appId: APP, repoId: REPO }], [lodash], new Error("db down")]);
+    expect((await readProposalFacts([vulnAlert], new Date())).productionMismatch).toBeUndefined();
+  });
+
+  it("the minute step's prodMismatch is wired to the stored source (prodMismatchOf)", async () => {
+    expect(PROPOSAL_STEP_DEPS.prodMismatch).toBe(prodMismatchOf);
+    h.current = fakeDb([[linkRow({ kind: "git", ref: "web-revamp", at: new Date(Date.now() - 40 * 60_000).toISOString() })]]);
+    expect(await PROPOSAL_STEP_DEPS.prodMismatch!(APP, REPO)).toContain("can't confirm what production is built from");
+    h.current = fakeDb([[linkRow({ kind: "git", ref: "main", at: at() })]]);
+    expect(await prodMismatchOf(APP, REPO)).toBeNull();
+  });
+});
 
 describe("createProposals", () => {
   it("skips (alert, action) pairs proposed before, inserts the rest with ON CONFLICT DO NOTHING", async () => {
@@ -179,7 +213,8 @@ describe("runProposalsStep", () => {
     expect(await runProposalsStep(now, {}, d)).toEqual({ created: 1, expired: 0, autoRan: 0 });
     expect((d.create as ReturnType<typeof vi.fn>).mock.calls[0][0]).toEqual([expect.objectContaining({ action: "recheck", targetRef: MON })]);
     expect(d.approveAuto).not.toHaveBeenCalled();
-    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: ID, status: "pending" })], {}, { devQueued: new Set() });
+    // D18: each new proposal's alert, so its Telegram notice answers that alert's message.
+    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: ID, status: "pending" })], {}, { devQueued: new Set(), alertIds: new Map([[ID, ALERT]]) });
     expect(d.queueDev).not.toHaveBeenCalled();
   });
   it("auto-runs a safe kind that is switched on, then reports its result instead of a new-proposal notice", async () => {
@@ -187,8 +222,8 @@ describe("runProposalsStep", () => {
     expect(await runProposalsStep(now, {}, d)).toEqual({ created: 1, expired: 0, autoRan: 1 });
     expect(d.approveAuto).toHaveBeenCalledWith(ID, expect.any(Date));
     expect(d.execute).toHaveBeenCalledWith(ID, expect.any(Date));
-    expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set() });
-    expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ status: "done", auto: true }));
+    expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
+    expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ status: "done", auto: true }), {}, { alertId: ALERT }); // D18: a reply to its alert
   });
   // Watchbell 1.2 (D11): a section the owner turned off gets no new proposals; its open ones wait unchanged.
   it("proposes nothing for a paused section's alerts and skips the log check while Hosting is off", async () => {
@@ -252,7 +287,7 @@ describe("runProposalsStep", () => {
         currentId: "dpl_cur00000001", currentSha: "abcdef1234567", liveAt: new Date(now.getTime() - 10 * 60_000), currentCreatedAt: new Date(now.getTime() - 12 * 60_000),
         newestProdCreatedAt: new Date(now.getTime() - 12 * 60_000), previousId: "dpl_prv00000001", previousState: "ready", previousCreatedAt: new Date(now.getTime() - 86_400_000),
       },
-      rolledOrPromotedLately: false, autoLately: false, sameDeployBefore: false, ...o,
+      rolledOrPromotedLately: false, autoLately: false, sameDeployBefore: false, previousNext: "ok", ...o,
     });
     const rbDeps = (o: Partial<StepDeps> = {}, app: object = {}, inFlight = false) => deps({
       firing: vi.fn().mockResolvedValue([]), logs: vi.fn().mockResolvedValue({ created: [rb()], expired: 0 }),
@@ -269,8 +304,8 @@ describe("runProposalsStep", () => {
       expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
       expect(d.approveAutoRollback).toHaveBeenCalledWith("rb-1", "Automatic: the new deploy abcdef1 errored in the first 30 minutes. app-a /. Down.", expect.any(Date));
       expect(d.execute).toHaveBeenCalledWith("rb-1", expect.any(Date));
-      expect(d.notifyRollback).toHaveBeenCalledWith(expect.objectContaining({ id: "rb-1", status: "done" }), { reason: "app-a /. Down.", newRef: "abcdef1" });
-      expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set() });
+      expect(d.notifyRollback).toHaveBeenCalledWith(expect.objectContaining({ id: "rb-1", status: "done" }), { reason: "app-a /. Down.", newRef: "abcdef1" }, {}, { alertId: ALERT });
+      expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
       expect(d.notifyResult).not.toHaveBeenCalled();
     });
     it("does nothing when off, for HighLatency, or when a guard says no", async () => {
@@ -279,12 +314,14 @@ describe("runProposalsStep", () => {
         rbDeps({ logs: vi.fn().mockResolvedValue({ created: [rb({ ruleKey: "HighLatency" })], expired: 0 }) }),
         rbDeps({}, { autoLately: true }),
         rbDeps({}, { rolledOrPromotedLately: true }),
+        rbDeps({}, { previousNext: "vulnerable" }), // D17: never back to a vulnerable Next.js, never alone when unknown
+        rbDeps({}, { previousNext: "unknown" }),
         rbDeps({}, {}, true),
       ]) {
         await runProposalsStep(now, {}, d);
         expect(d.approveAutoRollback).not.toHaveBeenCalled();
         expect(d.execute).not.toHaveBeenCalled();
-        expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "rb-1" })], {}, { devQueued: new Set() });
+        expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "rb-1" })], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
       }
     });
     it("runs at most one per minute, and a lost approval (another in flight) runs nothing", async () => {
@@ -307,13 +344,18 @@ describe("runProposalsStep", () => {
       execute: vi.fn().mockResolvedValue({ ...row({ id: "bump-1", action: "github_bump_pr", status: "done", auto: true }), id: "bump-1" }),
       ...o,
     });
+    it("built from the PR's base (no mismatch): runs as before, asking about the app and its repository", async () => {
+      const d = secDeps({ prodMismatch: vi.fn().mockResolvedValue(null) });
+      expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
+      expect(d.prodMismatch).toHaveBeenCalledWith(APP, REPO);
+    });
     it("opens the PR without asking when the policy allows it, and reports the result", async () => {
       const d = secDeps();
       expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
       expect(d.bumpReady).toHaveBeenCalledWith(REPO, ["critical", "high"]);
       expect(d.approveAutoBump).toHaveBeenCalledWith("bump-1", expect.any(Date));
-      expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }));
-      expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set() });
+      expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }), {}, { alertId: ALERT });
+      expect(d.notifyNew).toHaveBeenCalledWith([], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
     });
     // Watchbell 1.2: a FrameworkVulnerable proposal is judged on the app's Next.js check (bumpReady gets the app).
     it("asks the policy about the app's Next.js check for a FrameworkVulnerable proposal", async () => {
@@ -326,18 +368,21 @@ describe("runProposalsStep", () => {
       const d = secDeps({ autoSecurity: vi.fn().mockResolvedValue({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true }) });
       expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1, autoRan: 1 });
       expect(d.bumpReady).toHaveBeenCalledWith(REPO, ["critical", "high", "moderate"]);
-      expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }));
+      expect(d.notifyResult).toHaveBeenCalledWith(expect.objectContaining({ id: "bump-1", status: "done", auto: true }), {}, { alertId: ALERT });
     });
     it("stays pending for the owner when off, or when the policy says no (severity, major, no token)", async () => {
       for (const d of [
         secDeps({ autoSecurity: vi.fn().mockResolvedValue({ enabled: false, severities: ["critical"], sameMajorOnly: true }) }),
         secDeps({ bumpReady: vi.fn().mockResolvedValue({ ok: false, why: "major" }) }),
         secDeps({ bumpReady: vi.fn().mockResolvedValue({ ok: false, why: "no write token" }) }),
+        // Watchbell 1.2.2 (D15): production deployed from the CLI or built from another branch; or that can't be read.
+        secDeps({ prodMismatch: vi.fn().mockResolvedValue("Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live.") }),
+        secDeps({ prodMismatch: vi.fn().mockRejectedValue(new Error("db down")) }),
       ]) {
         await runProposalsStep(now, {}, d);
         expect(d.approveAutoBump).not.toHaveBeenCalled();
         expect(d.execute).not.toHaveBeenCalled();
-        expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "bump-1" })], {}, { devQueued: new Set() });
+        expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "bump-1" })], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
       }
     });
   });
@@ -347,13 +392,13 @@ describe("runProposalsStep", () => {
     const d = deps({ firing: vi.fn().mockResolvedValue([]), logs: vi.fn().mockResolvedValue({ created: [spike], expired: 0 }), queueDev: vi.fn().mockResolvedValue(new Set(["spike-1"])) });
     await runProposalsStep(now, {}, d);
     expect(d.queueDev).toHaveBeenCalledWith([{ proposalId: "spike-1", appId: APP }], now);
-    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "spike-1" })], {}, { devQueued: new Set(["spike-1"]) });
+    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "spike-1" })], {}, { devQueued: new Set(["spike-1"]), alertIds: expect.any(Map) });
   });
   it("still creates and notifies a LogErrorSpike proposal when no Dev hook is wired", async () => {
     const spike = row({ id: "spike-1", action: "vercel_rollback", risk: "risky", ruleKey: "LogErrorSpike", resourceId: APP });
     const d = deps({ firing: vi.fn().mockResolvedValue([]), logs: vi.fn().mockResolvedValue({ created: [spike], expired: 0 }), queueDev: undefined });
     expect(await runProposalsStep(now, {}, d)).toMatchObject({ created: 1 });
-    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "spike-1" })], {}, { devQueued: new Set() });
+    expect(d.notifyNew).toHaveBeenCalledWith([expect.objectContaining({ id: "spike-1" })], {}, { devQueued: new Set(), alertIds: expect.any(Map) });
   });
   it("adds the log proposals to the same notice and auto-run flow, even with nothing firing", async () => {
     const logRow = row({ id: "log-1", action: "recheck" });
@@ -445,5 +490,111 @@ describe("frameworkAskedApps", () => {
     expect(await frameworkAskedApps([alert({ ruleKey: "VulnerableDependency" }), alert({ resourceId: MON })], [APP])).toEqual(new Set());
     expect(await frameworkAskedApps([alert()], [])).toEqual(new Set());
     expect(f.queries).toHaveLength(0);
+  });
+});
+
+// Watchbell 1.2.2 (D17): the facts a rollback proposal needs, read with the others.
+describe("readProposalFacts / readRollbackContext: when the problem started, and the previous deployment's Next.js", () => {
+  const min = (m: number) => new Date(now.getTime() - m * 60_000);
+  const slow: ProposalAlert = {
+    id: ALERT, ruleKey: "HighLatency", subject: MON, severity: "warning", title: "app-a /", message: "p95 2,400 ms over the last 10 minutes (limit 1,500 ms).",
+    resourceId: APP, resourceKind: "app", resourceName: "shortly", causedBy: null, silencedUntil: null, silencedUntilResolved: false, startedAt: min(5),
+  };
+  const DEPS = [
+    { app: APP, id: "dpl_cur00000001", sha: "abcdef1234567", state: "READY", isCurrent: true, isPrevious: false, readyAt: min(20), createdAt: min(22) },
+    { app: APP, id: "dpl_prv00000001", sha: "1234567abcdef", state: "READY", isCurrent: false, isPrevious: true, readyAt: min(3 * 1440), createdAt: min(3 * 1440 + 2) },
+  ];
+  // The reads run in parallel: each answer looks at what was selected.
+  const by = (calls: { method: string; args: unknown[] }[]) => {
+    const keys = Object.keys((calls[0]?.args[0] ?? {}) as object);
+    if (keys.includes("findings")) return [{ app: APP, version: "16.4.1", status: "ok", findings: [], checkedAt: min(10) }];
+    if (keys.includes("message")) return [{ app: APP, at: min(1440), reason: "NextVulnerable", message: "shortly runs Next.js 16.3.8 with 1 known vulnerability (high)" }];
+    if (keys.includes("resolvedAt")) return [{ ruleKey: "HighLatency", subject: MON, startedAt: min(2 * 1440), resolvedAt: min(30) }];
+    if (keys.includes("isCurrent")) return DEPS;
+    if (keys.includes("url")) return [{ id: MON, kind: "http", url: "https://shortly.example.com/", lastError: null, appId: APP, appName: "shortly", appMeta: null }];
+    return [];
+  };
+
+  it("reads the alert's earlier episodes and the Security card's history: chronic latency, a vulnerable previous Next.js", async () => {
+    const f = fakeDb(Array.from({ length: 8 }, () => by));
+    h.current = f;
+    const facts = await readProposalFacts([slow], now, 30 * 60_000);
+    expect(facts.problemSince?.get(ALERT)).toEqual(min(2 * 1440));
+    expect(facts.previousNext?.get(APP)).toEqual({ status: "vulnerable", version: "16.3.8" });
+    expect(facts.deploys.get(APP)).toEqual({ currentId: "dpl_cur00000001", previousId: "dpl_prv00000001", liveAt: min(20) });
+    const episodes = f.queries.find((q) => Object.keys((q[0]?.args[0] ?? {}) as object).includes("resolvedAt"))!;
+    expect(render(whereOf(episodes)!).params).toEqual(expect.arrayContaining(["MonitorDown", "HighLatency", MON]));
+    expect(limitOf(episodes)).toBe(500);
+  });
+  it("reads nothing more for alerts that can't get a rollback", async () => {
+    const f = fakeDb([]);
+    h.current = f;
+    const facts = await readProposalFacts([{ ...slow, ruleKey: "CertExpiringSoon", resourceKind: "domain" }], now);
+    expect(f.queries).toHaveLength(0);
+    expect(facts.previousNext?.size).toBe(0);
+  });
+  it("gives the auto-rollback guard the previous deployment's Next.js status", async () => {
+    const f = fakeDb(Array.from({ length: 6 }, () => by));
+    h.current = f;
+    const ctx = await readRollbackContext([APP], now);
+    expect(ctx.apps.get(APP)?.previousNext).toBe("vulnerable");
+  });
+
+  // Fix round 1. C1: the new deploy breaks the site, so the after-deploy check stores `error` with the version and
+  // findings it kept, and no event. I2: an earlier, unrelated outage hours before the deploy.
+  const down: ProposalAlert = { ...slow, ruleKey: "MonitorDown", title: "app-a /", message: "3 consecutive checks failed: HTTP 500.", severity: "critical", startedAt: min(5) };
+  const byRow = (sec: object | null, episodes: object[] = [{ ruleKey: "MonitorDown", subject: MON, startedAt: min(300), resolvedAt: min(290) }]) =>
+    (calls: { method: string; args: unknown[] }[]) => {
+      const keys = Object.keys((calls[0]?.args[0] ?? {}) as object);
+      if (keys.includes("findings")) return sec ? [sec] : [];
+      if (keys.includes("message")) return [];
+      if (keys.includes("resolvedAt")) return episodes;
+      if (keys.includes("meta") && !keys.includes("url")) return [{ app: APP, meta: { framework: "vite" } }];
+      return by(calls);
+    };
+  const failedRow = (findings: object[] = []) => ({ app: APP, version: "16.3.8", status: "error", findings, checkedAt: min(19), reason: "Couldn't load the site: HTTP 500" });
+
+  it("a failed after-deploy check keeps its version: ok (no findings) or vulnerable (findings); an outage hours before doesn't count", async () => {
+    h.current = fakeDb(Array.from({ length: 10 }, () => byRow(failedRow())));
+    const facts = await readProposalFacts([down], now, 30 * 60_000);
+    expect(facts.problemSince?.get(ALERT)).toEqual(min(5));
+    expect(facts.previousNext?.get(APP)).toEqual({ status: "ok", version: null });
+    expect(proposalsFor(down, facts, EMPTY_BOOK, now).map((p) => p.action)).toEqual(["recheck", "vercel_rollback"]);
+    h.current = fakeDb(Array.from({ length: 10 }, () => byRow(failedRow([{ id: "GHSA-x", fixed: "16.4.1" }]))));
+    expect((await readProposalFacts([down], now, 30 * 60_000)).previousNext?.get(APP)?.status).toBe("vulnerable");
+    // Still down when the deploy went live: the same outage, not this deploy.
+    h.current = fakeDb(Array.from({ length: 10 }, () => byRow(failedRow(), [{ ruleKey: "MonitorDown", subject: MON, startedAt: min(300), resolvedAt: min(18) }])));
+    expect((await readProposalFacts([down], now, 30 * 60_000)).problemSince?.get(ALERT)).toEqual(min(300));
+  });
+  it("never checked: the framework Vercel builds the app with decides (review I1)", async () => {
+    h.current = fakeDb(Array.from({ length: 10 }, () => byRow(null)));
+    expect((await readProposalFacts([down], now, 30 * 60_000)).previousNext?.get(APP)).toEqual({ status: "ok", version: null });
+  });
+  // Fix round 2 (re-review I-1): a non-Next.js app (Vercel framework vite) whose after-deploy check failed: the row kept
+  // no version and no findings, and its reason is the failure's, not "not a Next.js site".
+  const nonNextFailed = { app: APP, version: null, status: "error", findings: [], checkedAt: min(19), reason: "Couldn't load the site: HTTP 500" };
+  it.each([
+    ["a Next.js app's failed check with its kept version", failedRow()],
+    ["a non-Next.js app's failed check (framework vite)", nonNextFailed],
+  ])("runProposalsStep: from %s (not a stubbed status) the rollback is created and auto-runs", async (_name, sec) => {
+    h.current = fakeDb(Array.from({ length: 30 }, () => byRow(sec)));
+    const created: unknown[] = [];
+    const d: StepDeps = {
+      firing: vi.fn().mockResolvedValue([down]), book: vi.fn().mockResolvedValue(EMPTY_BOOK), facts: readProposalFacts,
+      create: vi.fn(async (drafts: ProposalDraft[]) => {
+        const rows = drafts.map((x, i) => row({ ...x, id: `p-${i}` }));
+        created.push(...rows);
+        return rows as never;
+      }),
+      expire: vi.fn().mockResolvedValue(0), autoRun: vi.fn().mockResolvedValue({}), approveAuto: vi.fn().mockResolvedValue(true),
+      execute: vi.fn().mockResolvedValue({ ...row({ id: "p-1", action: "vercel_rollback", status: "done", auto: true }), id: "p-1" }),
+      notifyNew: vi.fn().mockResolvedValue(undefined), notifyResult: vi.fn().mockResolvedValue(undefined), logs: vi.fn().mockResolvedValue({ created: [], expired: 0 }),
+      autoRollback: vi.fn().mockResolvedValue({ enabled: true, windowMin: 30 }), rollbackContext: readRollbackContext,
+      approveAutoRollback: vi.fn().mockResolvedValue(true), notifyRollback: vi.fn().mockResolvedValue(undefined),
+    };
+    const r = await runProposalsStep(now, {}, d);
+    expect(created.map((c) => (c as { action: string }).action)).toEqual(["recheck", "vercel_rollback"]);
+    expect(d.approveAutoRollback).toHaveBeenCalledWith("p-1", expect.stringMatching(/^Automatic: /), expect.any(Date));
+    expect(r.autoRan).toBe(1);
   });
 });

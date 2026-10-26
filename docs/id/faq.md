@@ -21,6 +21,17 @@ registry.npmjs.org paling banyak sekali sehari apakah ada versi yang lebih baru.
 tanpa id dan tanpa informasi apa pun tentang Anda atau instalasi Anda, dan `WATCHBELL_NO_UPDATE_CHECK=1` (atau
 `NO_UPDATE_NOTIFIER=1`, atau `CI`) mematikannya.
 
+Watchbell juga memperingatkan kalau Node.js tempatnya berjalan punya perbaikan keamanan yang belum dipasang atau sudah
+lewat end-of-life. Untuk itu ia membaca daftar rilis publik di nodejs.org dan tanggal end-of-life Node.js di
+endoflife.date, dengan request biasa untuk daftar itu:
+- Watchbell yang sedang berjalan membaca keduanya setiap 12 jam, jadi dua request sehari ke tiap situs. Inilah baris
+  di Settings › Collector.
+- Di paket npm, `watchbell` dan `watchbell status` membacanya sendiri paling banyak dua kali sehari. Jadi totalnya
+  paling banyak empat request sehari ke tiap situs.
+
+`WATCHBELL_NO_UPDATE_CHECK=1` mematikan semua ini. `NO_UPDATE_NOTIFIER=1` dan `CI` hanya mematikan bagian
+perintahnya.
+
 ### Bisakah saya menjalankannya di server, bukan di laptop?
 
 Bisa. Installer yang sama bisa dipakai di server Linux. Jalankan `loginctl enable-linger "$USER"` agar service tetap

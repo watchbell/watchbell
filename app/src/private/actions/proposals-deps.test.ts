@@ -38,4 +38,15 @@ describe("VulnerableDependency → github_bump_pr (Stage 9 slice 5)", () => {
     expect(factNeeds([alert()], now).depApps).toEqual([APP]);
     expect(factNeeds([alert({ silencedUntilResolved: true })], now).depApps).toEqual([]);
   });
+
+  // Watchbell 1.2.2 (D15): the proposal still appears (Approve), its reason first says what merging would do to production.
+  it("leads the reason with the production mismatch; still the same risky proposal for the owner", () => {
+    const why = "Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live.";
+    const [p] = proposalsFor(alert(), { ...facts(new Map([[APP, REPO]])), productionMismatch: new Map([[APP, why]]) }, EMPTY_BOOK, now);
+    expect(p).toMatchObject({ action: "github_bump_pr", risk: "risky", targetRef: REPO });
+    expect(p.reason.startsWith(`${why} Vulnerable packages in `)).toBe(true);
+    expect(p.reason.length).toBeLessThanOrEqual(200);
+    const [plain] = proposalsFor(alert(), { ...facts(new Map([[APP, REPO]])), productionMismatch: new Map([["other", why]]) }, EMPTY_BOOK, now);
+    expect(plain.reason).toMatch(/^Vulnerable packages in /);
+  });
 });

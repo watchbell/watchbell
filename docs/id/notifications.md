@@ -17,6 +17,12 @@ dan disiapkan di **Alerts › Notifications** (khusus owner; user lain hanya mel
 - **Telegram dan Discord:** satu pesan per run collector, berisi setiap alert yang baru terbuka, masih firing (diulang
   setiap 6 jam), atau sudah resolved. Usulan dan hasil auto-action juga dikirim ke Telegram (lihat
   [Auto-actions](auto-actions.md)).
+- **Satu utas per alert di Telegram:** usulan atau aksi otomatis untuk sebuah alert dikirim sebagai balasan ke pesan
+  yang membuka alert itu (daftar gabungan berisi lebih dari tiga usulan tetap jadi pesan sendiri). **Check again now**
+  otomatis yang sudah jalan tidak mengirim apa-apa: pesan alert itu sendiri yang memberi tahu apakah masih down atau
+  sudah resolved; hanya cek ulang yang gagal jalan yang dilaporkan. Telegram adalah chat Anda sendiri, jadi aplikasi,
+  database, dan host disebut dengan nama aslinya; Discord, ringkasan email, dan console tetap menampilkan database
+  sebagai db-a, db-b.
 - **Ringkasan email:** satu email per hari pukul 07:00 di [zona waktu](configuration.md#zona-waktu) Anda: apa yang
   firing, apa yang resolved, uptime, dan error yang tersimpan selama 24 jam terakhir.
 

@@ -18,14 +18,15 @@ export const WATCHPOST_CLIENT = "watchpost";
 
 export type ProviderAnswer = { text: string; model: string; ms: number };
 
-export async function answerWithProvider(question: string, opts: { model?: string; context?: string; contextMax?: number; now?: Date } = {}): Promise<ProviderAnswer> {
+// fallback: `model` is a preference (the office's model), not the asker's pick, so a down provider may be swapped.
+export async function answerWithProvider(question: string, opts: { model?: string; fallback?: boolean; context?: string; contextMax?: number; now?: Date } = {}): Promise<ProviderAnswer> {
   const now = opts.now ?? new Date();
   const messages = consoleChatPrompt(await consoleSnapshot(now), question);
   if (opts.context) {
     const user = messages[messages.length - 1];
     user.content = `${user.content}\n\nContext: ${guard(opts.context, Math.min(opts.contextMax ?? CONTEXT_MAX, 4000))}`;
   }
-  const r = await complete(messages, { ...(opts.model ? { model: opts.model } : {}), purpose: "console-chat", maxTokens: 1500 });
+  const r = await complete(messages, { ...(opts.model ? { model: opts.model, ...(opts.fallback ? { fallback: true } : {}) } : {}), purpose: "console-chat", maxTokens: 1500 });
   const text = r.text.trim();
   if (!text) throw new EmptyAnswerError();
   return { text: text.length > ANSWER_MAX ? `${text.slice(0, ANSWER_MAX - 1)}…` : text, model: r.model, ms: r.ms };

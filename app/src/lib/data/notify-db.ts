@@ -79,6 +79,44 @@ export async function discordTarget(): Promise<{ url: string } | null> {
   return dc?.row.enabled && dc.config?.url ? { url: dc.config.url } : null;
 }
 
+// ---- Telegram threads (Watchbell 1.2.2, D18) ----
+// alert id → the Telegram message that opened it, in one ops.settings row (no new column): { "<alert id>": { m, at } }.
+// The first message of an alert wins (a repeat never replaces it), and entries older than THREAD_KEEP_MS are dropped on
+// each write, so the row stays small. Only the message id is kept: never the chat id or any text.
+export const TELEGRAM_THREADS_KEY = "notify.telegramThreads";
+export const THREAD_KEEP_MS = 7 * 86_400_000;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type ThreadEntry = { m: number; at: number };
+
+export async function rememberTelegramThread(alertIds: string[], messageId: number, now: Date): Promise<void> {
+  const ids = alertIds.filter((id) => UUID_RE.test(id));
+  if (!ids.length || !Number.isSafeInteger(messageId) || messageId <= 0) return;
+  const fresh: Record<string, ThreadEntry> = Object.fromEntries(ids.map((id) => [id, { m: messageId, at: now.getTime() }]));
+  const cutoff = now.getTime() - THREAD_KEEP_MS;
+  const kept = sql`case when jsonb_typeof(${settings.value}) = 'object' then ${settings.value} else '{}'::jsonb end`;
+  // One statement: what is stored wins over the new entries (the right side of ||), and old entries go.
+  await db().insert(settings).values({ key: TELEGRAM_THREADS_KEY, value: fresh }).onConflictDoUpdate({
+    target: settings.key,
+    set: {
+      value: sql`(select coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) from jsonb_each(${JSON.stringify(fresh)}::jsonb || ${kept}) as e
+        where jsonb_typeof(e.value) = 'object' and (e.value->>'at') ~ '^[0-9]{1,15}$' and (e.value->>'at')::bigint > ${cutoff})`,
+      updatedAt: now,
+    },
+  });
+}
+
+// The Telegram message that opened this alert, or null (never sent, too old, or unreadable). Never throws.
+export async function telegramThread(alertId: string | null | undefined): Promise<number | null> {
+  if (!alertId || !UUID_RE.test(alertId)) return null;
+  try {
+    const [row] = await db().select({ value: settings.value }).from(settings).where(eq(settings.key, TELEGRAM_THREADS_KEY)).limit(1);
+    const entry = (row?.value && typeof row.value === "object" ? (row.value as Record<string, unknown>)[alertId] : null) as Partial<ThreadEntry> | null | undefined;
+    return typeof entry?.m === "number" && Number.isSafeInteger(entry.m) && entry.m > 0 ? entry.m : null;
+  } catch {
+    return null;
+  }
+}
+
 const CLAIM_MS = 2 * 60_000;
 
 // Privacy: the db-a letters for a notification. If they can't be read the notice still goes out, without emails.
@@ -123,15 +161,21 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
     if (!configured.has(kind)) continue;
     const mine = rows.filter((r) => r.channels.includes(kind) && !quiet.has(r.a.id));
     if (!mine.length) continue;
-    // Privacy: databases by alias and no emails, for every notice whatever its stored text says.
+    // Privacy: no emails in any notice, whatever its stored text says. Discord names databases by alias; Telegram is
+    // the owner's own chat, so it keeps the real names (Watchbell 1.2.2, D18).
     const notices: Notice[] = mine.map(({ a }) => {
-      const shown = hideAlert(a, book);
+      const shown = kind === "telegram" ? a : hideAlert(a, book);
       return { kind: a.pending!, ruleKey: a.ruleKey, severity: a.severity, title: shown.title, message: shown.message, startedAt: a.startedAt, causedBy: shown.causedBy, provider: a.providerIncident };
     });
     const msg = composeMessage(notices, now, serverEnv().SITE_URL, langs[kind]);
     const r = await send(kind, hideEmails(kind === "telegram" ? msg.telegram : msg.discord));
     await db().update(channels).set(r.ok ? { lastSentAt: now, lastError: null } : { lastError: r.error }).where(eq(channels.kind, kind));
     if (r.ok) mine.forEach(({ a }) => accepted.add(a.id));
+    // D18: the message that opened an alert on Telegram, so its auto-actions answer it there (a reply, one thread).
+    if (r.ok && kind === "telegram" && r.messageId) {
+      await rememberTelegramThread(mine.filter(({ a }) => a.pending === "open").map(({ a }) => a.id), r.messageId, now)
+        .catch(() => console.warn("notify: remembering the Telegram message failed"));
+    }
   }
   let sent = 0;
   let dropped = 0;

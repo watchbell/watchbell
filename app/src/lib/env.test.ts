@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parseServerEnv } from "./env";
 
 const valid = {
@@ -53,6 +53,21 @@ describe("parseServerEnv", () => {
     it("validates DATABASE_URL only when present", () => {
       expect(() => parseServerEnv({ ...minimal, DATABASE_URL: "mysql://x" })).toThrow(/DATABASE_URL/);
       expect(parseServerEnv({ ...minimal, DATABASE_URL: valid.DATABASE_URL }).DATABASE_URL).toBe(valid.DATABASE_URL);
+    });
+
+    // 1.2.2 release smoke: a self-hosted install on its own machine runs at localhost, so a production build there must
+    // not print "SITE_URL points at localhost" on every start; the cloud edition still warns.
+    it("warns about a localhost SITE_URL only in the cloud edition", () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        parseServerEnv({ ...minimal, NODE_ENV: "production" });
+        parseServerEnv({ ...minimal, WATCHPOST_MODE: "demo", NODE_ENV: "production" });
+        expect(warn).not.toHaveBeenCalled();
+        parseServerEnv({ ...valid, NODE_ENV: "production" });
+        expect(warn).toHaveBeenCalledWith("env: SITE_URL points at localhost");
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

@@ -17,7 +17,8 @@ const book: AliasBook = { db: [{ id: DB, name: "ticketer-db", alias: "db-a" }, {
 
 const alert = (o: Partial<ProposalAlert>): ProposalAlert => ({
   id: ALERT, ruleKey: "MonitorDown", subject: MON, severity: "critical", title: "shortly /", message: "3 consecutive checks failed: HTTP 500 (owner@example.com).",
-  resourceId: APP, resourceKind: "app", resourceName: "shortly", causedBy: null, silencedUntil: null, silencedUntilResolved: false, ...o,
+  resourceId: APP, resourceKind: "app", resourceName: "shortly", causedBy: null, silencedUntil: null, silencedUntilResolved: false,
+  startedAt: new Date(now.getTime() - 60_000), ...o,
 });
 const facts = (o: Partial<ProposalFacts> = {}): ProposalFacts => ({
   monitorKinds: new Map([[MON, "http"]]), deploys: new Map(), supabaseRefs: new Map(), neonSuspended: new Map(), ...o,
@@ -132,7 +133,7 @@ describe("expiry, auto-run, results and parsing", () => {
 describe("auto-rollback rule: a rollback proposal for a down or slow app right after a new deploy", () => {
   const minAgo = (m: number) => new Date(now.getTime() - m * 60_000);
   const fresh = (liveAt: Date | null, previousId: string | null = "dpl_prv00000001") =>
-    facts({ deploys: new Map([[APP, { currentId: "dpl_cur00000001", previousId, liveAt }]]) });
+    facts({ deploys: new Map([[APP, { currentId: "dpl_cur00000001", previousId, liveAt }]]), previousNext: new Map([[APP, { status: "ok" as const, version: "16.3.8" }]]) });
   it("MonitorDown / HighLatency within the window → recheck plus vercel_rollback to the previous deployment", () => {
     for (const ruleKey of ["MonitorDown", "HighLatency"]) {
       const ps = proposalsFor(alert({ ruleKey }), fresh(minAgo(20)), book, now);
@@ -167,11 +168,9 @@ describe("auto-rollback rule: a rollback proposal for a down or slow app right a
     expect(proposalsFor(slow, fresh(minAgo(5), null), book, now).map((p) => p.action)).not.toContain("vercel_rollback");
     expect(proposalsFor(slow, fresh(null), book, now).map((p) => p.action)).not.toContain("vercel_rollback");
   });
-  it("a down site outside the window (owner 17 Oct): recheck, then redeploy and rollback for the owner to approve", () => {
+  it("a down site outside the window (owner 17 Oct; D17: no rollback any more): recheck, then a redeploy for the owner to approve", () => {
     const ps = proposalsFor(alert({}), fresh(minAgo(90)), book, now);
-    expect(ps.map((p) => [p.action, p.targetRef, p.risk])).toEqual([
-      ["recheck", MON, "safe"], ["vercel_redeploy", "dpl_cur00000001", "risky"], ["vercel_rollback", "dpl_prv00000001", "risky"],
-    ]);
+    expect(ps.map((p) => [p.action, p.targetRef, p.risk])).toEqual([["recheck", MON, "safe"], ["vercel_redeploy", "dpl_cur00000001", "risky"]]);
     // Without a previous deployment only the redeploy; without any deployment (not a Vercel app) only the recheck.
     expect(proposalsFor(alert({}), fresh(minAgo(90), null), book, now).map((p) => p.action)).toEqual(["recheck", "vercel_redeploy"]);
     expect(proposalsFor(alert({}), facts(), book, now).map((p) => p.action)).toEqual(["recheck"]);
@@ -180,6 +179,78 @@ describe("auto-rollback rule: a rollback proposal for a down or slow app right a
     // A failed heartbeat is a job, not the site: no redeploy for it.
     const hb = facts({ monitorKinds: new Map([[MON, "heartbeat"]]), deploys: new Map([[APP, { currentId: "dpl_cur00000001", previousId: "dpl_prv00000001", liveAt: minAgo(90) }]]) });
     expect(proposalsFor(alert({}), hb, book, now)).toEqual([]);
+  });
+});
+
+// Watchbell 1.2.2 (D17, seen 24 Oct): days of HighLatency got a rollback proposal because the app had deployed.
+describe("a rollback only when a fresh deploy caused it, never back to a vulnerable Next.js", () => {
+  const minAgo = (m: number) => new Date(now.getTime() - m * 60_000);
+  const deploys = (liveAt: Date) => new Map([[APP, { currentId: "dpl_cur00000001", previousId: "dpl_prv00000001", liveAt }]]);
+  const prev = (status: "ok" | "vulnerable" | "unknown", version: string | null = "16.3.8") => new Map([[APP, { status, version }]]);
+  const actions = (ps: { action: string }[]) => ps.map((p) => p.action);
+
+  it("chronic latency (the same alert was firing before the deploy) → no rollback; the recheck says it isn't the deploy", () => {
+    const f = facts({ deploys: deploys(minAgo(20)), previousNext: prev("ok"), problemSince: new Map([[ALERT, new Date("2026-10-12T02:00:00Z")]]) });
+    const ps = proposalsFor(alert({ ruleKey: "HighLatency", startedAt: minAgo(5) }), f, book, now);
+    expect(actions(ps)).toEqual(["recheck"]);
+    expect(ps[0].reason).toMatch(/^Slow since 12 Oct 09:00 WIB, not tied to a deploy \(live since 15 Oct 11:40 WIB\): check the app\. /);
+    expect(ps[0].reason.length).toBeLessThanOrEqual(200);
+  });
+  it("an alert that started before the deploy went live → no rollback, in the window or outside it, and never a redeploy for latency", () => {
+    for (const live of [minAgo(20), minAgo(300)]) {
+      const f = facts({ deploys: deploys(live), previousNext: prev("ok") });
+      const slow = proposalsFor(alert({ ruleKey: "HighLatency", startedAt: minAgo(400) }), f, book, now);
+      expect(actions(slow)).toEqual(["recheck"]);
+      expect(slow[0].reason).toMatch(/^Slow since /);
+      const down = proposalsFor(alert({ startedAt: minAgo(400) }), f, book, now);
+      expect(actions(down)).toEqual(["recheck"]);
+      expect(down[0].reason).toMatch(/^Down since .*not tied to a deploy/);
+    }
+    // Slow long after the deploy went live (review M1): said as such, with the by-hand way out.
+    const late = proposalsFor(alert({ ruleKey: "HighLatency" }), facts({ deploys: deploys(minAgo(300)), previousNext: prev("ok") }), book, now);
+    expect(actions(late)).toEqual(["recheck"]);
+    expect(late[0].reason).toMatch(/^Slow since 15 Oct 11:59 WIB, 5 h after the deploy went live, outside the rollback window: check the app or roll back by hand\. /);
+  });
+  it("inside the window with nothing to roll back to (a first deploy): the note says when it started, not 'outside the window'", () => {
+    const first = facts({ deploys: new Map([[APP, { currentId: "dpl_cur00000001", previousId: null, liveAt: minAgo(20) }]]) });
+    const ps = proposalsFor(alert({ ruleKey: "HighLatency", startedAt: minAgo(5) }), first, book, now);
+    expect(actions(ps)).toEqual(["recheck"]);
+    expect(ps[0].reason).toMatch(/^Slow since 15 Oct 11:55 WIB, started 15 min after the deploy went live: check the app\. /);
+  });
+  it("latency starting right after a fresh deploy → rollback proposed (the reason is the alert's)", () => {
+    const ps = proposalsFor(alert({ ruleKey: "HighLatency", startedAt: minAgo(5) }), facts({ deploys: deploys(minAgo(20)), previousNext: prev("ok") }), book, now);
+    expect(actions(ps)).toEqual(["recheck", "vercel_rollback"]);
+    expect(ps[1].reason).toBe(ps[0].reason);
+    expect(ps[1].reason).not.toMatch(/since|unknown/);
+  });
+  it("the previous deployment's Next.js has known advisories → no rollback, for any alert", () => {
+    const f = facts({ deploys: deploys(minAgo(20)), previousNext: prev("vulnerable") });
+    const slow = proposalsFor(alert({ ruleKey: "HighLatency", startedAt: minAgo(5) }), f, book, now);
+    expect(actions(slow)).toEqual(["recheck"]);
+    expect(slow[0].reason).toMatch(/^No rollback: the previous deployment runs Next\.js 16\.3\.8, which has known advisories\. /);
+    // A down site that started failing with this deploy gets the redeploy instead, waiting for approval.
+    const down = proposalsFor(alert({ startedAt: minAgo(5) }), f, book, now);
+    expect(actions(down)).toEqual(["recheck", "vercel_redeploy"]);
+    expect(down[1].reason).toMatch(/^No rollback: /);
+    const failed = proposalsFor(alert({ ruleKey: "DeploymentFailed", subject: APP, severity: "warning" }), f, book, now);
+    expect(actions(failed)).toEqual(["vercel_redeploy"]);
+  });
+  it("an unknown previous Next.js → the rollback is still proposed, and its reason says so first", () => {
+    for (const previousNext of [prev("unknown", null), undefined]) {
+      const ps = proposalsFor(alert({ startedAt: minAgo(5) }), facts({ deploys: deploys(minAgo(20)), previousNext }), book, now);
+      expect(actions(ps)).toEqual(["recheck", "vercel_rollback"]);
+      expect(ps[1].reason).toMatch(/^Previous deployment's Next\.js version is unknown: check it has no known advisories before approving\. /);
+      expect(ps[1].reason.length).toBeLessThanOrEqual(200);
+      expect(ps[0].reason).not.toMatch(/unknown/);
+    }
+  });
+  it("MonitorDown right after a deploy: unchanged (recheck, rollback); outside the window: recheck, redeploy", () => {
+    const ok = prev("ok");
+    expect(actions(proposalsFor(alert({ startedAt: minAgo(5) }), facts({ deploys: deploys(minAgo(20)), previousNext: ok }), book, now))).toEqual(["recheck", "vercel_rollback"]);
+    expect(actions(proposalsFor(alert({ startedAt: minAgo(5) }), facts({ deploys: deploys(minAgo(300)), previousNext: ok }), book, now))).toEqual(["recheck", "vercel_redeploy"]);
+    // Not knowing when it started (no deploy time) keeps the redeploy.
+    const noTime = facts({ deploys: new Map([[APP, { currentId: "dpl_cur00000001", previousId: "dpl_prv00000001", liveAt: null }]]), previousNext: ok });
+    expect(actions(proposalsFor(alert({}), noTime, book, now))).toEqual(["recheck", "vercel_redeploy"]);
   });
 });
 

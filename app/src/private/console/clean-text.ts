@@ -1,4 +1,4 @@
-import { type AliasBook, hideEmails } from "@/lib/view/display-name";
+import { type AliasBook, hideEmails, realNames } from "@/lib/view/display-name";
 import { scrubText as consoleScrub } from "@/private/console/scrub";
 import { scrubText as mcpScrub } from "@/private/mcp/scrub";
 
@@ -42,3 +42,10 @@ export function cleanOfficeText(text: string, book: AliasBook): string {
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 export const cleanLine = (text: string, book: AliasBook, max: number): string =>
   clip(cleanOfficeText(String(text ?? "").replace(/\s+/g, " "), book).replace(/\s+/g, " ").trim(), max);
+
+// Watchbell 1.2.2 (D18): text for the owner's own Telegram chat. The same scrub (no key, email or URL; an unknown host
+// is still "site.example"), then the real app, database and host names back in place of their aliases (realNames), so
+// the auto-action and report notices name things the way the alert messages do. Never for a screen, Discord or a page.
+export const ownerText = (text: string, book: AliasBook): string => realNames(cleanOfficeText(text, book), book);
+export const ownerLine = (text: string, book: AliasBook, max: number): string =>
+  clip(ownerText(String(text ?? "").replace(/\s+/g, " "), book).replace(/\s+/g, " ").trim(), max);

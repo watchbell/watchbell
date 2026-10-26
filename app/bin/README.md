@@ -21,22 +21,42 @@ The first start creates `~/.watchbell/` (on Windows `%USERPROFILE%\.watchbell\`)
   the tokens you save.
 - `data/`: the database (readable by your user only).
 
-Then it prints the address (http://localhost:3100) and a one-time setup code, and opens `/setup` in your browser,
+Then it shows the address (http://localhost:3100) and a one-time setup code, and opens `/setup` in your browser,
 where you create the owner account. `watchbell --no-open` skips the browser. Set `WATCHBELL_HOME` to keep the settings
 and data in another folder. Nothing is written inside the npm folder.
+
+In a terminal it then shows a short menu:
+
+```
+  Watchbell 1.2.2
+  http://localhost:3100
+  First run: setup code ABCDE-FGH23
+
+  ❯ Open in browser
+    Keep running in the background
+    Show live log
+    Stop and exit
+```
+
+Use ↑ and ↓ and Enter, or a first letter (`o` opens, `k` keeps it running; `s` moves between the two S items, Enter
+runs the one picked). **Keep running in the background** keeps Watchbell running after you close the terminal (stop
+it with `watchbell stop`); **Show live log** follows the log until you press a key; **Stop and exit** and Ctrl+C stop
+it cleanly. The server's own messages go to `~/.watchbell/logs/watchbell.log` (at most two files of about 5 MB), and an
+error still shows as one line with that path. `watchbell start --verbose` prints everything in the terminal instead,
+without the menu. Without a terminal (piped output, CI) there is no menu and no colour.
 
 ## Commands
 
 | Command | What it does |
 | --- | --- |
-| `watchbell` | Start (the default command; `watchbell start` is the same). `--no-open`: don't open the browser. |
+| `watchbell` | Start (the default command; `watchbell start` is the same). `--no-open`: don't open the browser. `--verbose`: the server's messages in the terminal, no menu. An unknown option stops it: `Unknown option --no-openen (see watchbell --help)`. |
 | `watchbell --host <addr> --port <n>` | Listen on this address and port for this run (with `start` or `run`). `0.0.0.0` opens it to your network: see [From another computer](#from-another-computer). |
 | `watchbell run` | Start in the foreground for a service manager: never opens a browser (the service uses it). |
 | `watchbell stop` | Stop the running Watchbell cleanly (`--timeout <seconds>`, default 30). |
-| `watchbell status` | Is it running, at which address, which folders. Exit code 0 when it runs, 3 when it doesn't. Also warns when the installed service runs a Node.js that no longer exists. |
+| `watchbell status` | Is it running, at which address (the one it really uses, also after `--port`), which folders and log. Exit code 0 when it runs, 3 when it doesn't. Also warns when the installed service runs a Node.js that no longer exists. |
 | `watchbell service install` | Start Watchbell when you log in: a systemd user service on Linux, a per-user Scheduled Task on Windows, a launchd agent (`~/Library/LaunchAgents/watchbell.plist`) on macOS. No admin rights. Asks first; `--yes` confirms. |
 | `watchbell service uninstall` | Remove that service or task. Settings and data stay. |
-| `watchbell update` | Update to the latest version with the npm next to your Node.js. A service installed with `watchbell service install` is stopped first and started again after; a Watchbell started in a terminal must be stopped first. |
+| `watchbell update` | Update to the latest version with the npm next to your Node.js, into the folder this copy was installed in (`npm install -g --prefix <that folder>`). A service installed with `watchbell service install` is stopped first and started again after; a Watchbell started in a terminal must be stopped first. |
 | `watchbell reset-login <email>` | Give an account a new temporary password and remove its authenticator (run it while Watchbell is stopped). |
 | `watchbell start --new-key` | Only when `OPS_ENCRYPTION_KEY` was lost: start with a new one (tokens saved with the old key must be entered again). |
 | `watchbell --version`, `--help` | Version, help. |
@@ -69,8 +89,8 @@ you to put it back from your backup (or to start over with `watchbell start --ne
 Watchbell listens on this machine only. The safest way in from another computer is an SSH tunnel:
 `ssh -N -L 3100:127.0.0.1:3100 you@the-watchbell-machine`, then open http://localhost:3100 there.
 
-`watchbell --host 0.0.0.0` opens it to your network for one run. It prints the addresses other computers can use and a
-warning: finish `/setup` first, keep it to networks you trust, and put HTTPS in front (a reverse proxy) before it
+`watchbell --host 0.0.0.0` opens it to your network for one run. It shows the addresses other computers can use and a
+warning (the longer text is in the log): finish `/setup` first, keep it to networks you trust, and put HTTPS in front (a reverse proxy) before it
 faces the internet. Sign-in works from those addresses; set `SITE_URL` in `~/.watchbell/.env` to one of them so links
 in alerts work there too. To keep it, set `HOST` (and `PORT`) in the file; the service reads the file.
 
@@ -87,18 +107,21 @@ Watchbell answers, and you are sure none runs, delete the file it names and star
 
 ## Updating and removing
 
-`watchbell update` updates the program (it runs `npm install -g watchbell@latest`); your settings and data stay in
+`watchbell update` updates the program (it runs `npm install -g watchbell@latest` with `--prefix` of the folder this
+copy runs from, so another Node.js on your PATH can't take the update); your settings and data stay in
 `~/.watchbell/`. A service installed with `watchbell service install` is stopped and started again for it; a
 Watchbell started in a terminal must be stopped first (`watchbell stop`). When npm's global folder belongs to root,
-stop Watchbell and run `sudo npm install -g watchbell@latest`.
+stop Watchbell and run the `sudo npm install -g ...` command it names.
 
 From 1.0.x, update once by hand, because 1.0 has no `watchbell update`: `watchbell stop` (or stop the service you set
 up), then `npm install -g watchbell@latest`, then start it again. From 1.1 on, `watchbell update` does it.
 
 There is no telemetry. `watchbell` and `watchbell status` ask registry.npmjs.org at most once a day whether a newer
-version exists (a plain request for the version number, nothing about you) and say so in one line.
-`WATCHBELL_NO_UPDATE_CHECK=1` in `~/.watchbell/.env` or in the environment (or `NO_UPDATE_NOTIFIER=1`, or `CI`) turns
-that off.
+version exists (a plain request for the version number, nothing about you) and say so in one line. They also read
+nodejs.org's release list and endoflife.date's Node.js dates at most twice a day, and print one warning line when the
+Node.js they run on has a security fix waiting or is past end of life. The running Watchbell reads the same two lists
+every 12 hours for its Settings › Collector line. `WATCHBELL_NO_UPDATE_CHECK=1` in `~/.watchbell/.env` or in the
+environment turns all of it off. `NO_UPDATE_NOTIFIER=1` or `CI` turn off only the commands' part.
 
 To remove Watchbell: `watchbell service uninstall` (if you installed the service), `npm uninstall -g watchbell`, then
 delete `~/.watchbell/` if you no longer want the data.

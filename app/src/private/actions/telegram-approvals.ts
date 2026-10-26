@@ -12,7 +12,7 @@ import { type NotifyLang, readNotifyLang } from "@/lib/notify/lang";
 import type { BotClient, InlineKeyboard, TelegramCallback, TelegramOwner } from "@/lib/notify/telegram-bot";
 import { type AliasBook, EMPTY_BOOK } from "@/lib/view/display-name";
 import { actionProposals } from "@/private/db/schema";
-import { cleanLine } from "@/private/console/clean-text";
+import { ownerLine } from "@/private/console/clean-text";
 import { toProposal } from "./proposals";
 import { decideAndRun } from "./proposals-decide";
 import { proposalMessage } from "./proposals-notify";
@@ -108,7 +108,7 @@ const STATUS: Record<NotifyLang, Record<Proposal["status"], string>> = {
 };
 
 export function statusLine(p: Proposal, book: AliasBook, lang: NotifyLang = "en"): string {
-  const result = p.result && (p.status === "done" || p.status === "failed" || p.status === "expired") ? cleanLine(p.result, book, 200) : "";
+  const result = p.result && (p.status === "done" || p.status === "failed" || p.status === "expired") ? ownerLine(p.result, book, 200) : "";
   return `Status: ${STATUS[lang][p.status]}${result ? ` — ${esc(result)}` : ""}`;
 }
 

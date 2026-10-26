@@ -10,7 +10,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseEnv } from "node:util";
 import { inspectLock, looksLikeServer, processNameOf, superviseChild } from "../scripts/selfhost-lib.mjs";
-import { browserCommand, COMMANDS, launchdPlist, main, parseArgs, scheduledTaskAction, serviceNodePath, systemdUnit } from "./watchbell.mjs";
+import { firstLine, installLogFile, rotateLog, rotatingWriter } from "../scripts/selfhost-log.mjs";
+import { browserCommand, COMMANDS, installPrefix, launchdPlist, main, MENU, NETWORK_WARNING, parseArgs, scheduledTaskAction, serviceNodePath, systemdUnit } from "./watchbell.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP = path.resolve(HERE, "..");
@@ -32,22 +33,54 @@ class FakeChild extends EventEmitter {
     super();
     this.pid = 4242;
     this.signals = [];
+    this.connected = true;
+    this.unrefed = false;
   }
   kill(sig) {
     this.signals.push(sig);
     return true;
   }
+  disconnect() {
+    this.connected = false;
+  }
+  unref() {
+    this.unrefed = true;
+  }
+}
+
+/** A terminal for the menu: raw mode is recorded, keys are sent with key(). */
+class FakeTty extends EventEmitter {
+  constructor() {
+    super();
+    this.isTTY = true;
+    this.raw = [];
+    this.paused = false;
+  }
+  setRawMode(on) {
+    this.raw.push(on);
+    return this;
+  }
+  resume() {
+    this.paused = false;
+  }
+  pause() {
+    this.paused = true;
+  }
+  key(str, key = {}) {
+    this.emit("keypress", str, { name: str, ...key });
+  }
 }
 
 /** A scratch package root (package.json + server/server.js placeholder) and a stub for everything main() touches. */
-function harness({ env = {}, platform = "linux", fetch, exitWith = 0, runSync, ask, lockAlive = [], processName = () => "node" } = {}) {
+function harness({ env = {}, platform = "linux", fetch, exitWith = 0, runSync, ask, lockAlive = [], processName = () => "node", tty = false, pkgDir = ["pkg"] } = {}) {
   const root = scratch("box");
-  const pkgRoot = path.join(root, "pkg");
+  const pkgRoot = path.join(root, ...pkgDir);
   fs.mkdirSync(path.join(pkgRoot, "server"), { recursive: true });
   fs.writeFileSync(path.join(pkgRoot, "package.json"), JSON.stringify({ name: "watchbell", version: "9.9.9" }));
   fs.writeFileSync(path.join(pkgRoot, "server", "server.js"), "// placeholder\n");
   const home = path.join(root, "home dir");
-  const log = { out: [], err: [], spawns: [], opened: [], runs: [], asked: [] };
+  const log = { out: [], err: [], spawns: [], opened: [], runs: [], asked: [], screen: [] };
+  const stdin = tty ? new FakeTty() : null;
   const proc = new EventEmitter();
   const deps = {
     env: { WATCHBELL_HOME: home, WATCHBELL_NO_UPDATE_CHECK: "1", ...env }, // the update check is tested on its own
@@ -59,6 +92,10 @@ function harness({ env = {}, platform = "linux", fetch, exitWith = 0, runSync, a
     cliPath: path.join(pkgRoot, "bin", "watchbell.mjs"),
     out: (m) => log.out.push(m),
     err: (m) => log.err.push(m),
+    write: (s) => log.screen.push(s),
+    stdin,
+    stdoutTty: tty,
+    keypressEvents: () => {},
     spawn: (cmd, args, opts) => {
       const child = new FakeChild();
       log.spawns.push({ cmd, args, opts, child });
@@ -87,7 +124,7 @@ function harness({ env = {}, platform = "linux", fetch, exitWith = 0, runSync, a
     readyTimeoutMs: 60_000,
   };
   const run = (argv) => main(argv, deps);
-  return { root, pkgRoot, home, envFile: path.join(home, ".env"), dataDir: path.join(home, "data"), deps, log, run, proc };
+  return { root, pkgRoot, home, envFile: path.join(home, ".env"), dataDir: path.join(home, "data"), logFile: path.join(home, "logs", "watchbell.log"), deps, log, run, proc, stdin };
 }
 
 const healthy = async () => new Response(JSON.stringify({ ok: true, service: "watchbell" }), { status: 200 });
@@ -125,7 +162,7 @@ describe("arguments and help", () => {
     for (const argv of [["frobnicate"], ["--bogus"], ["stop", "--no-open"], ["service"], ["service", "restart"], ["reset-login"], ["status", "extra"], ["stop", "--timeout", "0"]]) {
       const h = harness();
       assert.equal(await h.run(argv), 2, argv.join(" "));
-      assert.ok(h.log.err.some((e) => e.startsWith("watchbell: ")), argv.join(" "));
+      assert.ok(h.log.err.some((e) => e.startsWith("watchbell: ") || e.startsWith("Unknown option ")), argv.join(" "));
       assert.equal(fs.existsSync(h.home), false, argv.join(" "));
     }
   });
@@ -1174,6 +1211,227 @@ describe("update notice (D8)", () => {
   });
 });
 
+// ------------------------------------------------------------------------------------------------ Watchbell 1.2.2: the Node.js runtime (D20)
+
+const NODE_INDEX = "https://nodejs.org/dist/index.json";
+const NODE_EOL = "https://endoflife.date/api/v1/products/nodejs/";
+const nodeRelease = (version, security) => ({ version, date: "2026-10-21", lts: "Krypton", security });
+const NODE_INDEX_BODY = [nodeRelease("v24.22.2", false), nodeRelease("v24.22.1", true), nodeRelease("v24.12.0", false), nodeRelease("v25.9.0", false)];
+const NODE_EOL_BODY = { result: { releases: [{ name: "25", isEol: true, eolFrom: "2026-06-01" }, { name: "24", isEol: false, eolFrom: "2028-04-30" }] } };
+const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+
+/** A fetch stub for the runtime check: nodejs.org and endoflife.date answer (or run `index` / `eol`); the registry never does. */
+function nodeFetch(h, { version = "24.12.0", index, eol } = {}) {
+  const calls = [];
+  h.deps.nodeVersion = version;
+  h.deps.now = () => Date.UTC(2026, 9, 25, 12);
+  h.deps.fetch = async (url, init) => {
+    const u = String(url);
+    if (u === NODE_INDEX || u === NODE_EOL) {
+      calls.push({ url: u, init });
+      const answer = u === NODE_INDEX ? index : eol;
+      if (answer) return answer(init);
+      return json(u === NODE_INDEX ? NODE_INDEX_BODY : NODE_EOL_BODY);
+    }
+    if (u === REGISTRY) throw new Error("offline");
+    if (h.log.spawns.length) return healthy();
+    throw new Error("ECONNREFUSED");
+  };
+  delete h.deps.env.WATCHBELL_NO_UPDATE_CHECK;
+  return calls;
+}
+
+const RUNTIME_WARNING = /^warning: Node\.js /;
+const runtimeWarnings = (h) => h.log.err.filter((l) => RUNTIME_WARNING.test(l));
+
+describe("Node.js runtime check (D20)", () => {
+  test("status: one warning for a Node.js with a security fix waiting, none for a patched one", async () => {
+    for (const [version, line] of [
+      ["24.12.0", "warning: Node.js 24.12.0 has a security fix available (24.22.1). Update Node.js, then restart Watchbell."],
+      ["24.22.1", null], // the fix itself; the later 24.22.2 is no security release
+      ["24.23.0", null],
+      ["25.9.0", "warning: Node.js 25.9.0 is past end of life (since 2026-06-01) and gets no security fixes. Move to a supported Node.js line, then restart Watchbell."],
+    ]) {
+      const h = harness();
+      fs.mkdirSync(h.home, { recursive: true });
+      const calls = nodeFetch(h, { version });
+      assert.equal(await h.run(["status"]), 3, version);
+      assert.equal(calls.length, 2, version);
+      assert.deepEqual(runtimeWarnings(h), line ? [line] : [], version);
+      assert.deepEqual(h.log.err.filter((l) => !RUNTIME_WARNING.test(l)), [], version);
+    }
+  });
+
+  test("only plain GETs of the two public lists are sent, asking for gzip, never Brotli", async () => {
+    const h = harness();
+    const calls = nodeFetch(h);
+    await h.run(["status"]);
+    assert.deepEqual(calls.map((c) => c.url).sort(), [NODE_EOL, NODE_INDEX]);
+    for (const c of calls) {
+      assert.equal(c.init.method, "GET");
+      // Fix round 1 (M4): Node2Shell is in Node's Brotli decoder.
+      assert.deepEqual(c.init.headers, { accept: "application/json", "accept-encoding": "gzip" });
+      assert.equal(c.init.body, undefined);
+      assert.ok(c.init.signal instanceof AbortSignal);
+    }
+  });
+
+  test("offline, an error answer or a list it can't read: nothing is printed and nothing reads as fine", async () => {
+    const answers = [
+      () => Promise.reject(new TypeError("fetch failed")),
+      async () => new Response("Service Unavailable", { status: 503 }),
+      async () => new Response("<html>captive portal</html>", { status: 200 }),
+      async () => json([{ version: "v24.22.1" }]), // no security flag
+    ];
+    for (const index of answers) {
+      const h = harness();
+      fs.mkdirSync(h.home, { recursive: true });
+      nodeFetch(h, { index });
+      assert.equal(await h.run(["status"]), 3);
+      assert.deepEqual(h.log.err, []);
+      assert.equal(JSON.parse(fs.readFileSync(path.join(h.home, "node-check.json"), "utf8")).indexOk, false);
+    }
+  });
+
+  test("the answers are kept for 12 h in <home>/node-check.json; a failed ask is remembered and keeps the last good list", async () => {
+    const h = harness();
+    fs.mkdirSync(h.home, { recursive: true });
+    const calls = nodeFetch(h);
+    let now = Date.UTC(2026, 9, 25, 12);
+    h.deps.now = () => now;
+    await h.run(["status"]);
+    const cache = JSON.parse(fs.readFileSync(path.join(h.home, "node-check.json"), "utf8"));
+    assert.equal(cache.checkedAt, "2026-10-25T12:00:00.000Z");
+    assert.equal(cache.indexOk, true);
+    assert.deepEqual(cache.index.security, ["24.22.1"]);
+    now += 11 * HOUR;
+    await h.run(["status"]);
+    assert.equal(calls.length, 2, "no new requests within 12 h");
+    assert.equal(runtimeWarnings(h).length, 2, "the cached answer still warns");
+    now += 2 * HOUR;
+    const offline = nodeFetch(h, { index: () => Promise.reject(new Error("offline")), eol: () => Promise.reject(new Error("offline")) });
+    h.deps.now = () => now;
+    await h.run(["status"]);
+    assert.equal(offline.length, 2, "asked again after 12 h");
+    assert.equal(runtimeWarnings(h).length, 3, "offline: the last good list still shows the fix");
+    const after = JSON.parse(fs.readFileSync(path.join(h.home, "node-check.json"), "utf8"));
+    assert.equal(after.indexOk, false);
+    assert.deepEqual(after.index.security, ["24.22.1"]);
+    // Patched, with only that old list: unknown, so no line (and never "fine").
+    h.deps.nodeVersion = "24.22.1";
+    await h.run(["status"]);
+    assert.equal(runtimeWarnings(h).length, 3);
+  });
+
+  test("WATCHBELL_NO_UPDATE_CHECK, NO_UPDATE_NOTIFIER and CI skip it too, from the environment or ~/.watchbell/.env", async () => {
+    for (const [key, value] of [["WATCHBELL_NO_UPDATE_CHECK", "1"], ["NO_UPDATE_NOTIFIER", "1"], ["CI", "true"]]) {
+      const h = harness();
+      const calls = nodeFetch(h);
+      h.deps.env[key] = value;
+      await h.run(["status"]);
+      assert.equal(calls.length, 0, `${key}=${value}`);
+      assert.deepEqual(runtimeWarnings(h), []);
+    }
+    const h = harness();
+    fs.mkdirSync(h.home, { recursive: true });
+    fs.writeFileSync(path.join(h.home, ".env"), "WATCHBELL_NO_UPDATE_CHECK=1\n");
+    const calls = nodeFetch(h);
+    await h.run(["status"]);
+    assert.equal(calls.length, 0);
+  });
+
+  test("start warns once the server is ready; a slow nodejs.org never holds the start back; run never asks", async () => {
+    const h = harness({ exitWith: null });
+    let release;
+    const calls = nodeFetch(h, { index: () => new Promise((r) => (release = () => r(json(NODE_INDEX_BODY)))) });
+    const done = h.run(["--no-open"]);
+    while (!h.log.out.some((l) => l.startsWith("Watchbell is running"))) await new Promise((r) => setTimeout(r, 5));
+    assert.equal(calls.length, 2, "asked while the server starts");
+    assert.deepEqual(runtimeWarnings(h), [], "nothing yet: the list hasn't come");
+    release();
+    while (!runtimeWarnings(h).length) await new Promise((r) => setTimeout(r, 5));
+    h.log.spawns[0].child.emit("exit", 0, null);
+    assert.equal(await done, 0);
+    assert.equal(runtimeWarnings(h).length, 1);
+
+    const r = harness({ exitWith: null });
+    const none = nodeFetch(r);
+    assert.equal(await startUntil(r, ["run"]), 0);
+    assert.equal(none.length, 0);
+  });
+
+  // Fix round 1 (M5): a service installed with another Node.js (nvm, fnm, volta) runs that one, not this CLI's.
+  test("status also checks the Node.js an installed service runs, when it is another one", async () => {
+    const h = harness();
+    h.deps.env.XDG_CONFIG_HOME = path.join(h.root, "config");
+    const unitFile = path.join(h.root, "config", "systemd", "user", "watchbell.service");
+    fs.mkdirSync(path.dirname(unitFile), { recursive: true });
+    const old = path.join(h.root, "node-24.12.0", "bin", "node");
+    fs.mkdirSync(path.dirname(old), { recursive: true });
+    fs.writeFileSync(old, "");
+    fs.writeFileSync(unitFile, systemdUnit({ home: h.home }, { execPath: old, cliPath: h.deps.cliPath }));
+    let answer = { status: 0, stdout: "v24.12.0\n", stderr: "" };
+    const asked = [];
+    h.deps.runSync = (cmd, args, opts) => {
+      asked.push({ cmd, args, timeout: opts?.timeout });
+      return answer;
+    };
+    nodeFetch(h, { version: "24.22.1" });
+    await h.run(["status"]);
+    assert.deepEqual(asked, [{ cmd: old, args: ["--version"], timeout: 1000 }]);
+    assert.deepEqual(runtimeWarnings(h), []);
+    assert.deepEqual(h.log.err, [
+      `warning: the Watchbell service's Node.js (${old}), version 24.12.0, has a security fix available (24.22.1). Update Node.js, then run watchbell service install again.`,
+    ]);
+    // The CLI's own one too, when both are old: two lines.
+    h.log.err.length = 0;
+    answer = { status: 0, stdout: "v25.9.0\n", stderr: "" };
+    h.deps.nodeVersion = "24.12.0";
+    await h.run(["status"]);
+    assert.equal(h.log.err.length, 2, h.log.err.join("\n"));
+    assert.ok(h.log.err[1].includes("version 25.9.0, is past end of life"));
+    // Same version, a Node.js that won't run, or the switch: no extra line.
+    for (const [a, env] of [[{ status: 0, stdout: "v24.22.1\n" }, {}], [{ status: null, stdout: "" }, {}], [{ status: 0, stdout: "v24.12.0\n" }, { WATCHBELL_NO_UPDATE_CHECK: "1" }]]) {
+      h.log.err.length = 0;
+      asked.length = 0;
+      answer = { stderr: "", ...a };
+      h.deps.nodeVersion = "24.22.1";
+      Object.assign(h.deps.env, env);
+      await h.run(["status"]);
+      assert.deepEqual(h.log.err, [], JSON.stringify(a));
+    }
+    assert.deepEqual(asked, [], "switched off: the service's Node.js isn't run either");
+  });
+
+  test("status doesn't run the service's Node.js when it is this CLI's own", async () => {
+    const h = harness();
+    h.deps.env.XDG_CONFIG_HOME = path.join(h.root, "config");
+    const unitFile = path.join(h.root, "config", "systemd", "user", "watchbell.service");
+    fs.mkdirSync(path.dirname(unitFile), { recursive: true });
+    const own = path.join(h.root, "node", "bin", "node");
+    fs.mkdirSync(path.dirname(own), { recursive: true });
+    fs.writeFileSync(own, "");
+    fs.writeFileSync(unitFile, systemdUnit({ home: h.home }, { execPath: own, cliPath: h.deps.cliPath }));
+    const asked = [];
+    h.deps.runSync = (cmd) => {
+      asked.push(cmd);
+      return { status: 0, stdout: "v24.12.0\n", stderr: "" };
+    };
+    nodeFetch(h, { version: "24.22.1" });
+    h.deps.execPath = own;
+    await h.run(["status"]);
+    assert.deepEqual(asked, []);
+    assert.deepEqual(h.log.err, []);
+  });
+
+  test("checkNodeRuntime never throws, even when the home can't be read", async () => {
+    const { checkNodeRuntime } = await import("./watchbell.mjs");
+    const h = harness();
+    nodeFetch(h);
+    assert.deepEqual(await checkNodeRuntime({ home: "\0bad" }, { ...h.deps, fetch: undefined }), []);
+  });
+});
+
 describe("watchbell update (D9)", () => {
   const npmRuns = (log, { status = 0, stderr = "", bump, systemd } = {}) => (cmd, args, opts) => {
     log.push({ cmd, args, opts });
@@ -1404,7 +1662,7 @@ describe("--host and --port (D10)", () => {
 
   test("--host 0.0.0.0 --port: wins over .env and WATCHBELL_* for this run, lists the addresses, warns, names SITE_URL", async () => {
     const h = lanHarness({ WATCHBELL_PORT: "3500", WATCHBELL_HOST: "127.0.0.1" });
-    assert.equal(await startUntil(h, ["--no-open", "--host", "0.0.0.0", "--port", "3300"], (_o, err) => err.some((l) => l.startsWith("note: SITE_URL"))), 0);
+    assert.equal(await startUntil(h, ["--verbose", "--no-open", "--host", "0.0.0.0", "--port", "3300"], (_o, err) => err.some((l) => l.startsWith("note: SITE_URL"))), 0);
     const { env } = h.log.spawns[0].opts;
     assert.equal(env.HOSTNAME, "0.0.0.0");
     assert.equal(env.HOST, "0.0.0.0");
@@ -1432,7 +1690,7 @@ describe("--host and --port (D10)", () => {
     const out = h.log.out.join("\n");
     assert.ok(out.includes("  http://192.168.1.20:3100\n  http://[2001:db8::20]:3100"), out);
     const one = lanHarness();
-    assert.equal(await startUntil(one, ["--no-open", "--host", "192.168.1.20"], (_o, err) => err.some((l) => l.startsWith("tunnel"))), 0);
+    assert.equal(await startUntil(one, ["--verbose", "--no-open", "--host", "192.168.1.20"], (_o, err) => err.some((l) => l.startsWith("tunnel"))), 0);
     assert.ok(one.log.out.join("\n").includes("open it at:\n  http://192.168.1.20:3100"));
     assert.ok(!one.log.err.some((l) => l.startsWith("note:")), "SITE_URL already names that address");
   });
@@ -1448,7 +1706,7 @@ describe("--host and --port (D10)", () => {
     const h = lanHarness();
     fs.mkdirSync(h.home, { recursive: true });
     fs.writeFileSync(h.envFile, "SITE_URL=https://ops.example.test\n");
-    assert.equal(await startUntil(h, ["--no-open", "--host", "0.0.0.0"], (_o, err) => err.some((l) => l.startsWith("tunnel"))), 0);
+    assert.equal(await startUntil(h, ["--verbose", "--no-open", "--host", "0.0.0.0"], (_o, err) => err.some((l) => l.startsWith("tunnel"))), 0);
     assert.ok(!h.log.err.some((l) => l.startsWith("note:")), h.log.err.join("\n"));
     assert.equal(h.log.spawns[0].opts.env.SITE_URL, "https://ops.example.test");
   });
@@ -1518,6 +1776,8 @@ const lock = path.join(dataDir, "pg", ".watchpost.lock");
 fs.mkdirSync(path.dirname(lock), { recursive: true });
 fs.writeFileSync(lock, String(process.pid));
 fs.writeFileSync(path.join(dataDir, "setup-code"), "QWERT-YUIOP\\n");
+console.log("fake banner: Next.js ready");
+console.error("fake warning: \\u001b[31mred\\u001b[0m text\\n    at a stack line");
 fs.writeFileSync(path.join(dataDir, "seen-env.json"), JSON.stringify({ cwd: process.cwd(), host: process.env.HOSTNAME, port: process.env.PORT, migrations: process.env.WATCHBELL_MIGRATIONS_DIR }));
 const server = http.createServer((_q, res) => res.end(JSON.stringify({ ok: true, service: "watchbell" })));
 server.listen(Number(process.env.PORT), process.env.HOSTNAME);
@@ -1563,7 +1823,7 @@ describe("the CLI file in a scratch package (real processes)", () => {
     fs.mkdirSync(path.join(pkg, "scripts"), { recursive: true });
     fs.mkdirSync(path.join(pkg, "server", "drizzle-selfhost"), { recursive: true });
     fs.copyFileSync(path.join(HERE, "watchbell.mjs"), path.join(pkg, "bin", "watchbell.mjs"));
-    for (const f of ["selfhost-lib.mjs", "stop-selfhost.mjs"]) fs.copyFileSync(path.join(APP, "scripts", f), path.join(pkg, "scripts", f));
+    for (const f of ["selfhost-lib.mjs", "stop-selfhost.mjs", "node-runtime.mjs", "selfhost-log.mjs"]) fs.copyFileSync(path.join(APP, "scripts", f), path.join(pkg, "scripts", f));
     fs.writeFileSync(path.join(pkg, "package.json"), JSON.stringify({ name: "watchbell", version: "9.8.7" }));
     fs.writeFileSync(path.join(pkg, "server", "server.js"), FAKE_SERVER);
     const before = listing(pkg);
@@ -1596,6 +1856,15 @@ describe("the CLI file in a scratch package (real processes)", () => {
       assert.ok(out.includes(`Watchbell is running at http://localhost:${port}`), out);
       assert.match(out, new RegExp(`Removed a leftover database lock .+: process ${other.pid} is now (PING\\.EXE|sleep), not Watchbell`, "i"));
       assert.ok(out.includes("setup code QWERT-YUIOP"), out);
+      // 1.2.2: the server's own output is in the log, through the --import hook; its error reaches the screen as one
+      // plain line (the colour codes out), the stack stays in the log.
+      const logFile = path.join(home, "logs", "watchbell.log");
+      while (!out.includes("! fake warning") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+      assert.ok(out.includes(`! fake warning: red text (see the log: ${logFile})`), out);
+      assert.ok(!out.includes("fake banner") && !out.includes("stack line"), out);
+      const logged = fs.readFileSync(logFile, "utf8");
+      assert.ok(logged.includes("fake banner: Next.js ready") && logged.includes("at a stack line"), logged);
+      assert.ok(out.includes(`Log: ${logFile}`), out);
       const seen = JSON.parse(fs.readFileSync(path.join(home, "data", "seen-env.json"), "utf8"));
       assert.equal(seen.cwd, path.join(pkg, "server"));
       assert.equal(seen.host, "127.0.0.1");
@@ -1608,6 +1877,7 @@ describe("the CLI file in a scratch package (real processes)", () => {
       const status = sync("status");
       assert.equal(status.status, 0, status.stdout + status.stderr);
       assert.match(status.stdout, /Watchbell is running \(process \d+\)/);
+      assert.ok(status.stdout.includes(`Log:      ${path.join(home, "logs", "watchbell.log")}`), status.stdout);
 
       const stopped = sync("stop");
       assert.equal(stopped.status, 0, stopped.stdout + stopped.stderr);
@@ -1691,7 +1961,7 @@ describe("the server-action key with the real server", { skip: BUILT ? false : "
     fs.mkdirSync(path.join(pkg, "bin"));
     fs.mkdirSync(path.join(pkg, "scripts"));
     fs.copyFileSync(path.join(HERE, "watchbell.mjs"), path.join(pkg, "bin", "watchbell.mjs"));
-    for (const f of ["selfhost-lib.mjs", "stop-selfhost.mjs"]) fs.copyFileSync(path.join(APP, "scripts", f), path.join(pkg, "scripts", f));
+    for (const f of ["selfhost-lib.mjs", "stop-selfhost.mjs", "node-runtime.mjs"]) fs.copyFileSync(path.join(APP, "scripts", f), path.join(pkg, "scripts", f));
     fs.copyFileSync(path.join(BUILT, "package.json"), path.join(pkg, "package.json"));
     const manifest = JSON.parse(fs.readFileSync(path.join(pkg, "server", ".next", "server", "server-reference-manifest.json"), "utf8"));
     const [actionId] = Object.entries(manifest.node).find(([, a]) => a.filename === "src/app/setup/actions.ts" && a.exportedName === "submitSetup");
@@ -1919,20 +2189,20 @@ describe("--host details", () => {
 
   test("one address of another network: the printed, opened and server SITE_URL is that address", async () => {
     const h = lan();
-    const done = startUntil(h, ["--host", "192.168.1.20"], tunnel);
+    const done = startUntil(h, ["--verbose", "--host", "192.168.1.20"], tunnel);
     assert.equal(await done, 0);
     assert.ok(h.log.out.includes("Starting on http://192.168.1.20:3100 ..."), h.log.out.join("\n"));
     assert.ok(h.log.out.includes("Watchbell is running at http://192.168.1.20:3100"));
     assert.deepEqual(h.log.opened, ["http://192.168.1.20:3100"]);
     assert.equal(h.log.spawns[0].opts.env.SITE_URL, "http://192.168.1.20:3100");
     const v6 = lan();
-    assert.equal(await startUntil(v6, ["--no-open", "--host", "2001:DB8::20"], tunnel), 0);
+    assert.equal(await startUntil(v6, ["--verbose", "--no-open", "--host", "2001:DB8::20"], tunnel), 0);
     assert.equal(v6.log.spawns[0].opts.env.SITE_URL, "http://[2001:db8::20]:3100");
     // A SITE_URL of the user's own stays.
     const own = lan();
     fs.mkdirSync(own.home, { recursive: true });
     fs.writeFileSync(own.envFile, "SITE_URL=https://ops.example.test\n");
-    assert.equal(await startUntil(own, ["--no-open", "--host", "192.168.1.20"], tunnel), 0);
+    assert.equal(await startUntil(own, ["--verbose", "--no-open", "--host", "192.168.1.20"], tunnel), 0);
     assert.equal(own.log.spawns[0].opts.env.SITE_URL, "https://ops.example.test");
   });
 
@@ -1940,7 +2210,7 @@ describe("--host details", () => {
     for (const v of ["0:0:0:0:0:0:0:0", "[0::0]", "::0", "[::]"]) assert.equal(parseArgs(["--host", v]).opts.host, "::", v);
     assert.equal(parseArgs(["--host", "FE80::1"]).opts.host, "fe80::1");
     const h = lan();
-    assert.equal(await startUntil(h, ["--no-open", "--host", "0:0:0:0:0:0:0:0"], tunnel), 0);
+    assert.equal(await startUntil(h, ["--verbose", "--no-open", "--host", "0:0:0:0:0:0:0:0"], tunnel), 0);
     assert.equal(h.log.spawns[0].opts.env.HOSTNAME, "::");
   });
 });
@@ -1961,12 +2231,649 @@ describe("update check timer", () => {
     registryFetch(h, { registry: () => new Promise(() => {}) });
     h.deps.setTimer = spyTimer;
     h.deps.updateTimeoutMs = 20;
+    h.deps.nodeTimeoutMs = 30; // D20: the runtime check's two reads start the same way
     assert.equal(await h.run(["--no-open"]), 1, "the server failed before it was ready");
-    assert.deepEqual(unrefs, [20]);
+    assert.deepEqual(unrefs, [20, 30, 30]);
     const s = harness();
     registryFetch(s);
     s.deps.setTimer = spyTimer;
     await s.run(["status"]);
-    assert.deepEqual(unrefs, [20], "status keeps its timer referenced");
+    assert.deepEqual(unrefs, [20, 30, 30], "status keeps its timers referenced");
+  });
+});
+
+// ------------------------------------------------------------------------------------------------ 1.2.2 (D21)
+
+const until = async (cond, what = "condition") => {
+  const deadline = Date.now() + 10_000;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 5));
+  }
+};
+
+/** What a terminal shows after the CLI's writes: \n, \r, cursor up (ESC[nA) and erase below (ESC[J); bold dropped. */
+function render(chunks) {
+  const s = chunks.join("").replace(/\x1b\[(?:1|22)m/g, "");
+  const lines = [""];
+  let row = 0;
+  for (let i = 0; i < s.length; ) {
+    const up = /^\x1b\[(\d+)A/.exec(s.slice(i, i + 8));
+    if (up) {
+      row = Math.max(0, row - Number(up[1]));
+      i += up[0].length;
+    } else if (s.startsWith("\x1b[J", i)) {
+      lines.length = row + 1;
+      lines[row] = "";
+      i += 3;
+    } else {
+      const ch = s[i++];
+      if (ch === "\r") continue;
+      if (ch === "\n") {
+        row++;
+        if (lines.length <= row) lines.push("");
+      } else lines[row] += ch;
+    }
+  }
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+/** Settings with every key the CLI fills, so a start adds nothing (and says nothing about it). */
+function completeSettings(h) {
+  fs.mkdirSync(h.home, { recursive: true });
+  const k = Buffer.alloc(32, 7).toString("base64");
+  fs.writeFileSync(h.envFile, ["WATCHBELL_MODE=selfhost", "DATABASE_URL=pglite:", "WATCHBELL_DATA_DIR=./data", "HOST=127.0.0.1", "PORT=3100", "SITE_URL=http://localhost:3100", `OPS_ENCRYPTION_KEY=${k}`, `COLLECTOR_SECRET=${"c".repeat(40)}`, `CRON_SECRET=${"r".repeat(20)}`, `NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${k}`, ""].join("\n"));
+}
+
+const nics = () => ({
+  eth0: [
+    { address: "192.168.1.20", family: "IPv4", internal: false },
+    { address: "fe80::1c2a", family: "IPv6", internal: false },
+  ],
+  tailscale0: [{ address: "100.64.0.20", family: "IPv4", internal: false }],
+  lo: [{ address: "127.0.0.1", family: "IPv4", internal: true }],
+});
+
+/** A start whose server answers once it was spawned; `tty` gives it a terminal. */
+function readyHarness(opts = {}) {
+  const h = harness({ exitWith: null, ...opts });
+  h.deps.fetch = async () => (h.log.spawns.length ? healthy() : Promise.reject(new Error("down")));
+  h.deps.networkInterfaces = nics;
+  h.deps.logPollMs = 10;
+  h.deps.stopWaitMs = 2000;
+  return h;
+}
+const menuShown = (h) => /^ {2}(?:[❯>] | {2})Stop and exit$/.test(render(h.log.screen).at(-1) ?? "");
+const MENU_AT_TOP = ["  ❯ Open in browser", "    Keep running in the background", "    Show live log", "    Stop and exit"];
+
+/** Ctrl+C in the menu, then the server's exit once the stop request is there. */
+async function ctrlC(h) {
+  h.stdin.key("c", { ctrl: true });
+  await until(() => fs.existsSync(path.join(h.dataDir, "stop-request")), "the stop request");
+  h.log.spawns[0].child.emit("exit", 0, null);
+}
+
+describe("start screen and menu (1.2.2)", () => {
+  test("the short screen: version, address, setup code, then the menu; nothing else", async () => {
+    const h = readyHarness({ tty: true });
+    completeSettings(h);
+    fs.mkdirSync(h.dataDir, { recursive: true });
+    fs.writeFileSync(path.join(h.dataDir, "setup-code"), "ABCDE-FGHIJ\n");
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h), "the menu");
+    assert.deepEqual(render(h.log.screen), ["  Watchbell 9.9.9", "  http://localhost:3100", "  First run: setup code ABCDE-FGHIJ", "", ...MENU_AT_TOP]);
+    assert.deepEqual(h.log.out, [], "nothing printed outside the screen");
+    assert.deepEqual(h.log.err, []);
+    assert.equal(h.stdin.raw.at(-1), true, "raw mode for the keys");
+    // The server runs detached from the terminal, with its output in the log.
+    const { opts } = h.log.spawns[0];
+    assert.equal(opts.detached, true);
+    assert.equal(opts.stdio[0], "ignore");
+    assert.equal(typeof opts.stdio[1], "number");
+    assert.equal(opts.stdio[3], "ipc");
+    assert.equal(opts.env.WATCHBELL_LOG_FILE, h.logFile);
+    await ctrlC(h);
+    assert.equal(await done, 0);
+  });
+
+  test("a network address: the addresses on one line and the two-line warning; no setup line once the owner exists", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    const done = h.run(["--no-open", "--host", "0.0.0.0"]);
+    await until(() => menuShown(h), "the menu");
+    assert.deepEqual(render(h.log.screen), [
+      "  Watchbell 9.9.9",
+      "  http://192.168.1.20:3100   (also http://100.64.0.20:3100)",
+      "",
+      `  ${NETWORK_WARNING[0]}`,
+      `  ${NETWORK_WARNING[1]}`,
+      "",
+      ...MENU_AT_TOP,
+    ]);
+    assert.deepEqual(NETWORK_WARNING, ["! Open on your network over plain http. Finish setup first,", "  and put HTTPS in front before opening it to the internet."]);
+    // The long text (SSH tunnel, the SITE_URL note) is in the log instead.
+    const log = fs.readFileSync(h.logFile, "utf8");
+    assert.match(log, /SSH\s+tunnel/);
+    assert.match(log, /note: SITE_URL is http:\/\/localhost:3100/);
+    await ctrlC(h);
+    assert.equal(await done, 0);
+  });
+
+  test("up/down move the pointer, Enter on Open opens /setup and the menu stays", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    fs.mkdirSync(h.dataDir, { recursive: true });
+    fs.writeFileSync(path.join(h.dataDir, "setup-code"), "ABCDE-FGHIJ\n");
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.stdin.key(undefined, { name: "down" });
+    h.stdin.key(undefined, { name: "down" });
+    h.stdin.key(undefined, { name: "up" });
+    assert.deepEqual(render(h.log.screen).slice(-4), ["    Open in browser", "  ❯ Keep running in the background", "    Show live log", "    Stop and exit"]);
+    h.stdin.key(undefined, { name: "up" });
+    h.stdin.key(undefined, { name: "up" }); // wraps around to the last item
+    assert.equal(render(h.log.screen).at(-1), "  ❯ Stop and exit");
+    h.stdin.key(undefined, { name: "down" });
+    h.stdin.key("\r", { name: "return" });
+    assert.deepEqual(h.log.opened, ["http://localhost:3100/setup"]);
+    assert.ok(render(h.log.screen).includes("  Opening http://localhost:3100/setup in your browser."));
+    assert.ok(menuShown(h), "the menu stays");
+    assert.equal(fs.existsSync(path.join(h.dataDir, "stop-request")), false);
+    await ctrlC(h);
+    assert.equal(await done, 0);
+  });
+
+  test("k keeps it running in the background: one line, the CLI lets go and exits 0, nothing is stopped", async () => {
+    const h = readyHarness({ tty: true });
+    completeSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.stdin.key("k");
+    assert.equal(await done, 0);
+    const child = h.log.spawns[0].child;
+    assert.deepEqual(h.log.out, ["Running in the background. Stop it with: watchbell stop"]);
+    assert.equal(child.connected, false, "the IPC channel is closed");
+    assert.equal(child.unrefed, true);
+    assert.deepEqual(child.signals, []);
+    assert.equal(fs.existsSync(path.join(h.dataDir, "stop-request")), false);
+    assert.equal(h.stdin.raw.at(-1), false, "the terminal is back to normal");
+    assert.equal(h.stdin.paused, true);
+    for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) assert.equal(h.proc.listenerCount(sig), 0, sig);
+    // The runtime file stays for watchbell stop and status.
+    assert.equal(JSON.parse(fs.readFileSync(path.join(h.dataDir, "runtime.json"), "utf8")).pid, 4242);
+    // A later message from the server no longer reaches this (finished) CLI.
+    child.emit("message", { watchbell: "error", line: "late" });
+    assert.ok(!render(h.log.screen).some((l) => l.includes("late")));
+  });
+
+  test("s moves between Show live log and Stop and exit without running them; Enter on Stop stops cleanly", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.stdin.key("s");
+    assert.equal(render(h.log.screen).at(-2), "  ❯ Show live log");
+    assert.ok(!render(h.log.screen).some((l) => l.includes("Live log")), "s alone runs nothing");
+    h.stdin.key("s");
+    assert.equal(render(h.log.screen).at(-1), "  ❯ Stop and exit");
+    h.stdin.key("o"); // a single match runs at once
+    assert.equal(h.log.opened.length, 1);
+    h.stdin.key("s");
+    h.stdin.key("s");
+    h.stdin.key("\r", { name: "return" });
+    await until(() => fs.existsSync(path.join(h.dataDir, "stop-request")), "the stop request");
+    assert.ok(render(h.log.screen).includes("  Stopping Watchbell ..."));
+    h.log.spawns[0].child.emit("exit", 0, null);
+    assert.equal(await done, 0);
+    assert.ok(h.log.out.includes("  Watchbell stopped."));
+    assert.equal(h.stdin.raw.at(-1), false);
+    assert.equal(fs.existsSync(path.join(h.dataDir, "runtime.json")), false, "the runtime file goes with the server");
+    assert.equal(h.proc.listenerCount("SIGINT"), 0);
+  });
+
+  test("Show live log prints the end of the log and what follows (control codes out), until a key", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.stdin.key("s");
+    h.stdin.key("\r", { name: "return" });
+    const screen = () => render(h.log.screen);
+    assert.ok(screen().includes(`  Live log (${h.logFile}). Press any key to go back to the menu.`), screen().join("\n"));
+    assert.ok(screen().some((l) => l.startsWith("Settings: ")), "the last lines of the log first");
+    assert.ok(!menuShown(h), "no menu while the log runs");
+    fs.appendFileSync(h.logFile, "collector start +0ms\nevil \x1b[2Jline\n");
+    await until(() => screen().includes("evil line"), "the new log lines");
+    assert.ok(screen().includes("collector start +0ms"));
+    h.stdin.key("x");
+    assert.ok(menuShown(h), "any key goes back to the menu");
+    fs.appendFileSync(h.logFile, "after going back\n");
+    await new Promise((r) => setTimeout(r, 60));
+    assert.ok(!screen().includes("after going back"), "the log is no longer followed");
+    await ctrlC(h);
+    assert.equal(await done, 0);
+  });
+
+  test("a server error shows as one line above the menu (once), with where the log is", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    const child = h.log.spawns[0].child;
+    child.emit("message", { watchbell: "error", line: "scheduler: collector run failed: \x1b[31mboom" });
+    child.emit("message", { watchbell: "error", line: "scheduler: collector run failed: boom" });
+    child.emit("message", { other: true });
+    const screen = render(h.log.screen);
+    assert.equal(screen.filter((l) => l.includes("boom")).length, 1, screen.join("\n"));
+    assert.ok(screen.includes(`  ! scheduler: collector run failed: boom (see the log: ${h.logFile})`), screen.join("\n"));
+    assert.ok(menuShown(h), "the menu is drawn again below it");
+    // It crashes: the CLI says so and ends with its exit code.
+    child.emit("exit", 1, null);
+    assert.equal(await done, 1);
+    assert.ok(h.log.out.includes(`  Watchbell stopped with exit code 1 (see the log: ${h.logFile}).`), h.log.out.join("\n"));
+  });
+
+  test("a closed terminal (SIGHUP) or a kill stops it cleanly through the stop request; stopped elsewhere ends the menu", async () => {
+    for (const sig of ["SIGHUP", "SIGTERM"]) {
+      const h = readyHarness({ tty: true });
+      existingSettings(h);
+      const done = h.run(["--no-open"]);
+      await until(() => menuShown(h));
+      h.proc.emit(sig);
+      await until(() => fs.existsSync(path.join(h.dataDir, "stop-request")), sig);
+      assert.deepEqual(h.log.spawns[0].child.signals, [], "no signal reaches the detached server");
+      h.log.spawns[0].child.emit("exit", 0, null);
+      assert.equal(await done, 0, sig);
+    }
+    // watchbell stop in another terminal: the server exits, the menu ends.
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.log.spawns[0].child.emit("exit", 0, null);
+    assert.equal(await done, 0);
+    assert.ok(h.log.out.includes("  Watchbell stopped."));
+  });
+
+  test("POSIX: a server that ignores the stop request gets SIGTERM after the wait", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    h.deps.stopWaitMs = 30;
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    h.stdin.key("c", { ctrl: true });
+    const child = h.log.spawns[0].child;
+    await until(() => child.signals.length > 0, "SIGTERM");
+    assert.deepEqual(child.signals, ["SIGTERM"]);
+    child.emit("exit", null, "SIGTERM");
+    assert.equal(await done, 143);
+  });
+
+  test("Ctrl+C while it is still starting stops it the same way, with no menu", async () => {
+    const h = harness({ tty: true, exitWith: null });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => h.log.spawns.length === 1);
+    h.proc.emit("SIGINT");
+    await until(() => fs.existsSync(path.join(h.dataDir, "stop-request")));
+    h.log.spawns[0].child.emit("exit", 0, null);
+    assert.equal(await done, 0);
+    assert.ok(!render(h.log.screen).some((l) => l.includes(MENU[0])));
+    assert.deepEqual(h.log.err, []);
+  });
+
+  test("Windows' old console gets > instead of the arrow; Windows Terminal keeps it", async () => {
+    for (const [env, pointer] of [[{}, ">"], [{ WT_SESSION: "x" }, "❯"]]) {
+      const h = readyHarness({ tty: true, platform: "win32", env });
+      existingSettings(h);
+      const done = h.run(["--no-open"]);
+      await until(() => menuShown(h));
+      assert.ok(render(h.log.screen).includes(`  ${pointer} Open in browser`), render(h.log.screen).join("\n"));
+      await ctrlC(h);
+      assert.equal(await done, 0);
+    }
+  });
+
+  test("the package's log hook runs in front of server.js", async () => {
+    const h = readyHarness({ tty: true });
+    existingSettings(h);
+    fs.mkdirSync(path.join(h.pkgRoot, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(h.pkgRoot, "scripts", "selfhost-log.mjs"), "// hook\n");
+    const done = h.run(["--no-open"]);
+    await until(() => menuShown(h));
+    const { args } = h.log.spawns[0];
+    assert.equal(args[0], "--import");
+    assert.match(args[1], /^file:\/\/.+\/scripts\/selfhost-log\.mjs$/);
+    assert.equal(args[2], path.join(h.pkgRoot, "server", "server.js"));
+    h.stdin.key("k");
+    assert.equal(await done, 0);
+  });
+});
+
+describe("quiet start without a terminal (1.2.2)", () => {
+  const stopLine = (out) => out.some((l) => l.startsWith("Stop it with"));
+
+  test("short output, no menu and no cursor codes; the details and the server's output go to the log", async () => {
+    const h = readyHarness();
+    completeSettings(h);
+    assert.equal(await startUntil(h, ["--no-open"], stopLine), 0);
+    assert.deepEqual(h.log.out, [
+      "Watchbell 9.9.9",
+      "Starting on http://localhost:3100 ...",
+      "Watchbell is running at http://localhost:3100",
+      `Log: ${h.logFile}`,
+      'Stop it with Ctrl+C here, or run "watchbell stop" in another terminal.',
+    ]);
+    assert.deepEqual(h.log.screen, [], "no raw writes");
+    const { opts } = h.log.spawns[0];
+    assert.equal(opts.detached, false, "the server stays this process's child");
+    assert.equal(opts.stdio[3], "ipc");
+    const log = fs.readFileSync(h.logFile, "utf8");
+    assert.match(log, /^--- watchbell start, Watchbell 9\.9\.9/m);
+    assert.ok(log.includes(`Settings: ${h.envFile}`) && log.includes(`Data: ${h.dataDir}`), log);
+    if (process.platform !== "win32") assert.equal(fs.statSync(path.dirname(h.logFile)).mode & 0o777, 0o700);
+  });
+
+  test("CI or TERM=dumb never get the menu, even on a terminal", async () => {
+    for (const env of [{ CI: "true" }, { TERM: "dumb" }]) {
+      const h = readyHarness({ tty: true, env });
+      existingSettings(h);
+      assert.equal(await startUntil(h, ["--no-open"], stopLine), 0);
+      assert.deepEqual(h.log.screen, [], JSON.stringify(env));
+      assert.deepEqual(h.stdin.raw, []);
+    }
+  });
+
+  test("errors: one line each on stderr with the log's path; the same line not again; control codes out", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => stopLine(h.log.out));
+    const child = h.log.spawns[0].child;
+    child.emit("message", { watchbell: "error", line: "Watchbell setup code could not be prepared: \x1b]0;title\x07EACCES" });
+    child.emit("message", { watchbell: "error", line: "Watchbell setup code could not be prepared: EACCES" });
+    assert.deepEqual(h.log.err, [`! Watchbell setup code could not be prepared: EACCES (see the log: ${h.logFile})`]);
+    child.emit("exit", 1, null);
+    assert.equal(await done, 1);
+    assert.equal(h.log.err.at(-1), `Watchbell stopped with exit code 1 (see the log: ${h.logFile}).`);
+  });
+
+  test("a server that stops while starting: one line with its last error and the log", async () => {
+    const h = harness({ exitWith: null });
+    existingSettings(h);
+    const done = h.run(["--no-open"]);
+    await until(() => h.log.spawns.length === 1);
+    h.log.spawns[0].child.emit("message", { watchbell: "error", line: "Refusing to start: WATCHBELL_MODE=selfhost with a remote DATABASE_URL." });
+    h.log.spawns[0].child.emit("exit", 1, null);
+    assert.equal(await done, 1);
+    assert.ok(h.log.err.includes(`Watchbell could not start: Refusing to start: WATCHBELL_MODE=selfhost with a remote DATABASE_URL. (see the log: ${h.logFile})`), h.log.err.join("\n"));
+    // Nothing came over the channel (a crash before the hook): the log's last line.
+    const g = harness({ exitWith: null });
+    existingSettings(g);
+    const gone = g.run(["--no-open"]);
+    await until(() => g.log.spawns.length === 1);
+    fs.appendFileSync(g.logFile, "Error: listen EADDRINUSE: address already in use 127.0.0.1:3100\n\n");
+    g.log.spawns[0].child.emit("exit", 1, null);
+    assert.equal(await gone, 1);
+    assert.ok(g.log.err.at(-1).startsWith("Watchbell could not start: Error: listen EADDRINUSE"), g.log.err.join("\n"));
+  });
+
+  test("a network address: the addresses, then the same two warning lines as the screen", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    assert.equal(await startUntil(h, ["--no-open", "--host", "0.0.0.0"], stopLine), 0);
+    assert.ok(h.log.out.includes("Watchbell is running at http://192.168.1.20:3100   (also http://100.64.0.20:3100)"), h.log.out.join("\n"));
+    assert.deepEqual(h.log.err, NETWORK_WARNING);
+  });
+
+  test("--verbose prints everything here as before: the server's output inherited, no log hook", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    assert.equal(await startUntil(h, ["--verbose", "--no-open"]), 0);
+    const { args, opts } = h.log.spawns[0];
+    assert.equal(opts.stdio, "inherit");
+    assert.deepEqual(args, [path.join(h.pkgRoot, "server", "server.js")]);
+    assert.ok(h.log.out.includes(`  Settings: ${h.envFile}`));
+    assert.equal(fs.existsSync(h.logFile), false);
+    assert.deepEqual(parseArgs(["status", "--verbose"]).errors, ["--verbose only goes with watchbell start"]);
+  });
+
+  test("run (a service manager) keeps its output where it went: inherited, no log file", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    assert.equal(await startUntil(h, ["run"]), 0);
+    assert.equal(h.log.spawns[0].opts.stdio, "inherit");
+    assert.equal(fs.existsSync(h.logFile), false);
+  });
+
+  test("a log at its size limit becomes watchbell.log.1 at the start", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    h.deps.logMaxBytes = 64;
+    fs.mkdirSync(path.dirname(h.logFile), { recursive: true });
+    fs.writeFileSync(h.logFile, "x".repeat(100));
+    assert.equal(await startUntil(h, ["--no-open"]), 0);
+    assert.equal(fs.readFileSync(`${h.logFile}.1`, "utf8"), "x".repeat(100));
+    assert.ok(!fs.readFileSync(h.logFile, "utf8").includes("xxx"));
+  });
+});
+
+describe("the log hook (scripts/selfhost-log.mjs)", () => {
+  test("rotatingWriter keeps two files: the current one and .1", () => {
+    const dir = scratch("log");
+    const file = path.join(dir, "watchbell.log");
+    const write = rotatingWriter(file, { maxBytes: 50 });
+    for (const n of [1, 2, 3, 4]) write(Buffer.from(`${String(n).repeat(29)}\n`));
+    write.close();
+    assert.deepEqual(fs.readdirSync(dir).sort(), ["watchbell.log", "watchbell.log.1"]);
+    assert.equal(fs.readFileSync(file, "utf8"), `${"4".repeat(29)}\n`);
+    assert.equal(fs.readFileSync(`${file}.1`, "utf8"), `${"3".repeat(29)}\n`);
+    assert.equal(rotateLog(file, { maxBytes: 1000 }), false, "below the size it stays");
+    assert.equal(rotateLog(path.join(dir, "none.log")), false);
+  });
+
+  test("installLogFile: stdout and stderr go to the file; stderr's first line goes to the CLI while it listens", async () => {
+    const dir = scratch("hook");
+    const file = path.join(dir, "watchbell.log");
+    const sent = [];
+    const screen = [];
+    const proc = {
+      stdout: { write: (c) => screen.push(String(c)) },
+      stderr: { write: (c) => screen.push(String(c)) },
+      connected: true,
+      send: (m, cb) => {
+        sent.push(m);
+        cb?.();
+      },
+    };
+    const restore = installLogFile({ file, proc });
+    let called = 0;
+    proc.stdout.write("collector start +0ms\n", () => called++);
+    proc.stdout.write(Buffer.from("bytes\n"));
+    proc.stderr.write("\n  scheduler: run failed: boom\n    at x (y.js:1)\n", "utf8", () => called++);
+    proc.connected = false;
+    proc.stderr.write("after the CLI let go\n");
+    restore();
+    proc.stdout.write("back on the screen\n");
+    assert.equal(fs.readFileSync(file, "utf8"), "collector start +0ms\nbytes\n\n  scheduler: run failed: boom\n    at x (y.js:1)\nafter the CLI let go\n");
+    assert.deepEqual(sent, [{ watchbell: "error", line: "scheduler: run failed: boom" }]);
+    assert.deepEqual(screen, ["back on the screen\n"]);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(called, 2, "write callbacks still run");
+  });
+
+  test("firstLine: the first non-empty line, at most 300 characters", () => {
+    assert.equal(firstLine("\n\n  a\nb"), "a");
+    assert.equal(firstLine("  \n"), null);
+    assert.equal(firstLine("x".repeat(400)).length, 300);
+  });
+});
+
+describe("arguments (1.2.2)", () => {
+  test("an unknown option is named in one line and exits 2: Unknown option --no-openen (see watchbell --help)", async () => {
+    for (const argv of [["--no-openen"], ["start", "--no-openen"], ["status", "-x"], ["stop", "--time-out", "5"]]) {
+      const h = harness();
+      assert.equal(await h.run(argv), 2, argv.join(" "));
+      const bad = argv.find((a) => a.startsWith("-"));
+      const expected = [`Unknown option ${bad} (see watchbell --help)`];
+      if (argv.includes("5")) expected.push("watchbell: unexpected argument 5", "Run watchbell --help for the commands.");
+      assert.deepEqual(h.log.err, expected, argv.join(" "));
+      assert.equal(h.log.spawns.length, 0);
+      assert.equal(fs.existsSync(h.home), false);
+    }
+  });
+
+  test("every option each command takes still parses without an error", () => {
+    const ok = [
+      [],
+      ["start", "--no-open", "--new-key", "--verbose", "--host", "0.0.0.0", "--port", "3200"],
+      ["--host=127.0.0.1", "--port=3300"],
+      ["run", "--host", "::", "--port", "3300"],
+      ["stop"],
+      ["stop", "--timeout", "5"],
+      ["stop", "--timeout=5"],
+      ["status"],
+      ["service", "install", "--yes"],
+      ["service", "uninstall", "-y"],
+      ["update"],
+      ["reset-login", "owner@example.test"],
+      ["--help"],
+      ["-h"],
+      ["--version"],
+      ["-v"],
+    ];
+    for (const argv of ok) assert.deepEqual(parseArgs(argv).errors, [], argv.join(" "));
+    assert.equal(parseArgs(["stop", "--timeout=5"]).opts.timeout, 5);
+    assert.deepEqual(parseArgs(["stop", "--timeout=0"]).errors, ["--timeout needs a number of seconds (1-9999)"]);
+    assert.deepEqual(parseArgs(["run", "--verbose"]).errors, ["--verbose only goes with watchbell start"]);
+  });
+
+  test("--help lists --verbose and the log file", async () => {
+    const h = harness();
+    await h.run(["--help"]);
+    const help = h.log.out.join("\n");
+    assert.ok(help.includes("watchbell start --verbose"));
+    assert.ok(help.includes("~/.watchbell/logs/watchbell.log"));
+  });
+});
+
+describe("status and stop: the port it really runs on (1.2.2)", () => {
+  const runtime = (h, r) => {
+    fs.mkdirSync(h.dataDir, { recursive: true });
+    fs.writeFileSync(path.join(h.dataDir, "runtime.json"), JSON.stringify(r));
+  };
+
+  test("start writes <data>/runtime.json with the server's pid and address and removes it after", async () => {
+    const h = readyHarness();
+    existingSettings(h);
+    const done = h.run(["--no-open", "--port", "3261"]);
+    await until(() => h.log.out.some((l) => l.startsWith("Stop it with")));
+    const r = JSON.parse(fs.readFileSync(path.join(h.dataDir, "runtime.json"), "utf8"));
+    assert.deepEqual({ pid: r.pid, host: r.host, port: r.port, siteUrl: r.siteUrl }, { pid: 4242, host: "127.0.0.1", port: "3261", siteUrl: "http://localhost:3261" });
+    h.log.spawns[0].child.emit("exit", 0, null);
+    assert.equal(await done, 0);
+    assert.equal(fs.existsSync(path.join(h.dataDir, "runtime.json")), false);
+  });
+
+  test("status names the runtime port while its pid holds the lock; a stale or odd file is ignored", async () => {
+    const h = harness({ lockAlive: [555] });
+    existingSettings(h);
+    holdLock(h.dataDir, 555);
+    runtime(h, { pid: 555, host: "127.0.0.1", port: "3261", siteUrl: "http://localhost:3261" });
+    const asked = [];
+    h.deps.fetch = async (url) => {
+      asked.push(String(url));
+      return healthy();
+    };
+    assert.equal(await h.run(["status"]), 0);
+    assert.equal(h.log.out[0], "Watchbell is running (process 555) at http://localhost:3261");
+    assert.ok(h.log.out.includes(`  Port:     3261 (for this run; ${h.envFile} says 3100)`), h.log.out.join("\n"));
+    assert.deepEqual(asked, ["http://127.0.0.1:3261/api/health"]);
+    // Another pid (a crash left it): the .env address.
+    runtime(h, { pid: 556, host: "127.0.0.1", port: "3261", siteUrl: "http://localhost:3261" });
+    h.log.out.length = 0;
+    assert.equal(await h.run(["status"]), 0);
+    assert.equal(h.log.out[0], "Watchbell is running (process 555) at http://localhost:3100");
+    // A file that isn't ours to trust.
+    runtime(h, { pid: 555, host: "x;rm", port: "99999", siteUrl: "javascript:1" });
+    h.log.out.length = 0;
+    await h.run(["status"]);
+    assert.equal(h.log.out[0], "Watchbell is running (process 555) at http://localhost:3100");
+  });
+
+  test("stop asks the address in the runtime file", async () => {
+    const h = harness({ lockAlive: [555] });
+    existingSettings(h);
+    holdLock(h.dataDir, 555);
+    runtime(h, { pid: 555, host: "0.0.0.0", port: "3261", siteUrl: "http://localhost:3261" });
+    assert.equal(await h.run(["stop"]), 0);
+    assert.equal(h.log.spawns[0].opts.env.PORT, "3261");
+    assert.equal(h.log.spawns[0].opts.env.HOST, "0.0.0.0");
+  });
+});
+
+describe("watchbell update: into the running copy's prefix (1.2.2)", () => {
+  const npmRuns = (log, { status = 0, bump } = {}) => (cmd, args, opts) => {
+    if (cmd.endsWith("powershell.exe")) return { status: 0, stdout: "{}\r\n", stderr: "" };
+    log.push({ cmd, args, opts });
+    if (status === 0 && bump) bump();
+    return { status, stdout: "", stderr: "" };
+  };
+  const bumpTo = (h, version) => () => fs.writeFileSync(path.join(h.pkgRoot, "package.json"), JSON.stringify({ name: "watchbell", version }));
+
+  test("installPrefix: <prefix>/lib/node_modules/watchbell on POSIX, <prefix>\\node_modules\\watchbell on Windows, else null", () => {
+    const base = scratch("prefix");
+    assert.equal(installPrefix(path.join(base, "p", "lib", "node_modules", "watchbell") + path.sep, "linux"), path.join(base, "p"));
+    assert.equal(installPrefix(path.join(base, "p", "lib", "node_modules", "watchbell"), "darwin"), path.join(base, "p"));
+    assert.equal(installPrefix(path.join(base, "p", "node_modules", "watchbell"), "win32"), path.join(base, "p"));
+    assert.equal(installPrefix(path.join(base, "p", "Node_Modules", "Watchbell"), "win32"), path.join(base, "p"));
+    assert.equal(installPrefix(path.join(base, "project", "node_modules", "watchbell"), "linux"), null, "a project's node_modules is not a prefix");
+    assert.equal(installPrefix(path.join(base, "checkout", "app"), "linux"), null);
+    assert.equal(installPrefix(path.join(base, "p", "lib", "node_modules", "other"), "linux"), null);
+  });
+
+  test("POSIX layout: npm gets --prefix of the running copy", async () => {
+    const h = harness({ pkgDir: ["home", ".local", "lib", "node_modules", "watchbell"] });
+    const runs = [];
+    h.deps.runSync = npmRuns(runs, { bump: bumpTo(h, "10.0.0") });
+    registryFetch(h);
+    assert.equal(await h.run(["update"]), 0, h.log.err.join("\n"));
+    const prefix = path.join(h.root, "home", ".local");
+    assert.deepEqual(runs[0].args, ["install", "-g", "--prefix", prefix, "watchbell@latest"]);
+    assert.equal(runs[0].cmd, "/usr/bin/npm");
+    assert.ok(h.log.out.includes(`Updating Watchbell 9.9.9 to 10.0.0: /usr/bin/npm install -g --prefix "${prefix}" watchbell@latest`), h.log.out.join("\n"));
+  });
+
+  test("Windows layout: npm.cmd through cmd.exe with the prefix quoted", async () => {
+    const h = harness({ platform: "win32", pkgDir: ["AppData", "Roaming", "npm", "node_modules", "watchbell"] });
+    h.deps.execPath = "C:\\Program Files\\nodejs\\node.exe";
+    h.deps.env.SystemRoot = "C:\\Windows";
+    const runs = [];
+    h.deps.runSync = npmRuns(runs, { bump: bumpTo(h, "10.0.0") });
+    registryFetch(h);
+    assert.equal(await h.run(["update"]), 0, h.log.err.join("\n"));
+    const prefix = path.join(h.root, "AppData", "Roaming", "npm");
+    assert.equal(runs[0].cmd, "C:\\Windows\\System32\\cmd.exe");
+    assert.deepEqual(runs[0].args, ["/d", "/s", "/c", `""C:\\Program Files\\nodejs\\npm.cmd" install -g --prefix "${prefix}" watchbell@latest"`]);
+  });
+
+  test("npm installed elsewhere anyway: exit 1, the version it still holds and what to check", async () => {
+    const h = harness({ pkgDir: ["opt", "lib", "node_modules", "watchbell"] });
+    const runs = [];
+    h.deps.runSync = npmRuns(runs); // no bump: the copy that runs is unchanged
+    registryFetch(h);
+    assert.equal(await h.run(["update"]), 1);
+    const err = h.log.err.join("\n");
+    assert.match(err, /still holds Watchbell 9\.9\.9: the new version went to another folder/);
+    assert.ok(err.includes(`npm was told to install into ${path.join(h.root, "opt")}, where this copy runs from`), err);
+    // Not an npm global folder: no --prefix, and the hint says to update it the way it was installed.
+    const g = harness();
+    const gruns = [];
+    g.deps.runSync = npmRuns(gruns);
+    registryFetch(g);
+    assert.equal(await g.run(["update"]), 1);
+    assert.deepEqual(gruns[0].args, ["install", "-g", "watchbell@latest"]);
+    assert.match(g.log.err.join("\n"), /is not in an npm global folder \(<prefix>\/lib\/node_modules\/watchbell\), so update it the way you installed it/);
   });
 });

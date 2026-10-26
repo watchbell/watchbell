@@ -1,7 +1,7 @@
 import "server-only";
 import { ACTIONS_COPY } from "@/lib/copy/edition";
 import { aliasBook } from "@/lib/data/cached";
-import { discordTarget, recordResult, telegramTarget } from "@/lib/data/notify-db";
+import { discordTarget, recordResult, telegramTarget, telegramThread } from "@/lib/data/notify-db";
 import { sendDiscord } from "@/lib/notify/discord";
 import { esc } from "@/lib/alerts/compose";
 import { serverEnv } from "@/lib/env";
@@ -9,7 +9,7 @@ import { type NotifyLang, readNotifyLang, t } from "@/lib/notify/lang";
 import { type SendResult, sendTelegram } from "@/lib/notify/telegram";
 import type { InlineKeyboard } from "@/lib/notify/telegram-bot";
 import { type AliasBook, EMPTY_BOOK } from "@/lib/view/display-name";
-import { cleanLine } from "@/private/console/clean-text";
+import { cleanLine, ownerLine } from "@/private/console/clean-text";
 import { readAutoRun } from "./proposals-settings";
 import { ACTIONS, type AutoRun, type Proposal, type ProposalAction } from "./proposals-types";
 
@@ -19,6 +19,10 @@ import { ACTIONS, type AutoRun, type Proposal, type ProposalAction } from "./pro
 // Telegram approval buttons are on (webhook set, owner linked), a single notice also carries [✅ Approve] [❌ Reject] and a
 // "Status: ⏳ waiting" line (telegram-approvals.ts); a grouped one keeps only the links. Every text goes through the office scrub (console/clean-text.ts): no hostname, email or key leaves. English or Indonesian (notify.language, read at send time), short.
 // Neither function ever throws, and each gives up after NOTIFY_TIMEOUT_MS.
+// Watchbell 1.2.2 (D18): the Telegram text names the real app, database and host (ownerLine: the chat is the owner's
+// own), while the Discord history keeps the aliases; an automatic re-check that ran says nothing on Telegram (the
+// alert's own messages tell whether it is still down or resolved); and a notice about one alert's proposal or auto-run
+// is a reply to the Telegram message that opened that alert, when that message is known (notify-db telegramThread).
 
 export const NOTIFY_TIMEOUT_MS = 8_000;
 export const GROUP_OVER = 3;     // more new proposals than this → one grouped message
@@ -31,10 +35,11 @@ export type ProposalNotifyDeps = {
   book: () => Promise<AliasBook>;
   siteUrl: () => string;
   autoRun: () => Promise<AutoRun>;
-  send: (token: string, chatId: string, html: string, keyboard?: InlineKeyboard) => Promise<SendResult>;
+  send: (token: string, chatId: string, html: string, keyboard?: InlineKeyboard, replyTo?: number) => Promise<SendResult>;
   record: (r: SendResult, now: Date) => Promise<void>;
   lang: () => Promise<NotifyLang>;
   buttons?: () => Promise<((p: Proposal) => InlineKeyboard) | null>; // slice 7; null → no buttons
+  thread?: (alertId: string) => Promise<number | null>; // D18: the Telegram message that opened the alert
   // Owner 19 Oct: Discord gets a plain history of the same events (no buttons, no approve link).
   discord: () => Promise<{ url: string } | null>;
   sendDiscord: (url: string, content: string) => Promise<SendResult>;
@@ -47,7 +52,7 @@ const DEPS: ProposalNotifyDeps = {
   book: () => aliasBook(),
   siteUrl: () => serverEnv().SITE_URL,
   autoRun: () => readAutoRun(),
-  send: (token, chatId, html, keyboard) => sendTelegram(token, chatId, html, keyboard ? { replyMarkup: keyboard } : {}),
+  send: (token, chatId, html, keyboard, replyTo) => sendTelegram(token, chatId, html, { ...(keyboard ? { replyMarkup: keyboard } : {}), ...(replyTo ? { replyTo } : {}) }),
   record: (r, now) => recordResult("telegram", r, now),
   lang: () => readNotifyLang("telegram"),
   discord: () => discordTarget(),
@@ -56,8 +61,10 @@ const DEPS: ProposalNotifyDeps = {
   discordLang: () => readNotifyLang("discord"),
   // Loaded on use: telegram-approvals imports this file (proposalMessage).
   buttons: () => import("./telegram-approvals").then((m) => m.approvalButtons()),
+  thread: (alertId) => telegramThread(alertId),
 };
-type Out = string | { text: string; keyboard: InlineKeyboard };
+// replyTo: the Telegram message this one answers (D18).
+type Out = string | { text: string; keyboard?: InlineKeyboard; replyTo?: number | null };
 
 const MSG = {
   en: {
@@ -90,9 +97,9 @@ export const actionsUrl = (siteUrl: string, id?: string): string => `${siteUrl.r
 // `dev`: the Dev officer was asked to read the code for it (slice 3, LogErrorSpike): one extra line.
 export function proposalMessage(p: Proposal, book: AliasBook, siteUrl: string, dev = false, lang: NotifyLang = "en"): string {
   const m = (k: keyof typeof MSG.en) => t(MSG, lang, k);
-  const who = cleanLine(p.proposedBy, book, 60) || m("proposer");
-  const title = cleanLine(p.title, book, TITLE_MAX);
-  const reason = cleanLine(p.reason, book, LINE_MAX) || "-";
+  const who = ownerLine(p.proposedBy, book, 60) || m("proposer");
+  const title = ownerLine(p.title, book, TITLE_MAX);
+  const reason = ownerLine(p.reason, book, LINE_MAX) || "-";
   return [
     `🧑‍✈️ ${esc(who)} ${m("proposes")}: ${esc(label(p, lang))} — ${esc(title)}`,
     `${m("why")}: ${esc(reason)}`,
@@ -106,8 +113,8 @@ export function proposalMessage(p: Proposal, book: AliasBook, siteUrl: string, d
 export function proposalsGroupMessage(list: Proposal[], book: AliasBook, siteUrl: string, dev: ReadonlySet<string> = new Set(), lang: NotifyLang = "en"): string {
   const m = (k: keyof typeof MSG.en) => t(MSG, lang, k);
   const shown = list.slice(0, GROUP_SHOWN).map((p) => {
-    const who = cleanLine(p.proposedBy, book, 60) || m("proposer");
-    return `• ${esc(who)}: ${esc(label(p, lang))} — ${esc(cleanLine(p.title, book, TITLE_MAX))} (${riskText(p, lang)})${dev.has(p.id) ? ` · ${devLine(lang)}` : ""}\n  ${esc(actionsUrl(siteUrl, p.id))}`;
+    const who = ownerLine(p.proposedBy, book, 60) || m("proposer");
+    return `• ${esc(who)}: ${esc(label(p, lang))} — ${esc(ownerLine(p.title, book, TITLE_MAX))} (${riskText(p, lang)})${dev.has(p.id) ? ` · ${devLine(lang)}` : ""}\n  ${esc(actionsUrl(siteUrl, p.id))}`;
   });
   const more = list.length > GROUP_SHOWN ? [`+${list.length - GROUP_SHOWN} ${m("moreN")}`] : [];
   return [
@@ -117,12 +124,17 @@ export function proposalsGroupMessage(list: Proposal[], book: AliasBook, siteUrl
   ].join("\n");
 }
 
+// D18: an automatic re-check (of a monitor or a certificate) that ran changes nothing by itself: still failing, the alert
+// stays as it was; passing, the alert's own "resolved" message says so. Only a re-check that couldn't run is told.
+const QUIET_WHEN_DONE: ReadonlySet<ProposalAction> = new Set(["recheck", "domain_recheck"]);
+export const quietResult = (p: Proposal): boolean => p.auto && p.status === "done" && QUIET_WHEN_DONE.has(p.action);
+
 // Pure: the one-line notice after an auto-run proposal finished, or null when there is nothing to say.
 export function proposalResultMessage(p: Proposal, book: AliasBook, lang: NotifyLang = "en"): string | null {
-  if (!p.auto || (p.status !== "done" && p.status !== "failed")) return null;
+  if (!p.auto || (p.status !== "done" && p.status !== "failed") || quietResult(p)) return null;
   const icon = p.status === "done" ? "✅" : "❌";
-  const result = p.result ? cleanLine(p.result, book, LINE_MAX) : "";
-  return `${icon} ${t(MSG, lang, "automatic")}: ${esc(label(p, lang))} — ${esc(cleanLine(p.title, book, TITLE_MAX))}${result ? `: ${esc(result)}` : ""}`;
+  const result = p.result ? ownerLine(p.result, book, LINE_MAX) : "";
+  return `${icon} ${t(MSG, lang, "automatic")}: ${esc(label(p, lang))} — ${esc(ownerLine(p.title, book, TITLE_MAX))}${result ? `: ${esc(result)}` : ""}`;
 }
 
 // Pure: which of these need the owner's attention: pending, not auto, and risky or a safe kind not switched on.
@@ -203,7 +215,8 @@ async function sendAll(build: (book: AliasBook, lang: NotifyLang) => Promise<Out
   for (const out of await build(book, lang)) {
     let res: SendResult;
     try {
-      res = typeof out === "string" ? await d.send(target.token, target.chatId, out) : await d.send(target.token, target.chatId, out.text, out.keyboard);
+      res = typeof out === "string" ? await d.send(target.token, target.chatId, out)
+        : await d.send(target.token, target.chatId, out.text, out.keyboard, out.replyTo ?? undefined);
     } catch {
       res = { ok: false, kind: "transient", error: "Telegram didn't answer." };
     }
@@ -219,7 +232,12 @@ async function guarded(job: () => Promise<void>, timeoutMs: number): Promise<voi
   }
 }
 
-type Opts = { now?: Date; timeoutMs?: number; devQueued?: ReadonlySet<string> };
+// alertId / alertIds (D18): the alert a notice is about (one auto-run), or each new proposal's alert (proposal id → alert id).
+type Opts = { now?: Date; timeoutMs?: number; devQueued?: ReadonlySet<string>; alertId?: string | null; alertIds?: ReadonlyMap<string, string | null> };
+
+// The Telegram message to reply to for this alert, or null. Never throws.
+const threadOf = async (d: ProposalNotifyDeps, alertId: string | null | undefined): Promise<number | null> =>
+  alertId && d.thread ? d.thread(alertId).catch(() => null) : null;
 
 // New proposals (just created): one message each for those that need the owner, or one grouped message when there are
 // more than GROUP_OVER. Auto-run ones send nothing here (notifyProposalResult tells when they finish).
@@ -234,26 +252,30 @@ export async function notifyNewProposals(proposals: Proposal[], deps: Partial<Pr
     const keyboard = list.length > GROUP_OVER || !d.buttons ? null : await d.buttons().catch(() => null);
     const now = opts.now ?? new Date();
     await Promise.all([
-      sendAll((book, lang) => (list.length > GROUP_OVER
+      // A grouped message lists several alerts' proposals, so it answers none of them; a single one answers its alert.
+      sendAll(async (book, lang) => (list.length > GROUP_OVER
         ? [proposalsGroupMessage(list, book, d.siteUrl(), opts.devQueued, lang)]
-        : list.map((p) => {
+        : Promise.all(list.map(async (p): Promise<Out> => {
           const text = proposalMessage(p, book, d.siteUrl(), opts.devQueued?.has(p.id) ?? false, lang);
-          return keyboard ? { text: `${text}\n${pendingLine(lang)}`, keyboard: keyboard(p) } : text;
-        })), d, now),
+          const replyTo = await threadOf(d, opts.alertIds?.get(p.id));
+          return keyboard ? { text: `${text}\n${pendingLine(lang)}`, keyboard: keyboard(p), replyTo } : { text, replyTo };
+        }))), d, now),
       sendHistory((book, lang) => (list.length > GROUP_OVER ? [historyLine("proposed", list, book, lang)] : list.map((p) => historyLine("proposed", p, book, lang))), d, now),
     ]);
   }, opts.timeoutMs ?? NOTIFY_TIMEOUT_MS);
 }
 
-// An auto-run proposal that finished (done / failed): one line. Anything else sends nothing.
+// An auto-run proposal that finished (done / failed): one line, a reply to its alert's Telegram message when known. A
+// re-check that ran (quietResult) sends nothing on Telegram; the Discord history still records it. Anything else sends
+// nothing.
 export async function notifyProposalResult(p: Proposal, deps: Partial<ProposalNotifyDeps> = {}, opts: Opts = {}): Promise<void> {
   if (!p.auto || (p.status !== "done" && p.status !== "failed")) return;
   const d = { ...DEPS, ...deps };
   const now = opts.now ?? new Date();
   await guarded(() => Promise.all([
-    sendAll((book, lang) => {
+    sendAll(async (book, lang) => {
       const text = proposalResultMessage(p, book, lang);
-      return text ? [text] : [];
+      return text ? [{ text, replyTo: await threadOf(d, opts.alertId) }] : [];
     }, d, now),
     sendHistory((book, lang) => [historyLine(p.status === "done" ? "done" : "failed", p, book, lang)], d, now),
   ]).then(() => undefined), opts.timeoutMs ?? NOTIFY_TIMEOUT_MS);
@@ -263,13 +285,13 @@ export async function notifyProposalResult(p: Proposal, deps: Partial<ProposalNo
 // failed): what happened, why, which deploy went back, what to do, and the result line.
 export function autoRollbackMessage(p: Proposal, info: { reason: string; newRef: string }, book: AliasBook, lang: NotifyLang = "en"): string {
   const m = (k: keyof typeof MSG.en) => t(MSG, lang, k);
-  const app = cleanLine(p.resourceName ?? m("app"), book, 60) || m("app");
-  const reason = cleanLine(info.reason, book, LINE_MAX).replace(/[.!?…]+$/, "") || m("rollbackWhy");
-  const result = p.result ? cleanLine(p.result, book, LINE_MAX) : "";
+  const app = ownerLine(p.resourceName ?? m("app"), book, 60) || m("app");
+  const reason = ownerLine(info.reason, book, LINE_MAX).replace(/[.!?…]+$/, "") || m("rollbackWhy");
+  const result = p.result ? ownerLine(p.result, book, LINE_MAX) : "";
   return [
     lang === "id"
-      ? `⏪ Otomatis rollback ${esc(app)}: ${esc(reason)}. Deploy baru ${esc(cleanLine(info.newRef, book, 40))} dibalikin ke deploy sebelumnya. Benerin dulu, terus deploy ulang.`
-      : `⏪ Automatic rollback of ${esc(app)}: ${esc(reason)}. The new deploy ${esc(cleanLine(info.newRef, book, 40))} was rolled back to the previous one. Fix it first, then deploy again.`,
+      ? `⏪ Otomatis rollback ${esc(app)}: ${esc(reason)}. Deploy baru ${esc(ownerLine(info.newRef, book, 40))} dibalikin ke deploy sebelumnya. Benerin dulu, terus deploy ulang.`
+      : `⏪ Automatic rollback of ${esc(app)}: ${esc(reason)}. The new deploy ${esc(ownerLine(info.newRef, book, 40))} was rolled back to the previous one. Fix it first, then deploy again.`,
     `${p.status === "done" ? "✅" : "❌"} ${p.status === "done" ? m("succeeded") : m("failed")}${result ? `: ${esc(result)}` : ""}`,
   ].join("\n");
 }
@@ -279,7 +301,7 @@ export async function notifyAutoRollback(p: Proposal, info: { reason: string; ne
   const d = { ...DEPS, ...deps };
   const now = opts.now ?? new Date();
   await guarded(() => Promise.all([
-    sendAll((book, lang) => [autoRollbackMessage(p, info, book, lang)], d, now),
+    sendAll(async (book, lang) => [{ text: autoRollbackMessage(p, info, book, lang), replyTo: await threadOf(d, opts.alertId) }], d, now),
     sendHistory((book, lang) => [historyLine(p.status === "done" ? "done" : "failed", p, book, lang)], d, now),
   ]).then(() => undefined), opts.timeoutMs ?? NOTIFY_TIMEOUT_MS);
 }
@@ -289,7 +311,7 @@ export type DepPrNotice = { kind: "merged" | "stopped" | "ready-manual"; app: st
 
 export function depPrMessage(n: DepPrNotice, book: AliasBook, lang: NotifyLang = "en"): string {
   const id = lang === "id";
-  const app = cleanLine(n.app, book, 60) || t(MSG, lang, "app");
+  const app = ownerLine(n.app, book, 60) || t(MSG, lang, "app");
   const pkgs = n.packages.slice(0, 4).join(", ") + (n.packages.length > 4 ? `, +${n.packages.length - 4}` : "");
   if (n.kind === "merged") {
     return id
@@ -301,7 +323,7 @@ export function depPrMessage(n: DepPrNotice, book: AliasBook, lang: NotifyLang =
       ? `🔐 PR #${n.number} di ${esc(app)} siap di-merge, tapi auto-rollback mati — merge manual ya.`
       : `🔐 PR #${n.number} in ${esc(app)} is ready to merge, but auto-rollback is off — please merge it manually.`;
   }
-  const reason = cleanLine(n.reason ?? "", book, LINE_MAX) || t(MSG, lang, "stopFallback");
+  const reason = ownerLine(n.reason ?? "", book, LINE_MAX) || t(MSG, lang, "stopFallback");
   return id
     ? `⚠️ PR #${n.number} di ${esc(app)} butuh dicek: ${esc(reason)}. PR-nya dibiarin terbuka.`
     : `⚠️ PR #${n.number} in ${esc(app)} needs a look: ${esc(reason)}. The PR was left open.`;

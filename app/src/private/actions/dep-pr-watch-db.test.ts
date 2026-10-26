@@ -6,7 +6,7 @@ vi.mock("@/db/client", () => ({ db: () => { throw new Error("no database in test
 const ext = vi.hoisted(() => ({ extensions: { nav: [], palette: [] } as { nav: never[]; palette: never[]; runner?: { queueLockfileJob: unknown; lockfileJobActive: (r: string, b: string) => Promise<boolean> } } }));
 vi.mock("@/lib/extensions", () => ext);
 
-import { depPrMinuteStep, resetDepWatch, runnerLockfileActive, type WatchDeps, watchDepPrs } from "./dep-pr-watch-db";
+import { depPrMinuteStep, liveProductionSource, mergeBlock, resetDepWatch, runnerLockfileActive, type WatchDeps, watchDepPrs } from "./dep-pr-watch-db";
 
 // Watchbell 1.2 (review A1, minor 5): the merge watcher pauses with the DevOps section.
 describe("depPrMinuteStep and the DevOps section", () => {
@@ -62,6 +62,8 @@ function deps(o: Partial<WatchDeps> = {}): WatchDeps & { saved: { set: Record<st
     notify: vi.fn().mockResolvedValue(undefined),
     audit: vi.fn().mockResolvedValue(undefined),
     book: vi.fn().mockResolvedValue({ db: [], app: [{ id: APP, name: "acme-shop", alias: "app-a" }] }),
+    // D15 fix round 2: the live read before a merge (production built from main unless a test says otherwise).
+    liveSource: vi.fn().mockResolvedValue({ source: { kind: "git", ref: "main", sha: SHA } }),
     ...o,
   };
 }
@@ -100,6 +102,258 @@ describe("watchDepPrs", () => {
     expect(w.saved).toEqual([]);
   });
 
+  // Watchbell 1.2.2 (D15, incident 25 Oct): production was built from another branch or deployed from the CLI; merging
+  // into the PR's base would deploy that base to production and replace what is live. The PR stays open for the owner.
+  // Fix round 1: the stage says "needs a look", never "ready to merge"; a reading older than 30 minutes can't confirm.
+  it("refuses the merge when production wasn't built from the PR's base, or that can't be confirmed; merges when it was", async () => {
+    const fresh = min(5).toISOString();
+    for (const [productionSource, why] of [
+      [{ kind: "cli", at: fresh }, "Production was deployed from the CLI, not built from main. Merging this PR would deploy main to production and replace what is live."],
+      [{ kind: "git", ref: "web-revamp", at: fresh }, "Production was built from web-revamp, not main. Merging this PR would deploy main to production and replace what is live."],
+      [{ kind: "git", ref: "main", at: min(31).toISOString() }, "Watchbell can't confirm what production is built from (no reading in the last 30 minutes). Merging this PR could deploy main to production and replace what is live."],
+    ] as const) {
+      const d = deps({ rows: vi.fn().mockResolvedValue([row({ meta: { productionBranch: "main", productionSource } })]) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: expect.stringContaining(`PR #12: needs a look ⚠️ — ${why.slice(0, 60)}`) });
+      expect(d.saved.at(-1)?.text).not.toContain("ready to merge");
+      expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped", reason: why.replace(/\.$/, "") }));
+    }
+    const same = deps({ rows: vi.fn().mockResolvedValue([row({ meta: { productionSource: { kind: "git", ref: "main", sha: SHA, at: fresh } } })]) });
+    expect(await watchDepPrs(now, deadline(), same)).toEqual({ watched: 1, merged: 1, stopped: 0 });
+  });
+
+  // Fix round 1b: the PR's base is the branch production was promoted from, not the Vercel production branch; merging
+  // there deploys nothing to production by itself, so the owner merges and promotes.
+  it("never merges into a base that isn't the production branch when production was promoted from it", async () => {
+    const at = min(5).toISOString();
+    const d = deps({ rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp", meta: { productionBranch: "main", productionSource: { kind: "git", ref: "web-revamp", at } } })]),
+      pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "web-revamp" })) });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+    expect(d.merge).not.toHaveBeenCalled();
+    const why = "Merging into web-revamp won't deploy to production by itself: production was promoted from a web-revamp preview. Merge, then promote the new preview.";
+    expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: `PR #12: needs a look ⚠️ — ${why}` });
+    expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped", reason: why.replace(/\.$/, "") }));
+    // The production branch itself (1.2.1's case) still merges.
+    const prod = deps({ rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp", meta: { productionBranch: "web-revamp", productionSource: { kind: "git", ref: "web-revamp", at } } })]),
+      pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "web-revamp" })),
+      liveSource: vi.fn().mockResolvedValue({ source: { kind: "git", ref: "web-revamp" } }) });
+    expect((await watchDepPrs(now, deadline(), prod)).merged).toBe(1);
+  });
+
+  // Fix round 2 (re-review I1): with auto-rollback off the PR would stop at "ready to merge (manual)"; a mismatch, an old
+  // reading or the 1b case says "needs a look" with the reason instead, and Telegram gets the "stopped" notice.
+  it("auto-rollback off: a blocked PR is 'needs a look' with the reason, never 'ready to merge (manual)'", async () => {
+    const at = min(5).toISOString();
+    for (const [r, live, why] of [
+      [row({ meta: { productionBranch: "main", productionSource: { kind: "cli", at } } }), "main", "Production was deployed from the CLI, not built from main."],
+      [row({ meta: { productionBranch: "main", productionSource: { kind: "git", ref: "main", at: min(31).toISOString() } } }), "main", "Watchbell can't confirm what production is built from"],
+      [row({ baseBranch: "web-revamp", meta: { productionBranch: "main", productionSource: { kind: "git", ref: "web-revamp", at } } }), "web-revamp", "Merging into web-revamp won't deploy to production by itself"],
+    ] as const) {
+      const d = deps({
+        rows: vi.fn().mockResolvedValue([r]), rollback: vi.fn().mockResolvedValue({ enabled: false, windowMin: 30 }),
+        pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: r.baseBranch })),
+        liveSource: vi.fn().mockResolvedValue({ source: { kind: "git", ref: live } }),
+      });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: expect.stringContaining(`PR #12: needs a look ⚠️ — ${why}`) });
+      expect(d.saved.at(-1)?.text).not.toContain("ready to merge");
+      expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped", reason: expect.stringContaining(why.replace(/\.$/, "")) }));
+      expect(d.notify).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "ready-manual" }));
+    }
+    // Nothing against it: still "ready to merge (manual)" as before.
+    const clean = deps({ rows: vi.fn().mockResolvedValue([row({ meta: { productionSource: { kind: "git", ref: "main", at } } })]), rollback: vi.fn().mockResolvedValue({ enabled: false, windowMin: 30 }) });
+    await watchDepPrs(now, deadline(), clean);
+    expect(clean.saved.at(-1)).toMatchObject({ set: { stage: "ready-manual" } });
+  });
+
+  // Fix round 2 (re-review residual risk): one live read of what production is built from, right before the merge.
+  describe("the live read before a merge", () => {
+    it("a source never recorded, but Vercel says production was deployed from the CLI now: needs a look, no merge", async () => {
+      const d = deps({ liveSource: vi.fn().mockResolvedValue({ source: { kind: "cli" } }) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.liveSource).toHaveBeenCalledWith(APP);
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: expect.stringContaining("needs a look ⚠️ — Production was deployed from the CLI, not built from main.") });
+    });
+    it("a stored reading that still says main, but a CLI deploy since: no merge", async () => {
+      const d = deps({
+        rows: vi.fn().mockResolvedValue([row({ meta: { productionBranch: "main", productionSource: { kind: "git", ref: "main", at: min(2).toISOString() } } })]),
+        liveSource: vi.fn().mockResolvedValue({ source: { kind: "cli", ref: "web-revamp" } }),
+      });
+      expect(await watchDepPrs(now, deadline(), d)).toMatchObject({ merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+    });
+    // Fix round 3 (re-review r2 minor 1): the wait is said on the PR, and it ends.
+    it("Vercel can't be read: no merge, the stage says so, the next round tries again", async () => {
+      const d = deps({ liveSource: vi.fn().mockResolvedValue(null) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved).toEqual([{ set: expect.objectContaining({ stage: "checks" }), text: "PR #12: waiting for CI — waiting: Vercel didn't say which deployment is live" }]);
+      expect(d.notify).not.toHaveBeenCalled();
+      const thrown = deps({ liveSource: vi.fn().mockRejectedValue(new Error("network")), rows: vi.fn().mockResolvedValue([row({ stage: "smoke" })]) });
+      expect(await watchDepPrs(now, deadline(), thrown)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+      expect(thrown.merge).not.toHaveBeenCalled();
+      expect(thrown.saved.at(-1)?.text).toBe("PR #12: smoke test — waiting: Vercel didn't say which deployment is live");
+    });
+    const WAITED = "PR #12: smoke test — waiting: Vercel didn't say which deployment is live";
+    it("Vercel still can't say which deployment is live 45 minutes after the preview was ready, after a round that waited: needs a look", async () => {
+      const d = deps({ liveSource: vi.fn().mockResolvedValue(null), rows: vi.fn().mockResolvedValue([row({ stage: "smoke", previewReadyAt: min(46), openedAt: min(60), stageText: WAITED })]) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: expect.stringContaining("needs a look ⚠️ — Vercel didn't say which deployment is live for 45 minutes") });
+      expect(d.notify).toHaveBeenCalledWith(expect.objectContaining({ kind: "stopped" }));
+    });
+    // Re-review r3 minor 4: the clock's base is the preview's ready time (not openedAt), with the boundary.
+    it("counts from the preview's ready time: 44 minutes waits even when the PR opened over 45 minutes ago", async () => {
+      const d = deps({ liveSource: vi.fn().mockResolvedValue(null), rows: vi.fn().mockResolvedValue([row({ stage: "smoke", previewReadyAt: min(44), openedAt: min(90), stageText: WAITED })]) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+      expect(d.saved.at(-1)?.text).toBe(WAITED);
+    });
+    // Re-review r3 minor 3: never on the first failed read (one transient failure), even long after the preview.
+    it("the first failed read never stops the PR, however late; the next failed one does", async () => {
+      const r = row({ stage: "smoke", previewReadyAt: min(120), openedAt: min(130), stageText: "PR #12: smoke test" });
+      const d = deps({ liveSource: vi.fn().mockResolvedValue(null), rows: vi.fn().mockResolvedValue([r]) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+      expect(d.saved.at(-1)?.text).toBe(WAITED);
+      const again = deps({ liveSource: vi.fn().mockResolvedValue(null), rows: vi.fn().mockResolvedValue([{ ...r, stageText: WAITED }]) });
+      expect(await watchDepPrs(now, deadline(), again)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+    });
+    // Re-review r2 minor 2: the same live read before a "ready to merge (manual)" stop (auto-rollback off).
+    it("auto-rollback off: a source never recorded but a CLI deploy now is 'needs a look', not 'ready to merge'; a failed read waits", async () => {
+      const off = { rollback: vi.fn().mockResolvedValue({ enabled: false, windowMin: 30 }) };
+      const cli = deps({ ...off, liveSource: vi.fn().mockResolvedValue({ source: { kind: "cli" } }) });
+      expect(await watchDepPrs(now, deadline(), cli)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(cli.saved.at(-1)).toMatchObject({ set: { stage: "failed" }, text: expect.stringContaining("Production was deployed from the CLI, not built from main.") });
+      expect(cli.notify).not.toHaveBeenCalledWith(expect.objectContaining({ kind: "ready-manual" }));
+      const down = deps({ ...off, liveSource: vi.fn().mockResolvedValue(null) });
+      expect(await watchDepPrs(now, deadline(), down)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+      expect(down.saved.at(-1)?.text).toContain("waiting: Vercel didn't say which deployment is live");
+      expect(down.notify).not.toHaveBeenCalled();
+      const fine = deps(off);
+      await watchDepPrs(now, deadline(), fine);
+      expect(fine.saved.at(-1)).toMatchObject({ set: { stage: "ready-manual" } });
+      expect(fine.liveSource).toHaveBeenCalledWith(APP);
+    });
+    // Re-review r2 I1: a redeploy or promote of a CLI deployment (only the CLI's gitCommitRef names the branch).
+    it("a redeploy of a CLI deployment read live is a CLI deploy: no merge", async () => {
+      const vercel = vi.fn().mockResolvedValue({ token: "v", teamId: "team", projectId: "prj" });
+      const serving = vi.fn().mockResolvedValue(ok({ currentId: "dpl_live", latest: null, promote: null }));
+      const deployment = vi.fn().mockResolvedValue(ok({ id: "dpl_live", source: "redeploy", branch: "main", sha: null, branchFrom: "cli" }));
+      expect(await liveProductionSource(APP, { vercel, serving, deployment })).toEqual({ source: { kind: "cli", ref: "main" } });
+      const d = deps({
+        rows: vi.fn().mockResolvedValue([row({ meta: { productionBranch: "main", productionSource: { kind: "git", ref: "main", at: min(2).toISOString() } } })]),
+        liveSource: (appId) => liveProductionSource(appId, { vercel, serving, deployment }),
+      });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)?.text).toContain("Production was deployed from the CLI, not built from main.");
+    });
+    // Re-review r2 minor 5: the live 1b path (the stored reading is old news; the live one says production was promoted).
+    it("live: production promoted from the PR's base, which isn't the production branch: no merge", async () => {
+      const d = deps({
+        rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp", meta: { productionBranch: "main" } })]),
+        pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "web-revamp" })),
+        liveSource: vi.fn().mockResolvedValue({ source: { kind: "git", ref: "web-revamp" } }),
+      });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.saved.at(-1)?.text).toContain("Merging into web-revamp won't deploy to production by itself");
+    });
+    it("a live deployment that names no source can't be confirmed: needs a look", async () => {
+      const d = deps({ liveSource: vi.fn().mockResolvedValue({ source: null }) });
+      expect(await watchDepPrs(now, deadline(), d)).toMatchObject({ merged: 0, stopped: 1 });
+      expect(d.saved.at(-1)?.text).toContain("can't confirm what production is built from");
+    });
+    it("liveProductionSource reads the served deployment and its source", async () => {
+      const vercel = vi.fn().mockResolvedValue({ token: "v", teamId: "team", projectId: "prj" });
+      const serving = vi.fn().mockResolvedValue(ok({ currentId: "dpl_live", latest: { id: "dpl_live", readyState: "READY", createdAt: 1 }, promote: null }));
+      const deployment = vi.fn().mockResolvedValue(ok({ id: "dpl_live", source: "cli", branch: "web-revamp", sha: null }));
+      expect(await liveProductionSource(APP, { vercel, serving, deployment })).toEqual({ source: { kind: "cli", ref: "web-revamp" } });
+      expect(serving).toHaveBeenCalledWith("v", "team", "prj");
+      expect(deployment).toHaveBeenCalledWith("v", expect.objectContaining({ id: "team" }), "dpl_live");
+      expect(await liveProductionSource(APP, { vercel, serving: vi.fn().mockResolvedValue(ok({ currentId: null, latest: null, promote: null })), deployment })).toBeNull();
+      expect(await liveProductionSource(APP, { vercel, serving: vi.fn().mockResolvedValue({ ok: false, kind: "transient", error: "x" }), deployment })).toBeNull();
+      expect(await liveProductionSource(APP, { vercel: vi.fn().mockResolvedValue(null), serving, deployment })).toBeNull();
+      // Re-review r2 minor 5: a failed read of the deployment itself.
+      expect(await liveProductionSource(APP, { vercel, serving, deployment: vi.fn().mockResolvedValue({ ok: false, kind: "transient", error: "x" }) })).toBeNull();
+    });
+
+    // Fix round 4 (re-review r3 I1): the fallback only after a failed or canceled latest build, never while one runs.
+    describe("when Vercel names no served deployment", () => {
+      const vercel = vi.fn().mockResolvedValue({ token: "v", teamId: "team", projectId: "prj" });
+      const servingWith = (readyState: string, promote: { toDeploymentId: string; requestedAt: number } | null = null) =>
+        vi.fn().mockResolvedValue(ok({ currentId: null, latest: { id: "dpl_latest", readyState, createdAt: min(1).getTime() }, promote }));
+      const readyList = () => vi.fn().mockResolvedValue(ok([
+        { id: "dpl_old", source: "git", branch: "main", sha: null, branchFrom: "github", createdAt: min(90) },
+        { id: "dpl_new", source: "cli", branch: null, sha: null, createdAt: min(30) },
+      ]));
+      const idle = () => vi.fn().mockResolvedValue(ok(null));
+
+      it("a production build queued, initializing or building (a CLI deploy in progress): null, the PR waits", async () => {
+        for (const state of ["QUEUED", "INITIALIZING", "BUILDING"]) {
+          const ready = readyList();
+          expect(await liveProductionSource(APP, { vercel, serving: servingWith(state), ready, running: idle(), deployment: vi.fn() })).toBeNull();
+          expect(ready).not.toHaveBeenCalled();
+        }
+        // The latest failed but another production build is running: wait for it too.
+        const running = vi.fn().mockResolvedValue(ok({ id: "dpl_run", state: "building" }));
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR"), ready: readyList(), running, deployment: vi.fn() })).toBeNull();
+        expect(running).toHaveBeenCalledWith("v", "team", "prj");
+        // Through the watcher: no merge, the waiting text.
+        const d = deps({
+          rows: vi.fn().mockResolvedValue([row({ meta: { productionBranch: "main", productionSource: { kind: "git", ref: "main", at: min(2).toISOString() } } })]),
+          liveSource: (appId) => liveProductionSource(appId, { vercel, serving: servingWith("BUILDING"), ready: readyList(), running: idle(), deployment: vi.fn() }),
+        });
+        expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 0 });
+        expect(d.merge).not.toHaveBeenCalled();
+        expect(d.saved.at(-1)?.text).toContain("waiting: Vercel didn't say which deployment is live");
+      });
+
+      it("the latest failed or was canceled, none running: the newest READY production deployment", async () => {
+        for (const state of ["ERROR", "CANCELED"]) {
+          const ready = readyList();
+          const deployment = vi.fn();
+          expect(await liveProductionSource(APP, { vercel, serving: servingWith(state), ready, running: idle(), deployment })).toEqual({ source: { kind: "cli" } });
+          expect(ready).toHaveBeenCalledWith("v", "team", "prj");
+          expect(deployment).not.toHaveBeenCalled();
+        }
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR"), ready: vi.fn().mockResolvedValue(ok([])), running: idle(), deployment: vi.fn() })).toBeNull();
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR"), ready: vi.fn().mockResolvedValue({ ok: false, kind: "transient", error: "x" }), running: idle(), deployment: vi.fn() })).toBeNull();
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR"), ready: readyList(), running: vi.fn().mockResolvedValue({ ok: false, kind: "transient", error: "x" }), deployment: vi.fn() })).toBeNull();
+      });
+
+      // Re-review r3 minor 1: after a promote of an older deployment, the newest READY one before it isn't served.
+      it("after a succeeded promote: a READY deployment created after it, else the promote's target", async () => {
+        const deployment = vi.fn().mockResolvedValue(ok({ id: "dpl_promoted", source: "cli", branch: "web-revamp", sha: null }));
+        // The promote (60 min ago) of an older CLI deployment; both READY ones in the list predate it except none: target.
+        const before = vi.fn().mockResolvedValue(ok([{ id: "dpl_main", source: "git", branch: "main", sha: null, branchFrom: "github", createdAt: min(90) }]));
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR", { toDeploymentId: "dpl_promoted", requestedAt: min(60).getTime() }), ready: before, running: idle(), deployment }))
+          .toEqual({ source: { kind: "cli", ref: "web-revamp" } });
+        expect(deployment).toHaveBeenCalledWith("v", expect.objectContaining({ id: "team" }), "dpl_promoted");
+        // A READY deployment created after the promote is what's served.
+        const after = vi.fn().mockResolvedValue(ok([
+          { id: "dpl_main", source: "git", branch: "main", sha: null, branchFrom: "github", createdAt: min(20) },
+          { id: "dpl_older", source: "cli", branch: null, sha: null, createdAt: min(90) },
+        ]));
+        expect(await liveProductionSource(APP, { vercel, serving: servingWith("ERROR", { toDeploymentId: "dpl_promoted", requestedAt: min(60).getTime() }), ready: after, running: idle(), deployment: vi.fn() }))
+          .toEqual({ source: { kind: "git", ref: "main" } });
+      });
+    });
+  });
+
+  // Review minor 3: an app deleted (appId null) or no longer watched isn't read by the collector any more.
+  it("never merges for an app that is gone or no longer watched", async () => {
+    for (const o of [{ appMonitored: false }, { appGone: min(1) }]) {
+      const d = deps({ rows: vi.fn().mockResolvedValue([row(o)]) });
+      expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 0, stopped: 1 });
+      expect(d.merge).not.toHaveBeenCalled();
+      expect(d.saved.at(-1)?.text).toContain("no longer watched");
+    }
+    expect(mergeBlock({ appId: null, meta: null, baseBranch: "main" }, now)).toContain("gone or no longer watched");
+    expect(mergeBlock({ appId: APP, appMonitored: true, appGone: null, meta: {}, baseBranch: "main" }, now)).toBeNull();
+  });
+
   it("pending → merged: green checks, READY preview, HTTP smoke ok, auto-rollback on → squash merge pinned to the SHA", async () => {
     const d = deps();
     expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 1, stopped: 0 });
@@ -119,6 +373,7 @@ describe("watchDepPrs", () => {
       rows: vi.fn().mockResolvedValue([row({ baseBranch: "web-revamp", packages: ["axios"], title: "Watchbell: update axios to 1.6.8 (security fix)" })]),
       security: vi.fn().mockResolvedValue({ enabled: true, severities: ["critical", "high", "moderate"], sameMajorOnly: true }),
       pull: vi.fn().mockResolvedValue(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "web-revamp" })),
+      liveSource: vi.fn().mockResolvedValue({ source: { kind: "git", ref: "web-revamp" } }),
     });
     expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 1, merged: 1, stopped: 0 });
     expect(d.merge).toHaveBeenCalledWith("w", "o/acme-shop", 12, "watchpost/deps-0a1b2c3d", "web-revamp", SHA, "Watchbell: update axios to 1.6.8 (security fix)");

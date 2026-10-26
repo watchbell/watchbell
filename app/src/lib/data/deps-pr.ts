@@ -13,7 +13,7 @@ import { stageLine } from "@/lib/deps/pr-watch";
 import { type Upgrade, upgradesFor } from "@/lib/deps/plan";
 import { serverEnv } from "@/lib/env";
 import { isUuid } from "@/lib/ids";
-import { productionCandidate } from "@/lib/deps/branch";
+import { baseCandidates, expectedBase, productionMismatch, scannedBranch } from "@/lib/deps/branch";
 import { branchHead, createBranch, createPull, manifestAt, openPull, openWatchpostPulls, putManifest, repoInfo } from "@/lib/providers/github-write";
 import type { Failure, FetchOpts } from "@/lib/providers/http";
 import { type ActionOutcome, STALE } from "@/lib/provider-actions";
@@ -67,21 +67,26 @@ async function dependencyPlanOf(repoId: string): Promise<{ upgrades: Upgrade[]; 
   return { upgrades: upgradesFor(open), installed: installedOf(open) };
 }
 
-// The update PR's base: the app's Vercel production branch (resources.meta.productionBranch, from the account sync) when
-// it is a plain branch name that exists in the repository, else the repository's default branch. head: that branch's
-// head commit (the default branch's read is returned as is, so the caller reports it like before). A failed read of the
-// production branch fails the run: guessing could open the PR against a branch that never deploys.
+// The update PR's base: the first of baseCandidates (lib/deps/branch.ts) the repository has: the Git branch the live
+// production deployment was built from (1.2.2, D15: resources.meta.productionSource), the app's Vercel production branch
+// (resources.meta.productionBranch, 1.2.1), else the repository's default branch. head: that branch's head commit (the
+// default branch's read is returned as is, so the caller reports it like before). A failed read of a candidate fails
+// the run: guessing could open the PR against a branch that never deploys.
 export async function prBase(
-  token: string, fullName: string, defaultBranch: string, productionBranch: unknown, o: FetchOpts,
+  token: string, fullName: string, defaultBranch: string, meta: Record<string, unknown> | null, o: FetchOpts,
 ): Promise<{ ok: true; data: { base: string; head: Awaited<ReturnType<typeof branchHead>> } } | Failure> {
-  const prod = productionCandidate(productionBranch, defaultBranch);
-  if (prod) {
-    const head = await branchHead(token, fullName, prod, o);
+  for (const b of baseCandidates(meta, defaultBranch)) {
+    if (b === defaultBranch) break;
+    const head = await branchHead(token, fullName, b, o);
     if (!head.ok) return head;
-    if (head.data) return { ok: true, data: { base: prod, head } };
+    if (head.data) return { ok: true, data: { base: b, head } };
   }
   return { ok: true, data: { base: defaultBranch, head: await branchHead(token, fullName, defaultBranch, o) } };
 }
+
+// The warning on top of an update PR whose base isn't what production was built from (opened as a draft).
+export const prWarning = (why: string): string =>
+  `> [!WARNING]\n> ${why} Check where production is built from before you merge; Watchbell won't merge this pull request itself.\n\n`;
 
 export async function bumpPrAs(actor: Actor, appId: string, repoId: string, fin: Finisher = finish, opts: BumpOpts = {}): Promise<ActionResult> {
   if (!isUuid(appId) || !isUuid(repoId)) return fin(refuse("Something in that request wasn't valid."), actor, "");
@@ -94,6 +99,7 @@ export async function bumpPrAs(actor: Actor, appId: string, repoId: string, fin:
   // The app must still be linked to that repository (the proposal's target), and the repository still shared.
   const [row] = await db().select({
     app: resources.name, meta: resources.meta, fullName: githubRepos.fullName, owner: githubRepos.owner, goneAt: githubRepos.goneAt, lockfilePath: dependencyScans.lockfilePath,
+    lockfileSha: dependencyScans.lockfileSha,
   })
     .from(appRepos).innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId)).innerJoin(resources, eq(resources.id, appRepos.appId))
     .leftJoin(dependencyScans, eq(dependencyScans.repoId, appRepos.repoId))
@@ -129,12 +135,24 @@ export async function bumpPrAs(actor: Actor, appId: string, repoId: string, fin:
   const o: FetchOpts = { timeoutMs: 8_000, ...fetchOpts };
   const info = await repoInfo(acc.token, row.fullName, o);
   if (!info.ok) return fin({ done: false, failed: info, audit: { message: `Package update PR failed · ${row.app}`, resourceId: appId } }, actor, acc.id);
-  // Watchbell 1.2.1 (owner 24 Oct): the branch Vercel deploys to production when the repository has it (shopfront is
-  // live from web-revamp while main is stale: a fix merged into main never reached production), else the default branch.
+  // Watchbell 1.2.1 (owner 24 Oct) and 1.2.2 (D15): the branch production was really built from, else the branch Vercel
+  // deploys to production, when the repository has it, else the default branch (prBase). The scan read the same branch.
   // The PR record keeps the base, so the merge watcher merges into the same branch.
-  const pb = await prBase(acc.token, row.fullName, info.data.defaultBranch, meta.productionBranch, o);
+  const pb = await prBase(acc.token, row.fullName, info.data.defaultBranch, meta, o);
   if (!pb.ok) return fin({ done: false, failed: pb, audit: { message: `Package update PR failed · ${row.app}`, resourceId: appId } }, actor, acc.id);
   const base = pb.data.base;
+  // Watchbell 1.2.2 (D15): production wasn't built from that base (a CLI deploy, a branch the repository doesn't have), or
+  // that can't be confirmed lately: merging would deploy the base to production and replace what is live. Never
+  // automatically; an approved PR opens as a draft with the warning on top.
+  const mismatch = productionMismatch(meta.productionSource, base, new Date());
+  if (mismatch && auto) return fin(refuse(`Automatic PR not opened: ${mismatch} The proposal waits for your approval.`), actor, acc.id);
+  // D15 fix round 2: the scan's advisories (the plan) must come from the branch the PR edits. After a change of source,
+  // until the next scan, they may not: another branch's plan on this package.json could jump a major. Scan again first.
+  // (A framework PR's plan is the app's Next.js check, not the scan.)
+  const scanned = framework ? null : scannedBranch(row.lockfileSha, info.data.defaultBranch, dir);
+  if (scanned && scanned !== base) {
+    return fin(refuse(`The dependency scan of ${row.app} read ${scanned}, but this pull request would go to ${base}. Scan again (Dependencies › Scan now on the app page), then ask again.`), actor, acc.id);
+  }
   const head = pb.data.head;
   if (!head.ok) return fin({ done: false, failed: head, audit: { message: `Package update PR failed · ${row.app}`, resourceId: appId } }, actor, acc.id);
   if (!head.data) return fin(refuse(`The default branch ${base} wasn't found.`), actor, acc.id);
@@ -185,11 +203,22 @@ export async function bumpPrAs(actor: Actor, appId: string, repoId: string, fin:
   const put = await putManifest(acc.token, row.fullName, branch, base, text, manifest.data.sha, commitMessage(bumps), o, manifestPath);
   if (!put.ok) return failed(put);
   const title = prTitle(bumps, dir);
-  const pr = await createPull(acc.token, row.fullName, branch, base, title, prBody(bumps, lockKind, !!auto, dir), o);
+  const body = (mismatch ? prWarning(mismatch) : "") + prBody(bumps, lockKind, !!auto, dir);
+  let pr = await createPull(acc.token, row.fullName, branch, base, title, body, o, { draft: !!mismatch });
+  // A private repository on GitHub's free plan can't have draft PRs (422): a normal PR, the warning on top stays.
+  let draft = !!mismatch;
+  if (mismatch && !pr.ok && pr.status === 422) {
+    pr = await createPull(acc.token, row.fullName, branch, base, title, body, o);
+    draft = false;
+  }
   if (!pr.ok) return failed(pr);
+  const how = !mismatch ? "" : draft ? ` Opened as a draft: ${mismatch}` : ` Opened as a normal pull request (this repository can't have drafts), with the warning on top: ${mismatch}`;
   const list = bumps.map((b) => `${b.package} ${b.from} → ${b.to}`).join(", ");
   // For the dedupe and the merge watcher. A failed record doesn't undo the PR (the next scan's dedupe reads GitHub too).
   const sha = await branchHead(acc.token, row.fullName, branch, o).catch(() => null);
+  // Watchbell 1.2.2 (D18): the lockfile workflow (the runner or the actions repository set in Settings) took the update,
+  // so the result doesn't ask the owner to run npm install.
+  let lockfileTaken = false;
   if (sha?.ok && sha.data) {
     await db().insert(dependencyPrs).values({
       repoId, appId, proposalId: proposalId ?? null, number: pr.data.number, branch, baseBranch: base, headSha: sha.data, title: title.slice(0, 200),
@@ -198,15 +227,16 @@ export async function bumpPrAs(actor: Actor, appId: string, repoId: string, fin:
     // The VM runner (Stage 9 slice 4, the private edition's registry) updates the lockfile on the PR branch; it skips
     // without a registered runner. The registry is read lazily: its blocks import this file (proposals, merge watcher).
     const { extensions } = await import("@/lib/extensions");
-    await extensions.runner?.queueLockfileJob({
+    const job = await extensions.runner?.queueLockfileJob({
       repoId, branch, headSha: sha.data, prNumber: pr.data.number, lockfilePath, targets: bumps.map((b) => ({ name: b.package, version: b.fixed })),
-    }).catch(() => console.warn("deps: queueing the lockfile job failed"));
+    }).catch(() => { console.warn("deps: queueing the lockfile job failed"); return null; });
     // Or GitHub Actions in the owner's actions repository (no VM needed); never throws, skips when not set up.
-    await dispatchLockfileUpdate(acc.token, { repo: row.fullName, branch, lockfilePath, prNumber: pr.data.number });
+    const sent = await dispatchLockfileUpdate(acc.token, { repo: row.fullName, branch, lockfilePath, prNumber: pr.data.number });
+    lockfileTaken = job?.queued === true || sent.sent;
   }
   return fin({
     done: true,
-    message: `Pull request #${pr.data.number} opened for ${row.app}: ${list}. Run npm install${dir ? ` in ${dir}` : ""} on the branch before merging.`,
+    message: `Pull request #${pr.data.number} opened for ${row.app}: ${list}.${lockfileTaken ? "" : ` Run npm install${dir ? ` in ${dir}` : ""} on the branch before merging.`}${how}`,
     audit: { message: `Package update PR opened · ${row.app} · #${pr.data.number}`, resourceId: appId, detail: list },
   }, actor, acc.id);
 }
@@ -223,6 +253,27 @@ export async function autoBumpReady(repoId: string, severities: DepSeverity[], f
   if (!plan) return { ok: false, why: "nothing" };
   const pick = autoPick(plan.upgrades, plan.installed, severities);
   return pick.ok ? { ok: true } : { ok: false, why: pick.why };
+}
+
+// Watchbell 1.2.2 (D15): the update-PR proposals (app → its linked repository) whose merge would deploy the base over what
+// is live: production was deployed from the CLI, or built from another branch than the base prBase would pick
+// (expectedBase: before GitHub is asked whether the branch exists; bumpPrAs checks the real base again), or the last
+// reading is older than 30 minutes. App id → the sentence for the proposal's reason. Such a proposal never runs or
+// merges automatically.
+export async function productionMismatches(pairs: readonly { appId: string; repoId: string }[], now: Date): Promise<Map<string, string>> {
+  const want = pairs.filter((p) => isUuid(p.appId) && isUuid(p.repoId));
+  const out = new Map<string, string>();
+  if (!want.length) return out;
+  const rows = await db().select({ appId: appRepos.appId, repoId: appRepos.repoId, meta: resources.meta, defaultBranch: githubRepos.defaultBranch })
+    .from(appRepos).innerJoin(resources, eq(resources.id, appRepos.appId)).innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId))
+    .where(inArray(appRepos.appId, [...new Set(want.map((p) => p.appId))])).limit(want.length * 4);
+  for (const p of want) {
+    const r = rows.find((x) => x.appId === p.appId && x.repoId === p.repoId);
+    const meta = (r?.meta ?? {}) as Record<string, unknown>;
+    const why = r ? productionMismatch(meta.productionSource, expectedBase(meta, r.defaultBranch ?? null), now) : null;
+    if (why) out.set(p.appId, why);
+  }
+  return out;
 }
 
 // ---- proposals for FrameworkVulnerable (Watchbell 1.2) ----

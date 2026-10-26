@@ -1,4 +1,5 @@
 import { clip } from "./proposals";
+import type { NextStatus } from "./rollback-guard";
 
 // Auto-rollback after a bad production deploy (owner 16 Oct). Pure. A vercel_rollback proposal runs without asking (as
 // "office-auto", through the same run path and guards as an approval) only when ALL of these hold:
@@ -8,7 +9,8 @@ import { clip } from "./proposals";
 //     previous production deployment of that live one;
 //   - the live deployment is the newest production deployment (not a rolled-back state) and isn't itself the result of
 //     a rollback or a promote (no such console action on the app in the last 2 hours);
-//   - the previous deployment is READY and at most 30 days old;
+//   - the previous deployment is READY and at most 30 days old, and its Next.js is known to have no advisories
+//     (Watchbell 1.2.2, rollback-guard.ts previousNext: a vulnerable or unknown one waits for the owner);
 //   - no auto-rollback of this app in the last 2 hours, none ever for this same deployment pair, and no other
 //     auto-rollback in flight anywhere.
 // Failed builds never go live on Vercel; this is for builds that succeed but break at runtime.
@@ -31,6 +33,7 @@ export type RollbackCheck = {
   autoLately: boolean;             // an auto-rollback of this app in the last 2 h
   sameDeployBefore: boolean;       // an auto-rollback to this same previous deployment, ever (retention: 30 days)
   inFlight: boolean;               // an auto-rollback approved or running anywhere
+  previousNext: NextStatus;        // the previous deployment's Next.js: only "ok" may run alone
 };
 
 export type RollbackDecision = { ok: true } | { ok: false; why: string };
@@ -48,6 +51,8 @@ export function autoRollbackDecision(c: RollbackCheck, now: Date): RollbackDecis
   if (c.rolledOrPromotedLately) return no("live deploy came from a rollback or promote");
   if ((d.previousState ?? "").toLowerCase() !== "ready") return no("previous not ready");
   if (!d.previousCreatedAt || now.getTime() - d.previousCreatedAt.getTime() > PREVIOUS_MAX_AGE_MS) return no("previous too old");
+  if (c.previousNext === "vulnerable") return no("previous Next.js has advisories");
+  if (c.previousNext !== "ok") return no("previous Next.js unknown");
   if (c.autoLately) return no("auto-rollback within 2 h");
   if (c.sameDeployBefore) return no("already rolled back once");
   if (c.inFlight) return no("another auto-rollback is running");

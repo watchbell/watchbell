@@ -4,7 +4,8 @@ import { isDemo } from "@/lib/mode";
 
 // Telegram Bot API (core.telegram.org/bots/api): POST /bot<token>/sendMessage; every answer is { ok, result } or
 // { ok: false, error_code, description, parameters?: { retry_after } }. The token is never logged or put in an error.
-export type SendResult = { ok: true } | { ok: false; kind: "config" | "transient"; error: string; retryAfterS?: number };
+// messageId (Watchbell 1.2.2, D18): the sent message's id when Telegram returned it, so a later notice can reply to it.
+export type SendResult = { ok: true; messageId?: number } | { ok: false; kind: "config" | "transient"; error: string; retryAfterS?: number };
 
 const base = (token: string) => `https://api.telegram.org/bot${token}`;
 
@@ -23,12 +24,20 @@ export async function telegramCall(token: string, method: string, init: RequestI
 }
 
 // replyMarkup (Stage 9 slice 7): an inline keyboard under the message, e.g. the proposal approval buttons.
-export async function sendTelegram(token: string, chatId: string, html: string, opts: { fetch?: typeof fetch; replyMarkup?: unknown } = {}): Promise<SendResult> {
+// replyTo (Watchbell 1.2.2, D18): the message this one answers (an auto-action's result under its alert). Sent as
+// reply_parameters (Bot API 7.0's form of reply_to_message_id) with allow_sending_without_reply, so a deleted alert
+// message still lets the notice through as a plain one.
+export async function sendTelegram(token: string, chatId: string, html: string, opts: { fetch?: typeof fetch; replyMarkup?: unknown; replyTo?: number | null } = {}): Promise<SendResult> {
+  const reply = typeof opts.replyTo === "number" && Number.isSafeInteger(opts.replyTo) && opts.replyTo > 0
+    ? { reply_parameters: { message_id: opts.replyTo, allow_sending_without_reply: true } } : {};
   const r = await telegramCall(token, "sendMessage", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...(opts.replyMarkup ? { reply_markup: opts.replyMarkup } : {}) }),
+    body: JSON.stringify({ chat_id: chatId, text: html, parse_mode: "HTML", link_preview_options: { is_disabled: true }, ...(opts.replyMarkup ? { reply_markup: opts.replyMarkup } : {}), ...reply }),
   }, opts.fetch ?? fetch);
-  if (r.ok) return { ok: true };
+  if (r.ok) {
+    const id = (r.result as { message_id?: unknown } | null)?.message_id;
+    return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? { ok: true, messageId: id } : { ok: true };
+  }
   if (r.code === 429) return { ok: false, kind: "transient", retryAfterS: r.retryAfter ?? 30, error: `Telegram asked us to wait ${r.retryAfter ?? 30} s.` };
   if (r.code === null || r.code >= 500) return { ok: false, kind: "transient", error: r.code === null ? r.description : `Telegram returned an error (${r.code}).` };
   return { ok: false, kind: "config", error: `Telegram: ${r.description}` };

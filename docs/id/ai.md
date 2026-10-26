@@ -54,6 +54,17 @@ Setelah sebuah provider terhubung:
 - **Playground**: coba sebuah model dengan session owner Anda. "Plain" hanya mengirim pesan Anda; "Ask the console"
   menambahkan snapshot aplikasi Anda yang sudah dibersihkan. Tidak ada yang disimpan.
 
+Kalau provider yang dituju tidak bisa dihubungi (endpoint atau tunnel-nya mati: timeout, error jaringan, atau 502, 503,
+504, 52x, 530), kena batas pemakaian (429), gagal karena error server lain (misalnya 500), atau mengirim jawaban yang
+tidak bisa dibaca Watchbell, Watchbell mencoba provider aktif berikutnya satu kali. Kunci yang ditolak (401 atau 403)
+atau request yang ditolak provider tidak pernah dicoba ulang, provider yang Anda matikan tidak pernah dipakai, dan
+model yang Anda pilih langsung (Playground, atau model yang dipilih di Ask) tetap di provider-nya. Panggilan yang punya
+batas waktu tetap di dalam batas itu: selama ada provider lain yang aktif, provider pertama mendapat dua pertiga
+waktunya (untuk batas 9 detik atau lebih), jadi provider yang macet masih menyisakan waktu untuk yang kedua. Kalau
+tidak ada yang menjawab, pesannya menyebut nama provider-nya, misalnya
+`AI provider "my-router" is unreachable (its endpoint or tunnel is down).`, dan apakah provider lain sudah dicoba atau
+memang tidak ada (tambahkan di **Bring your own key**).
+
 ## Model, kuota, dan log
 
 - **Models** menampilkan model yang ditawarkan tiap provider yang terhubung (`/models` miliknya). Matikan sebuah model,

@@ -23,6 +23,8 @@ export type VercelDeployment = {
   id: string; projectId: string; state: DeploymentState; rawState: string; target: "production" | "preview";
   branch: string | null; sha: string | null; message: string | null; source: string | null; url: string | null;
   createdAt: Date; buildingAt: Date | null; readyAt: Date | null;
+  // 1.2.2 (D15): which meta field named the branch, and whether the CLI deployed uncommitted changes (toDeployment).
+  branchFrom?: BranchFrom; gitDirty?: true;
 };
 export type DiscoveredApp = {
   externalId: string; name: string;
@@ -217,6 +219,8 @@ const deploymentSchema = z.object({
   buildingAt: z.number().nullish(),
   ready: z.number().nullish(),
   meta: z.record(z.string(), z.unknown()).nullish(),
+  // Watchbell 1.2.2 (D15): the Git source of a deployment (v13 single reads), when the meta has no commit fields.
+  gitSource: z.object({ ref: z.string().nullish(), sha: z.string().nullish() }).nullish().catch(null),
 });
 const str = (v: unknown) => (typeof v === "string" && v.length ? v : null);
 const date = (v: number | null | undefined) => (v ? new Date(v) : null);
@@ -227,12 +231,25 @@ function toDeployment(d: z.infer<typeof deploymentSchema>, id: string): VercelDe
   return {
     id, projectId: d.projectId, state: mapDeploymentState(raw), rawState: raw,
     target: d.target === "production" ? "production" : "preview",
-    branch: str(m.githubCommitRef) ?? str(m.gitCommitRef),
-    sha: str(m.githubCommitSha) ?? str(m.gitCommitSha),
-    message: str(m.githubCommitMessage) ?? str(m.gitCommitMessage),
+    // GitHub, then the CLI's git metadata, then GitLab and Bitbucket (1.2.2 review minor 1), then gitSource (v13 reads).
+    branch: str(m.githubCommitRef) ?? str(m.gitCommitRef) ?? str(m.gitlabCommitRef) ?? str(m.bitbucketCommitRef) ?? str(d.gitSource?.ref),
+    sha: str(m.githubCommitSha) ?? str(m.gitCommitSha) ?? str(m.gitlabCommitSha) ?? str(m.bitbucketCommitSha) ?? str(d.gitSource?.sha),
+    message: str(m.githubCommitMessage) ?? str(m.gitCommitMessage) ?? str(m.gitlabCommitMessage) ?? str(m.bitbucketCommitMessage),
     source: d.source ?? null, url: d.url ?? null,
     createdAt: new Date(d.createdAt ?? d.created ?? 0), buildingAt: date(d.buildingAt), readyAt: date(d.ready),
+    ...branchOrigin(m, d.gitSource?.ref),
   };
+}
+
+// 1.2.2 (D15 fix round 3): where the branch came from. "cli" when only the CLI's own git metadata (gitCommitRef: the
+// branch the CLI ran on locally) names it, so a redeploy or promote of a CLI deployment isn't taken for a Git build;
+// gitDirty: the CLI deployed uncommitted changes. Only set when there is something to say (keeps the shape otherwise).
+export type BranchFrom = "github" | "gitlab" | "bitbucket" | "gitSource" | "cli";
+function branchOrigin(m: Record<string, unknown>, gitSourceRef: string | null | undefined): { branchFrom?: BranchFrom; gitDirty?: true } {
+  const from: BranchFrom | null = str(m.githubCommitRef) ? "github" : str(m.gitlabCommitRef) ? "gitlab" : str(m.bitbucketCommitRef) ? "bitbucket"
+    : str(gitSourceRef) ? "gitSource" : str(m.gitCommitRef) ? "cli" : null;
+  const dirty = m.gitDirty === "1" || m.gitDirty === 1 || m.gitDirty === true;
+  return { ...(from ? { branchFrom: from } : {}), ...(dirty ? { gitDirty: true as const } : {}) };
 }
 
 export async function listDeployments(token: string, team: VercelTeam, q: { since?: number; limit?: number }, opts: VercelOpts = {}): Promise<Result<VercelDeployment[]>> {
@@ -427,5 +444,30 @@ export async function deploymentsForCommit(token: string, teamId: string, projec
     ok: true,
     data: p.data.deployments.map((d) => toDeployment(d, d.uid)).filter((d) => d.projectId === projectId && (d.sha === null || d.sha === sha))
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()),
+  };
+}
+
+// Watchbell 1.2.2 (D15 fix round 4): what the update-PR merge watcher needs to know which deployment is live when
+// servingId can't say (the latest production deployment isn't READY): that latest deployment's state, and the last
+// succeeded promote (its target, and when it was asked). Read only; the same project GET as currentProduction.
+export type ProductionServing = {
+  currentId: string | null;
+  latest: { id: string; readyState: string | null; createdAt: number | null } | null;
+  promote: { toDeploymentId: string; requestedAt: number } | null;
+};
+export async function productionServing(token: string, teamId: string, projectId: string, opts: VercelOpts = {}): Promise<Result<ProductionServing>> {
+  const r = await get(`/v9/projects/${seg(projectId)}?${teamQ(teamId)}`, token, opts);
+  if (!r.ok) return r;
+  const p = oneProjectSchema.safeParse(r.data);
+  if (!p.success) return format("the project");
+  const latest = p.data.targets?.production ?? null;
+  const last = p.data.lastAliasRequest ?? null;
+  return {
+    ok: true,
+    data: {
+      currentId: servingId(latest, last),
+      latest: latest ? { id: latest.id, readyState: latest.readyState ?? null, createdAt: latest.createdAt ?? null } : null,
+      promote: last && last.type === "promote" && last.jobStatus === "succeeded" ? { toDeploymentId: last.toDeploymentId, requestedAt: last.requestedAt } : null,
+    },
   };
 }

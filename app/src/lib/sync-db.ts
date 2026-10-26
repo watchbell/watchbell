@@ -14,6 +14,7 @@ import { listProjects as listSupabaseProjects } from "@/lib/providers/supabase";
 import { discoverTurso } from "@/lib/providers/turso";
 import { listUpstashRedis, parseUpstashCred } from "@/lib/providers/upstash";
 import { appDomainsMeta } from "@/lib/domain-move";
+import { keepProductionSource } from "@/lib/deps/branch";
 import { discoverVercel, listProjectDomains, type ProjectDomain, productionHost, tokenExpiry } from "@/lib/providers/vercel";
 import { activeCount, withMonitorLock } from "@/lib/data/monitors-db";
 import { MAX_MONITORS, overLimitText, resumeIds } from "@/lib/monitors";
@@ -223,7 +224,8 @@ export async function syncAccount(accountId: string): Promise<{ ok: true; rows: 
   const now = new Date();
   await db().transaction(async (tx) => {
     for (const u of plan.update) {
-      await tx.update(resources).set({ name: u.name, meta: { ...u.meta, ...keepDomainKeys(oldMeta.get(u.id)) }, lastSeenAt: now, goneAt: null, updatedAt: now }).where(eq(resources.id, u.id));
+      // 1.2.2 (D15): the collector's productionSource survives too (discovery doesn't read deployments).
+      await tx.update(resources).set({ name: u.name, meta: { ...u.meta, ...keepDomainKeys(oldMeta.get(u.id)), ...keepProductionSource(oldMeta.get(u.id)) }, lastSeenAt: now, goneAt: null, updatedAt: now }).where(eq(resources.id, u.id));
     }
     if (plan.insert.length) {
       await tx.insert(resources).values(plan.insert.map((i) => ({ accountId, kind, externalId: i.externalId, name: i.name, meta: i.meta, monitored: i.monitored })))

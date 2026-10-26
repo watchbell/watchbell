@@ -20,6 +20,7 @@ Tempat membacanya:
 | Service Linux | `cat app/data/setup-code`, atau `journalctl --user -u watchbell` |
 | Scheduled Task Windows | `Get-Content app\data\setup-code`, atau `app\data\watchbell.log` |
 | Dijalankan manual | Terminal tempat Anda menjalankan `npm run start:selfhost` |
+| Paket npm (`watchbell`) | Layar awal (`First run: setup code ...`), `~/.watchbell/data/setup-code`, atau `~/.watchbell/logs/watchbell.log` |
 
 Kode berlaku selama 24 jam. Me-restart Watchbell menggantinya dengan kode baru (dan menghapus hitungan percobaan yang
 gagal). Tanda hubung dan spasi tidak berpengaruh saat Anda mengetiknya, dan kode tidak pernah berisi 0, O, 1, I, atau

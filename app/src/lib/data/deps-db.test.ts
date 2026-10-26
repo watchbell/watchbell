@@ -230,6 +230,23 @@ describe("scanRepo on the production branch", () => {
     expect(n.seen.map((s) => s.url)).toContain("https://api.github.com/repos/acme/acme-shop/contents/?ref=main");
   });
 
+  // 1.2.2 (D15 fix round 1): the branch production was built from isn't in the repository: the production branch next,
+  // like the update PR's base.
+  it("the branch production was built from is missing: the production branch is scanned next", async () => {
+    const f = fakeDb([[], []]);
+    h.current = f;
+    const n = net();
+    const fetch = (async (url: string, init: RequestInit) => {
+      const p = new URL(url).pathname;
+      if (p === "/repos/acme/acme-shop/git/ref/heads/web-revamp") return json({ message: "Not Found" }, 404);
+      if (p === "/repos/acme/acme-shop/git/ref/heads/release") return json({ object: { sha: "9".repeat(40) } });
+      return n.fetch(url, init);
+    }) as unknown as typeof globalThis.fetch;
+    expect(await scanRepo("github_pat_TEST", { ...PROD, prodFallback: "release" }, Date.now() + 30_000, { fetch })).toMatchObject({ status: "scanned" });
+    const gets = n.seen.filter((s) => s.url.startsWith("https://api.github.com/repos/acme/acme-shop/contents")).map((s) => new URL(s.url).searchParams.get("ref"));
+    expect(new Set(gets)).toEqual(new Set(["release"]));
+  });
+
   it("GitHub can't say whether the branch exists: the scan fails (retried), it doesn't guess", async () => {
     const f = fakeDb([]);
     h.current = f;
@@ -385,6 +402,19 @@ describe("scanDirs / reposToScan", () => {
   it("reposToScan carries the folder and the production branch to the scan", async () => {
     h.current = fakeDb([[], [{ id: REPO.id, fullName: REPO.fullName, defaultBranch: "main", scannedAt: null }], [{ repoId: REPO.id, name: "web", monitored: true, meta: { rootDirectory: "./apps/web/", productionBranch: "web-revamp" } }]]);
     expect(await reposToScan()).toEqual([{ id: REPO.id, fullName: REPO.fullName, defaultBranch: "main", scannedAt: null, rootDir: "apps/web", rootDirUnsupported: null, prodBranch: "web-revamp" }]);
+  });
+
+  // Watchbell 1.2.2 (D15): production was built from web-revamp while the project's production branch says main; the scan
+  // reads what is live (then the same exists-else-default rule). A CLI deploy keeps the production branch.
+  it("the scan's branch is the Git branch the live production deployment was built from", async () => {
+    h.current = fakeDb([[
+      { repoId: REPO.id, name: "web", monitored: true, meta: { productionBranch: "main", productionSource: { kind: "git", ref: "web-revamp" } } },
+      { repoId: "44444444-4444-4444-8444-444444444444", name: "cli", monitored: true, meta: { productionBranch: "release", productionSource: { kind: "cli" } } },
+    ]]);
+    const dirs = await scanDirs([REPO.id, "44444444-4444-4444-8444-444444444444"]);
+    expect(dirs.get(REPO.id)).toMatchObject({ branch: "web-revamp", fallback: "main" });
+    expect(dirs.get("44444444-4444-4444-8444-444444444444")?.branch).toBe("release");
+    expect(dirs.get("44444444-4444-4444-8444-444444444444")?.fallback).toBeUndefined();
   });
 });
 

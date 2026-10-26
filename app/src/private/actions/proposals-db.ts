@@ -2,7 +2,7 @@ import "server-only";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { ACTIONS_COPY } from "@/lib/copy/edition";
-import { accounts, deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
+import { accounts, alerts as alertRows, appSecurity, deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
 import { readAliasBook } from "@/lib/data/aliases-db";
 import { listFiring } from "@/lib/data/alerts-db";
 import { fixableApps } from "@/lib/data/deps-db";
@@ -25,8 +25,11 @@ import {
 import { AUTO_ROLLBACK_GAP_MS, AUTO_ROLLBACK_RULES, autoRollbackDecision, autoRollbackReason, deployRef, type RollbackCheck } from "./auto-rollback";
 import { notifyAutoRollback, notifyNewProposals, notifyProposalResult } from "./proposals-notify";
 import { type Runner, runProposalAction, type RunTarget } from "./proposals-run";
-import { autoBumpReady, frameworkFixes, type FrameworkFix } from "@/lib/data/deps-pr";
+import { autoBumpReady, frameworkFixes, type FrameworkFix, productionMismatches } from "@/lib/data/deps-pr";
 import { type AutoRollback, readAutoRollback, readAutoRun, readAutoSecurity } from "./proposals-settings";
+import {
+  ALERT_HISTORY_MS, NEXT_EVENT_REASONS, type NextCheck, type NextEvent, type PreviousNext, previousNext, problemSince,
+} from "./rollback-guard";
 import type { Proposal } from "./proposals-types";
 
 // Stage 9 slice 1: the proposals table (0030 ops.action_proposals). Status moves only forward, each step a
@@ -43,13 +46,17 @@ const ROW = {
   auto: actionProposals.auto, result: actionProposals.result, createdAt: actionProposals.createdAt, decidedAt: actionProposals.decidedAt,
   expiresAt: actionProposals.expiresAt,
 };
-const RUN_ROW = { ...ROW, resourceId: actionProposals.resourceId, targetRef: actionProposals.targetRef, ruleKey: actionProposals.ruleKey };
-type RunRow = ProposalRow & { resourceId: string | null; targetRef: string | null; ruleKey?: string };
+// alertId (Watchbell 1.2.2, D18): an auto-run's Telegram notice answers its alert's message.
+const RUN_ROW = { ...ROW, resourceId: actionProposals.resourceId, targetRef: actionProposals.targetRef, ruleKey: actionProposals.ruleKey, alertId: actionProposals.alertId };
+type RunRow = ProposalRow & { resourceId: string | null; targetRef: string | null; ruleKey?: string; alertId?: string | null };
 
 // ---- facts for the firing alerts (only what they need; nothing read when no alert needs it) ----
 export async function readProposalFacts(alerts: ProposalAlert[], now: Date, rollbackWindowMs?: number): Promise<ProposalFacts> {
   const need = factNeeds(alerts, now);
-  const [mons, deps, refs, neon, fixable, dailyHb, framework] = await Promise.all([
+  // Watchbell 1.2.2 (D17): the down / slow alerts whose start decides a rollback, and the earlier episodes of each.
+  const deployApps = new Set(need.deployApps);
+  const episodic = alerts.filter((a) => (a.ruleKey === "MonitorDown" || a.ruleKey === "HighLatency") && a.resourceId && deployApps.has(a.resourceId) && a.startedAt);
+  const [mons, deps, refs, neon, fixable, dailyHb, framework, history, nextHistory] = await Promise.all([
     need.monitorIds.length
       ? db().select({ id: monitors.id, kind: monitors.kind, url: monitors.url, lastError: monitors.lastError, appId: monitors.resourceId, appName: resources.name, appMeta: resources.meta })
         .from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId)).where(inArray(monitors.id, need.monitorIds))
@@ -68,6 +75,8 @@ export async function readProposalFacts(alerts: ProposalAlert[], now: Date, roll
       : new Map<string, string>(),
     need.monitorIds.length ? dailyHeartbeatId(need.monitorIds) : null,
     need.frameworkApps.length ? frameworkFixes(need.frameworkApps, need.depApps).catch(() => new Map<string, FrameworkFix>()) : new Map<string, FrameworkFix>(),
+    episodic.length ? alertEpisodes(episodic.map((a) => a.subject), now).catch(() => []) : [],
+    readNextHistory(need.deployApps),
   ]);
   // Watchbell 1.2.1: which of these monitors check a host their app no longer has (no redeploy for those; Update monitor).
   // The other watched apps are read only when one of these apps has stored domains.
@@ -77,13 +86,27 @@ export async function readProposalFacts(alerts: ProposalAlert[], now: Date, roll
       .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt))).limit(500)
     : [];
   const moves = withDomains ? monitorMoves(mons, watchedApps) : new Map<string, DomainMove>();
+  // Watchbell 1.2.2 (D15): the update-PR proposals whose merge would replace what is live say so first. Read only when
+  // there is one; a failed read leaves the reasons as they were (the auto-run asks again, bumpPrAs checks the real base).
+  const bumpPairs = [...[...fixable].map(([appId, repoId]) => ({ appId, repoId })), ...[...framework].map(([appId, fx]) => ({ appId, repoId: fx.repoId }))];
+  const mismatch = bumpPairs.length
+    ? await Promise.resolve().then(() => productionMismatches(bumpPairs, now)).catch(() => new Map<string, string>())
+    : new Map<string, string>();
   const deploys = new Map<string, { currentId: string | null; previousId: string | null; liveAt: Date | null }>();
+  const previousLive = new Map<string, Date | null>();
   for (const d of deps) {
     const cur = deploys.get(d.app) ?? { currentId: null, previousId: null, liveAt: null };
     if (d.isCurrent) { cur.currentId = d.id; cur.liveAt = d.readyAt ?? d.createdAt ?? null; }
-    else if (d.isPrevious) cur.previousId = d.id;
+    else if (d.isPrevious) { cur.previousId = d.id; previousLive.set(d.app, d.readyAt ?? d.createdAt ?? null); }
     deploys.set(d.app, cur);
   }
+  const prevNext = new Map<string, PreviousNext>();
+  for (const [app, d] of deploys) {
+    if (d.previousId) prevNext.set(app, nextOf(nextHistory, app, d.liveAt, previousLive.get(app) ?? null));
+  }
+  // Fix round 1 (review I2): a down check chains only an episode open at (or just before) the live deploy.
+  const since = new Map(episodic.map((a) => [a.id, problemSince(a.startedAt!, history.filter((h) => h.ruleKey === a.ruleKey && h.subject === a.subject),
+    { ruleKey: a.ruleKey, liveAt: deploys.get(a.resourceId!)?.liveAt ?? null })]));
   return {
     monitorKinds: new Map(mons.map((m) => [m.id, String(m.kind)])),
     deploys,
@@ -94,8 +117,51 @@ export async function readProposalFacts(alerts: ProposalAlert[], now: Date, roll
     dailyHeartbeatId: dailyHb,
     frameworkFixes: framework,
     monitorMoves: moves,
+    problemSince: since,
+    previousNext: prevNext,
+    ...(mismatch.size ? { productionMismatch: mismatch } : {}),
   };
 }
+
+// Watchbell 1.2.2 (D17): the resolved episodes of these checks' down / slow alerts in the last 7 days (problemSince).
+async function alertEpisodes(subjects: string[], now: Date) {
+  return db().select({ ruleKey: alertRows.ruleKey, subject: alertRows.subject, startedAt: alertRows.startedAt, resolvedAt: alertRows.resolvedAt }).from(alertRows)
+    .where(and(inArray(alertRows.ruleKey, ["MonitorDown", "HighLatency"]), inArray(alertRows.subject, [...new Set(subjects)]), isNotNull(alertRows.resolvedAt),
+      gte(alertRows.resolvedAt, new Date(now.getTime() - ALERT_HISTORY_MS))))
+    .orderBy(desc(alertRows.startedAt)).limit(500);
+}
+
+// Watchbell 1.2.2 (D17): what the Security card knows about these apps' Next.js: the stored check (one row each) and its
+// transitions in Events (NextVulnerable / NextClean), newest first; and the framework Vercel builds each app with (fix
+// rounds 1 and 2: a non-Next.js app, also after a failed check). A failed read is "nothing known" (unknown: no rollback runs by itself).
+type NextHistory = { checks: Map<string, NextCheck>; events: Map<string, NextEvent[]>; frameworks: Map<string, string | null> };
+export async function readNextHistory(appIds: string[]): Promise<NextHistory> {
+  const out: NextHistory = { checks: new Map(), events: new Map(), frameworks: new Map() };
+  if (!appIds.length) return out;
+  try {
+    const [checks, evs, apps] = await Promise.all([
+      db().select({ app: appSecurity.resourceId, version: appSecurity.version, status: appSecurity.status, findings: appSecurity.findings, checkedAt: appSecurity.checkedAt, reason: appSecurity.reason })
+        .from(appSecurity).where(inArray(appSecurity.resourceId, appIds)).limit(appIds.length),
+      db().select({ app: events.resourceId, at: events.at, reason: events.reason, message: events.message }).from(events)
+        .where(and(inArray(events.reason, [...NEXT_EVENT_REASONS]), inArray(events.resourceId, appIds))).orderBy(desc(events.at)).limit(Math.min(500, 50 * appIds.length)),
+      db().select({ app: resources.id, meta: resources.meta }).from(resources).where(inArray(resources.id, appIds)).limit(appIds.length),
+    ]);
+    for (const c of checks) {
+      out.checks.set(c.app, { version: c.version, status: c.status, findings: Array.isArray(c.findings) ? c.findings : [], checkedAt: c.checkedAt, reason: c.reason });
+    }
+    for (const e of evs) if (e.app) out.events.set(e.app, [...(out.events.get(e.app) ?? []), { at: e.at, reason: e.reason, message: e.message }]);
+    for (const a of apps) {
+      const fw = a.meta && typeof a.meta === "object" ? (a.meta as Record<string, unknown>).framework : null;
+      out.frameworks.set(a.app, typeof fw === "string" ? fw : null);
+    }
+  } catch {
+    return { checks: new Map(), events: new Map(), frameworks: new Map() };
+  }
+  return out;
+}
+
+const nextOf = (h: NextHistory, app: string, currentLiveAt: Date | null, previousLiveAt: Date | null): PreviousNext =>
+  previousNext({ currentLiveAt, previousLiveAt, check: h.checks.get(app) ?? null, events: h.events.get(app) ?? [], framework: h.frameworks.get(app) ?? null });
 
 // Review T1 minor 1: the apps (among these) whose firing FrameworkVulnerable alert already has an update-PR proposal that
 // is pending, approved, running or done: their VulnerableDependency proposal leaves next out (fixableApps), so the owner
@@ -264,6 +330,7 @@ export async function readLogApps(now: Date): Promise<LogApp[]> {
     db().select({
       app: deployments.resourceId,
       previousId: sql<string | null>`max(${deployments.externalId}) filter (where ${deployments.isPreviousProduction})`,
+      previousLiveAt: sql<Date | null>`max(${liveAtSql}) filter (where ${deployments.isPreviousProduction})`.mapWith(deployments.readyAt),
       lastDeployAt: sql<Date | null>`max(${deployments.createdAtProvider}) filter (where ${deployments.target} = 'production')`.mapWith(deployments.createdAtProvider),
     }).from(deployments)
       .where(and(inArray(deployments.resourceId, ids), or(eq(deployments.isPreviousProduction, true), gte(deployments.createdAtProvider, new Date(now.getTime() - NO_DEPLOY_MS)))))
@@ -276,9 +343,13 @@ export async function readLogApps(now: Date): Promise<LogApp[]> {
   const depBy = new Map(deps.map((d) => [d.app, d]));
   const monBy = new Map<string, string>();
   for (const m of mons) if (!monBy.has(m.app)) monBy.set(m.app, m.id);
+  // D17: a spike's rollback needs the previous deployment's Next.js (one more read pair, only for those apps).
+  const spiking = hot.filter((r) => r.errorsSinceLive >= SPIKE_MIN && r.liveAt && depBy.get(r.appId)?.previousId).map((r) => r.appId);
+  const nextHistory = spiking.length ? await readNextHistory(spiking) : null;
   return hot.map((r) => ({
     ...r, appName: r.appName ?? "", previousId: depBy.get(r.appId)?.previousId ?? null, lastDeployAt: depBy.get(r.appId)?.lastDeployAt ?? null,
     httpMonitorId: monBy.get(r.appId) ?? null, db: dbs.get(r.appId) ?? null,
+    ...(nextHistory && spiking.includes(r.appId) ? { previousNext: nextOf(nextHistory, r.appId, r.liveAt, depBy.get(r.appId)?.previousLiveAt ?? null) } : {}),
   }));
 }
 
@@ -364,6 +435,9 @@ export type StepDeps = {
   autoSecurity?: typeof readAutoSecurity;
   bumpReady?: typeof autoBumpReady;
   approveAutoBump?: (id: string, now: Date) => Promise<boolean>;
+  // Watchbell 1.2.2 (D15): what merging this app's update PR would do to production, when it must not run on its own
+  // (null: nothing against it). Left out: not asked.
+  prodMismatch?: (appId: string, repoId: string) => Promise<string | null>;
   // Watchbell 1.2 (D11): the sections the owner turned off; their alerts get no new proposals (left out: none paused).
   paused?: () => Promise<Set<SectionId>>;
   // The provider of each account id (an account alert follows its provider's section), read only while something is paused.
@@ -384,7 +458,7 @@ type RollbackApp = Omit<RollbackCheck, "setting" | "ruleKey" | "targetRef" | "in
 
 export async function readRollbackContext(appIds: string[], now: Date): Promise<{ apps: Map<string, RollbackApp>; inFlight: boolean }> {
   const since2h = new Date(now.getTime() - AUTO_ROLLBACK_GAP_MS);
-  const [deps, newest, evs, autos] = await Promise.all([
+  const [deps, newest, evs, autos, nextHistory] = await Promise.all([
     db().select({
       app: deployments.resourceId, id: deployments.externalId, sha: deployments.commitSha, state: deployments.state, isCurrent: deployments.isCurrent,
       isPrevious: deployments.isPreviousProduction, readyAt: deployments.readyAt, createdAt: deployments.createdAtProvider,
@@ -397,6 +471,7 @@ export async function readRollbackContext(appIds: string[], now: Date): Promise<
     db().select({ app: actionProposals.resourceId, targetRef: actionProposals.targetRef, status: actionProposals.status, decidedAt: actionProposals.decidedAt })
       .from(actionProposals)
       .where(and(eq(actionProposals.action, "vercel_rollback"), eq(actionProposals.auto, true), gte(actionProposals.createdAt, new Date(now.getTime() - 31 * 86_400_000)))),
+    readNextHistory(appIds),
   ]);
   const apps = new Map<string, RollbackApp>();
   for (const app of appIds) {
@@ -412,6 +487,7 @@ export async function readRollbackContext(appIds: string[], now: Date): Promise<
       rolledOrPromotedLately: evs.some((e) => e.app === app),
       autoLately: mine.some((a) => a.decidedAt !== null && a.decidedAt.getTime() >= since2h.getTime()),
       sameDeployBefore: !!prev && mine.some((a) => a.targetRef === prev.id),
+      previousNext: cur && prev ? nextOf(nextHistory, app, cur.readyAt ?? cur.createdAt, prev.readyAt ?? prev.createdAt).status : "unknown",
     });
   }
   return { apps, inFlight: autos.some((a) => a.status === "approved" || a.status === "running") };
@@ -455,7 +531,7 @@ async function autoRollbacks(created: RunRow[], now: Date, left: () => number, d
       const p = await deps.execute(row.id, new Date());
       if (!p) continue;
       ran.push(p);
-      await (deps.notifyRollback ?? notifyAutoRollback)(p, { reason: row.reason, newRef }).catch(() => undefined);
+      await (deps.notifyRollback ?? notifyAutoRollback)(p, { reason: row.reason, newRef }, {}, { alertId: row.alertId ?? null }).catch(() => undefined);
       // Never more than one per run: the next one waits for the next minute (and the 2 h rule per app).
       break;
     }
@@ -482,6 +558,13 @@ async function autoBumps(created: RunRow[], left: () => number, deps: StepDeps):
   for (const row of rows) {
     if (left() < 15_000) break;
     try {
+      // Watchbell 1.2.2 (D15): production wasn't built from the PR's base (another branch, or the CLI): the proposal waits
+      // for the owner (its reason says why). An unreadable answer waits too.
+      const mismatch = row.resourceId && deps.prodMismatch ? await deps.prodMismatch(row.resourceId, row.targetRef!).catch(() => "unknown") : null;
+      if (mismatch) {
+        console.log(`${ACTIONS_COPY.logTag}/auto-security: waits for the owner (production source)`);
+        continue;
+      }
       // Watchbell 1.2: a FrameworkVulnerable proposal is judged on the app's Next.js check, not the scan.
       const ready = row.ruleKey === "FrameworkVulnerable" && row.resourceId
         ? await deps.bumpReady(row.targetRef!, setting.severities, { appId: row.resourceId })
@@ -500,6 +583,11 @@ async function autoBumps(created: RunRow[], left: () => number, deps: StepDeps):
   return ran;
 }
 
+// Watchbell 1.2.2 (D15): why this app's update PR must not run on its own, read now (null: nothing against it).
+export async function prodMismatchOf(appId: string, repoId: string): Promise<string | null> {
+  return (await productionMismatches([{ appId, repoId }], new Date())).get(appId) ?? null;
+}
+
 // Watchbell 1.2: the providers of these accounts (CredentialExpiring follows its provider's section).
 async function providersOf(ids: string[]): Promise<Map<string, string>> {
   const rows = await db().select({ id: accounts.id, provider: accounts.provider }).from(accounts).where(inArray(accounts.id, ids));
@@ -512,7 +600,9 @@ const STEP: StepDeps = {
   logs: logsIfDue,
   autoRollback: () => readAutoRollback(), rollbackContext: readRollbackContext, approveAutoRollback, notifyRollback: notifyAutoRollback,
   autoSecurity: () => readAutoSecurity(), bumpReady: autoBumpReady, approveAutoBump, paused: pausedSections, providers: providersOf,
+  prodMismatch: prodMismatchOf,
 };
+export { STEP as PROPOSAL_STEP_DEPS }; // for the wiring test
 
 // Every minute (minuteSteps): proposals for the firing alerts, expiry, and the auto-run of the safe kinds the owner
 // switched on. Cheap when nothing fires (one read of the firing alerts, one expiry update). Bounded by ctx.deadline: no
@@ -578,8 +668,10 @@ export async function runProposalsStep(now: Date, ctx: { deadline?: number } = {
   // Slice 3: an error spike after a deploy also asks the Dev officer to read the code (queued; devMinuteStep runs it).
   const spikes = created.filter((r) => r.ruleKey === "LogErrorSpike" && r.resourceId).map((r) => ({ proposalId: r.id, appId: r.resourceId! }));
   const devQueued = spikes.length && deps.queueDev ? await deps.queueDev(spikes, now).catch(() => new Set<string>()) : new Set<string>();
-  await deps.notifyNew(created.filter((r) => !ranIds.has(r.id)).map(toProposal), {}, { devQueued }).catch(() => undefined);
-  for (const p of ran) await deps.notifyResult(p).catch(() => undefined);
+  // D18: each notice answers its alert's Telegram message (proposal id → alert id; a log proposal has none).
+  const alertIds = new Map(created.map((r) => [r.id, r.alertId ?? null]));
+  await deps.notifyNew(created.filter((r) => !ranIds.has(r.id)).map(toProposal), {}, { devQueued, alertIds }).catch(() => undefined);
+  for (const p of ran) await deps.notifyResult(p, {}, { alertId: alertIds.get(p.id) ?? null }).catch(() => undefined);
   return out;
 }
 

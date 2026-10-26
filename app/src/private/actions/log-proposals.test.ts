@@ -19,7 +19,8 @@ const book: AliasBook = {
 
 const app = (o: Partial<LogApp> = {}): LogApp => ({
   appId: APP, appName: "shortly", liveAt: ago(30), currentId: "dpl_cur00000001", previousId: "dpl_prv00000001", lastDeployAt: ago(30),
-  errorsSinceLive: 0, baselineErrors: 0, topSinceLive: null, errors30: 0, top30: null, dbErrors30: 0, topDb: null, httpMonitorId: MON, db: null, ...o,
+  errorsSinceLive: 0, baselineErrors: 0, topSinceLive: null, errors30: 0, top30: null, dbErrors30: 0, topDb: null, httpMonitorId: MON, db: null,
+  previousNext: { status: "ok", version: "16.3.8" }, ...o,
 });
 
 describe("LogErrorSpike", () => {
@@ -45,6 +46,16 @@ describe("LogErrorSpike", () => {
     expect(logProposalsFor(app({ errorsSinceLive: 40, baselineErrors: 240 }), book, now)).toEqual([]);
     expect(logProposalsFor(app({ errorsSinceLive: 40, liveAt: ago(121) }), book, now)).toEqual([]);
     expect(logProposalsFor(app({ errorsSinceLive: 40, previousId: null }), book, now)).toEqual([]);
+  });
+  // Watchbell 1.2.2 (D17): never back to a Next.js with known advisories; an unknown one says so first.
+  it("no rollback to a previous deployment whose Next.js is vulnerable; unknown → proposed, with that said first", () => {
+    expect(logProposalsFor(app({ errorsSinceLive: 40, previousNext: { status: "vulnerable", version: "16.3.8" } }), book, now)).toEqual([]);
+    for (const previousNext of [{ status: "unknown" as const, version: null }, undefined]) {
+      const [p] = logProposalsFor(app({ errorsSinceLive: 40, previousNext }), book, now);
+      expect(p.action).toBe("vercel_rollback");
+      expect(p.reason).toMatch(/^Previous deployment's Next\.js version is unknown: .* 40 errors since the deploy went live/);
+      expect(p.reason.length).toBeLessThanOrEqual(200);
+    }
   });
 });
 

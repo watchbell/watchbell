@@ -5,8 +5,9 @@
 // - The letters follow one deterministic order, first_seen_at then id, over every database row the console has ever
 //   synced (watched or not, gone or not), so db-a is the same database on every page, in every notification and after
 //   a refresh. A new database only ever gets the next letter.
-// - Text built from names (events, alerts, Advisor items, banners, the digest, Telegram and Discord) goes through
-//   hideNames: each database name becomes its alias, and any email left becomes "[email hidden]".
+// - Text built from names (events, alerts, Advisor items, banners, the digest and Discord) goes through hideNames: each
+//   database name becomes its alias, and any email left becomes "[email hidden]". Watchbell 1.2.2 (D18): Telegram is
+//   the owner's own chat and keeps the real names (realNames below); it still never shows an email.
 // The real name stays in the database and is still what matching, links and Sync use. Pure: safe for client code.
 
 export type Alias = { id: string; name: string; alias: string };
@@ -223,4 +224,39 @@ export function maskText(text: string, book: AliasBook): string {
   out = out.replace(URL_HOST, (all, scheme: string, h: string) => (/\.example$/i.test(h) ? all : `${scheme}site.example`));
   if (m.names) out = out.replace(m.names, (n) => m.nameAlias.get(n.toLowerCase()) ?? n);
   return out;
+}
+
+// ---- The owner's own Telegram chat (Watchbell 1.2.2, D18) ------------------------------------------------------------
+// realNames: the reverse of the aliases, for text that only the owner reads in their own Telegram chat. Stored office
+// text (a proposal's title, reason and result) was written with aliases, so the Telegram notice turns app-a, db-a and
+// the alias hosts (app-a.example, app-a-2.example, site-a.example, with any subdomain kept) back into the names and
+// hosts they stand for. Accounts and teams stay masked, generic placeholders (site.example, preview.example, app-?)
+// stay as they are, and any email is still hidden. Screens, the digest, Discord and public pages keep the aliases.
+const unmasks = new WeakMap<AliasBook, { host: RegExp | null; hostName: Map<string, string>; names: RegExp | null; realName: Map<string, string> }>();
+
+function unmasksOf(book: AliasBook) {
+  const hit = unmasks.get(book);
+  if (hit) return hit;
+  const hostName = new Map((book.host ?? []).map((h) => [h.alias.toLowerCase(), h.name]));
+  const realName = new Map<string, string>();
+  for (const a of [...book.app, ...book.db]) if (a.name.trim() && !realName.has(a.alias.toLowerCase())) realName.set(a.alias.toLowerCase(), a.name);
+  const alt = (keys: Iterable<string>) => [...keys].sort((a, b) => b.length - a.length).map(escape).join("|");
+  const built = {
+    // A subdomain's dot may come before an alias host ("api.app-a.example"); a name never follows a dot.
+    host: hostName.size ? new RegExp(String.raw`(?<![\p{L}\p{N}_-])(?:${alt(hostName.keys())})${AFTER}`, "giu") : null,
+    hostName,
+    names: realName.size ? new RegExp(`(?<!${BEFORE})(?:${alt(realName.keys())})${AFTER}`, "giu") : null,
+    realName,
+  };
+  unmasks.set(book, built);
+  return built;
+}
+
+export function realNames(text: string, book: AliasBook): string {
+  if (!text) return text;
+  const u = unmasksOf(book);
+  let out = text;
+  if (u.host) out = out.replace(u.host, (h) => u.hostName.get(h.toLowerCase()) ?? h);
+  if (u.names) out = out.replace(u.names, (n) => u.realName.get(n.toLowerCase()) ?? n);
+  return hideEmails(out);
 }

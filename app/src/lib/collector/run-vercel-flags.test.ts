@@ -7,7 +7,53 @@ const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("next/cache", () => ({ revalidateTag: vi.fn(), updateTag: vi.fn() }));
 
-import { updateCurrentFlags } from "./run";
+import { readFileSync } from "node:fs";
+import { originsOf, saveProductionSources, updateCurrentFlags } from "./run";
+
+// Watchbell 1.2.2 (D15, review minor 6): the Vercel task records the production source after the current flags; a failed
+// write is an error line, never a failed task.
+describe("saveProductionSources", () => {
+  const apps = [{ id: "11111111-1111-4111-8111-111111111111", meta: {} }];
+  const at = new Date("2026-10-25T10:00:00Z");
+  it("records the team's apps with the run's time", async () => {
+    const record = vi.fn().mockResolvedValue(1);
+    const errors: string[] = [];
+    const seen = new Map([["dpl_1", { branchFrom: "cli" }]]);
+    await saveProductionSources(apps, at, errors, "acme", seen, record);
+    expect(record).toHaveBeenCalledWith(apps, at, seen);
+    expect(errors).toEqual([]);
+  });
+  it("a failed write is one error line", async () => {
+    const errors: string[] = [];
+    await saveProductionSources(apps, at, errors, "acme", new Map(), vi.fn().mockRejectedValue(new Error("db down")));
+    expect(errors).toEqual([expect.stringMatching(/^vercel\/acme: production source not saved/)]);
+  });
+  it("originsOf keeps where each deployment's branch came from", () => {
+    const dep = (id: string, o: object) => ({ id, projectId: "p", state: "ready" as const, rawState: "READY", target: "production" as const, branch: "main", sha: null, message: null,
+      source: "redeploy", url: null, createdAt: at, buildingAt: null, readyAt: null, ...o });
+    expect(originsOf([dep("a", { branchFrom: "cli" }), dep("b", { branchFrom: "github", gitDirty: true }), dep("c", {})])).toEqual(new Map([
+      ["a", { branchFrom: "cli" }], ["b", { branchFrom: "github", gitDirty: true }], ["c", {}],
+    ]));
+  });
+  it("taskVercel calls it for the team's apps right after the current flags", () => {
+    const src = readFileSync(new URL("./run.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    // Only taskVercel's own body: from its signature to the closing brace at column 0 (review r1 minor 5).
+    const start = src.indexOf("async function taskVercel(");
+    const end = src.indexOf("\n}\n", start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const task = src.slice(start, end);
+    const flags = task.indexOf("await updateCurrentFlags(teamApps, ready, current");
+    const save = task.indexOf("await saveProductionSources(teamApps, now, errors, team.name, seen);");
+    expect(flags).toBeGreaterThan(0);
+    expect(save).toBeGreaterThan(flags);
+    // seen: the origins of the deployments listed and of the current ones fetched by id, in the same team loop.
+    expect(task.indexOf("const seen = originsOf(mine);")).toBeGreaterThan(0);
+    expect(task.indexOf("for (const [k, v] of originsOf([d])) seen.set(k, v);")).toBeGreaterThan(task.indexOf("const d = one.data;"));
+    // The very next statement after the flags, in the same team loop (no early return or branch in between).
+    expect(task.slice(flags, save).split("\n").filter((l) => l.trim()).length).toBe(1);
+  });
+});
 
 // Watchbell 1.2.1 (fix round 1, review minors 2 and 5): the Vercel task's current/previous flag update marks an app whose
 // production deployment became current, for the security task; a mark that couldn't be saved is made again next run.

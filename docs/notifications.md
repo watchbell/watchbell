@@ -17,6 +17,11 @@ they are set up on **Alerts › Notifications** (owner only; everyone else sees 
 - **Telegram and Discord:** one message per collector run, listing every alert that opened, is still firing (repeated
   every 6 hours) or resolved. Auto-action proposals and results also go to Telegram (see
   [Auto-actions](auto-actions.md)).
+- **One thread per alert on Telegram:** a proposal or an automatic action for an alert is sent as a reply to the
+  message that opened that alert (a grouped list of more than three proposals stays a message of its own). An automatic
+  **Check again now** that ran sends nothing: the alert's own messages tell whether it is still down or resolved; only a
+  re-check that couldn't run is reported. Telegram is your own chat, so it names apps, databases and hosts by their real
+  names; Discord, the digest and the console keep databases as db-a, db-b.
 - **Email digest:** one email a day at 07:00 in your [time zone](configuration.md#time-zone): what fired, what
   resolved, uptime and stored errors of the last 24 hours.
 

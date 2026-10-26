@@ -18,6 +18,16 @@ The one request of its own is in the npm package: `watchbell` and `watchbell sta
 once a day whether a newer version exists. It is a plain request for the version number, with no id and nothing about
 you or your install, and `WATCHBELL_NO_UPDATE_CHECK=1` (or `NO_UPDATE_NOTIFIER=1`, or `CI`) turns it off.
 
+Watchbell also warns when the Node.js under it has a security fix waiting or is past end of life. For that it reads
+the public release list on nodejs.org and the Node.js end-of-life dates on endoflife.date, with plain requests for
+those lists:
+- The running Watchbell reads both every 12 hours, which is two requests a day to each site. This is the line on
+  Settings › Collector.
+- In the npm package, `watchbell` and `watchbell status` read them at most twice a day on their own. That makes up to
+  four requests a day to each site.
+
+`WATCHBELL_NO_UPDATE_CHECK=1` turns all of this off. `NO_UPDATE_NOTIFIER=1` and `CI` turn off only the commands' part.
+
 ### Can I run it on a server instead of a laptop?
 
 Yes. The same installer works on a Linux server. Run `loginctl enable-linger "$USER"` so the service keeps running
