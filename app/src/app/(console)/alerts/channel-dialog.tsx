@@ -8,6 +8,7 @@ import type { ChannelKind } from "@/db/schema";
 import { Button, Field, fieldClass } from "@/components/kit";
 import { useHoldRefresh } from "@/components/live";
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AddressList } from "./address-list";
 import { saveDigest, saveDiscord, saveSmtp, saveTelegram, saveWebhook, sendTest, setChannelEnabled, telegramChats } from "./channel-actions";
 
 // Mockup channelDlg(). The texts are the mockup's. Secrets typed here go to a server action and are never shown again:
@@ -120,7 +121,7 @@ export function ChannelControls({ kind, connected, enabled, envMissing }: { kind
       {/* Esc and the scrim do nothing while the save runs. */}
       <Dialog open={open} onOpenChange={(next) => { if (!saving) show(next); }}>
         <DialogTrigger render={<Button size="sm" disabled={envMissing !== null}>{connected ? "Change" : "Connect"}</Button>} />
-        <DialogContent className="gap-0 p-0 sm:max-w-[560px]" showCloseButton={false}>
+        <DialogContent className="max-h-[92vh] gap-0 overflow-y-auto p-0 sm:max-w-[560px]" showCloseButton={false}>
           <div className="flex items-start gap-3 px-[18px] pb-2 pt-4">
             <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-sunken text-ink-soft"><Icon size={19} /></span>
             <div>
@@ -177,9 +178,17 @@ export function ChannelControls({ kind, connected, enabled, envMissing }: { kind
                   <Field id="ch-sm-from" label="From" error={errors.from}>
                     <input id="ch-sm-from" className={fieldClass} type="email" autoComplete="off" placeholder="alerts@example.com" value={mail.from} onChange={(e) => setMail({ ...mail, from: e.target.value })} />
                   </Field>
-                  <Field id="ch-sm-to" label="Send to" error={errors.to}>
-                    <input id="ch-sm-to" className={fieldClass} type="email" autoComplete="off" placeholder="you@example.com" value={mail.to} onChange={(e) => setMail({ ...mail, to: e.target.value })} />
-                  </Field>
+                  <div className="col-span-2 max-[520px]:col-span-1">
+                    <Field id="ch-sm-to" label="Send to" help="Up to 10 addresses; each one gets the same email. Press Enter or a comma after each." error={errors.to}>
+                      <AddressList id="ch-sm-to" onChange={(v) => setMail((m) => ({ ...m, to: v }))} />
+                    </Field>
+                    {/* Resend's shared test sender only reaches the Resend account's own address (seen 26 Oct). */}
+                    {mail.from.trim().toLowerCase() === "onboarding@resend.dev" && mail.to.includes(",") && (
+                      <p className="-mt-2 mb-3.5 rounded-md border border-warn/40 bg-warn-soft px-2.5 py-2 text-[12.5px]">
+                        Resend&apos;s test sender (onboarding@resend.dev) only delivers to your own Resend account address. Verify a domain in Resend and send from it to reach other people.
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
               {kind === "email_digest" && (

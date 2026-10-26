@@ -3,7 +3,7 @@ import { Banner, Card, PageHeader } from "@/components/kit";
 import { AutoRefresh } from "@/components/live";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { requirePageMember } from "@/lib/auth";
-import { listFiring, listResolved, rulesWithState } from "@/lib/data/alerts-db";
+import { listFiring, listResolved, readMessageTemplates, rulesWithState } from "@/lib/data/alerts-db";
 import { aliasBook } from "@/lib/data/cached";
 import { channelViews } from "@/lib/data/notify-db";
 import { pausedSections } from "@/lib/data/sections-db";
@@ -21,7 +21,7 @@ export default async function AlertsPage() {
   const now = new Date();
   // Watchbell 1.2: the alerts of a section the owner turned off are paused and left out here until it is on again.
   const paused = await pausedSections();
-  const [stored, storedResolved, rules, channels, book, langs] = await Promise.all([listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs()]);
+  const [stored, storedResolved, rules, channels, book, langs, templates] = await Promise.all([listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs(), readMessageTemplates()]);
   const pausedNames = SECTION_IDS.filter((id) => paused.has(id)).map((id) => SECTIONS[id].label);
   // Privacy: databases by alias and no emails in titles, messages and causes, stored rows included.
   const firing = stored.map((a) => ({ ...hideAlert(a, book), search: [a.title, a.message].join(" ") }));
@@ -55,7 +55,7 @@ export default async function AlertsPage() {
         </TabsContent>
 
         <TabsContent value="rules">
-          <Card flush><RulesTable rules={rules} owner={owner} /></Card>
+          <Card flush><RulesTable rules={rules} owner={owner} templates={templates} now={now} /></Card>
         </TabsContent>
 
         <TabsContent value="notifications">

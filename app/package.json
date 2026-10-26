@@ -1,6 +1,6 @@
 {
   "name": "watchbell",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "private": true,
   "scripts": {
     "dev": "cross-env NEXT_TELEMETRY_DISABLED=1 next dev --port 3100",

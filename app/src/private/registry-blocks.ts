@@ -42,12 +42,12 @@ export function mergeExtensions(...parts: Part[]): Extension {
 }
 
 // ---- T1 foundation ----
-// Watchbell 1.2: Manage, right after Settings (AI Gateway ti-route-2, API explorer ti-api); palette = every mockup sub-page
+// Watchbell 1.2: Manage (1.2.4: last, under "AI & API", after Backups) (AI Gateway ti-route-2, API explorer ti-api); palette = every mockup sub-page
 // both editions have (each edition adds its own entry for /ai/ask: registry.public.ts and registry-blocks-private.ts).
 export const base: Part = {
-  nav: [{ section: "manage", after: "settings", items: [
-    { key: "ai", label: "AI Gateway", href: "/ai", icon: "route", stage: 5, ownerOnly: true },
-    { key: "api-docs", label: "API explorer", href: "/api-docs", icon: "api", stage: 5, ownerOnly: true },
+  nav: [{ section: "manage", after: "backups", items: [
+    { key: "ai", label: "AI Gateway", href: "/ai", icon: "route", stage: 5, ownerOnly: true, sub: "AI & API" },
+    { key: "api-docs", label: "API explorer", href: "/api-docs", icon: "api", stage: 5, ownerOnly: true, sub: "AI & API" },
   ] }],
   palette: [
     { label: "AI Gateway", href: "/ai", keywords: ["ai", "gateway", "overview"] },
@@ -114,7 +114,7 @@ import { proposalsMinuteStep, pruneProposals } from "@/private/actions/proposals
 // extension items into their section).
 export const t9public: Part = {
   nav: [{ section: "manage", after: "alerts", items: [
-    { key: "auto-actions", label: "Auto-actions", href: "/auto-actions", icon: "bolt", stage: 9, ownerOnly: true },
+    { key: "auto-actions", label: "Auto-actions", href: "/auto-actions", icon: "bolt", stage: 9, ownerOnly: true, sub: "Alerting" },
   ] }],
   palette: [{ label: "Auto-actions", href: "/auto-actions", keywords: ["proposal", "approve", "reject", "auto-run", "rollback"] }],
   dailySteps: [{ name: "auto-actions-retention", run: pruneProposals }],

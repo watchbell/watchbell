@@ -162,6 +162,9 @@ run Actions, dan dependency advisory. Menampilkan "GitHub isn't connected" sampa
 
 ## Manage
 
+Di menu, Manage dibagi jadi tiga judul: **Alerting** (Alerts, Auto-actions, Status page), **Setup** (Connections,
+Settings, Sections, Backups), dan **AI & API** (AI Gateway, API explorer).
+
 **Connections** (khusus owner). Akun provider yang dibaca Watchbell: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
 Cloudflare, GitHub, dan token GitHub PR-write yang opsional, berupa tile yang dikelompokkan per bagian (Hosting,
 Database, DevOps, dan Google Drive di bawah Manage). Sebuah tile membuka drawer berisi akun-akun provider itu dan form

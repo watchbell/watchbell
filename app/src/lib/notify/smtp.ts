@@ -7,6 +7,7 @@ import { z } from "zod";
 import { DEMO_UNAVAILABLE } from "@/lib/demo/simulate";
 import { isDemo } from "@/lib/mode";
 import { blockedHostname, isBlockedAddress } from "@/lib/net/public-host";
+import { MAX_RECIPIENTS, recipients } from "./hints";
 import type { SendResult } from "./telegram";
 
 // 1.2.3 (owner 24 Oct: Office 365, Zimbra): alert messages by email through the user's own mail server, without a
@@ -28,7 +29,13 @@ export function smtpProblems(c: { host: string; port: number; user: string; pass
   if (!c.user.trim() || c.user.length > 200) out.user = "Enter the user name the server expects (often the whole address).";
   if (!c.pass || c.pass.length > 500) out.pass = "Enter the password or app password.";
   if (!email.safeParse(c.from.trim()).success) out.from = "Enter the address the mail comes from.";
-  if (!email.safeParse(c.to.trim()).success) out.to = "Enter the address that gets the alerts.";
+  const to = recipients(c.to);
+  if (!to.length) out.to = "Enter the address that gets the alerts.";
+  else if (to.length > MAX_RECIPIENTS) out.to = `Up to ${MAX_RECIPIENTS} addresses.`;
+  else {
+    const bad = to.find((a) => !email.safeParse(a).success);
+    if (bad) out.to = `${bad} isn't a valid address.`;
+  }
   return out;
 }
 
@@ -40,7 +47,7 @@ const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").slice(0, 200);
 export function buildMessage(c: Pick<SmtpConfig, "from" | "to" | "host">, subject: string, text: string, now: Date): string {
   const body = Buffer.from(text.replace(/\r?\n/g, "\r\n"), "utf8").toString("base64").replace(/.{1,76}/g, "$&\r\n");
   return [
-    `From: Watchbell <${c.from.trim()}>`, `To: <${c.to.trim()}>`, `Subject: ${header(oneLine(subject))}`, `Date: ${now.toUTCString()}`,
+    `From: Watchbell <${c.from.trim()}>`, `To: ${recipients(c.to).map((a) => `<${a}>`).join(", ")}`, `Subject: ${header(oneLine(subject))}`, `Date: ${now.toUTCString()}`,
     `Message-ID: <${randomUUID()}@watchbell>`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64",
     "", body,
   ].join("\r\n");
@@ -151,8 +158,13 @@ export async function sendSmtp(c: SmtpConfig, subject: string, text: string, dep
     await expect([235], "the user name or password");
     r.send(`MAIL FROM:<${c.from.trim()}>`);
     await expect([250], "the sender address");
-    r.send(`RCPT TO:<${c.to.trim()}>`);
-    await expect([250, 251], "the recipient address");
+    // Every address must be accepted: a refused one fails the send, so a typo shows up on Send test (by its place in
+    // the list; the console never shows the addresses).
+    const to = recipients(c.to);
+    for (const [i, a] of to.entries()) {
+      r.send(`RCPT TO:<${a}>`);
+      await expect([250, 251], to.length > 1 ? `recipient ${i + 1} of ${to.length}` : "the recipient address");
+    }
     r.send("DATA");
     await expect([354], "the message");
     socket.write(`${buildMessage(c, subject, text, new Date())}\r\n.\r\n`);

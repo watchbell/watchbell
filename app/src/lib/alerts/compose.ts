@@ -4,9 +4,11 @@ import type { Severity } from "@/db/schema";
 import type { NotifyLang } from "@/lib/notify/lang";
 import { clock, zoneLabel } from "@/lib/time";
 import type { Pending } from "./lifecycle";
+import { type MessageTemplates, renderTemplate, SAMPLE_DETAIL, type TemplateValues } from "./message-template";
 import { translateAlertText } from "./translate-id";
 
-export type Notice = { kind: Pending; ruleKey: string; severity: Severity; title: string; message: string; startedAt: Date; causedBy: string | null; provider: string | null };
+// `threshold` (1.2.4): the rule's number, for a custom text's {threshold}.
+export type Notice = { kind: Pending; ruleKey: string; severity: Severity; title: string; message: string; startedAt: Date; causedBy: string | null; provider: string | null; threshold?: number | null };
 
 // Notification language (owner 19 Oct): the frame of the message in English or Indonesian; the alert text itself is
 // stored in English and translated by translate-id.ts.
@@ -19,8 +21,8 @@ export const SEVERITY_WORD: Record<NotifyLang, Record<Severity, string>> = {
   id: { critical: "kritis", warning: "peringatan", info: "info" },
 };
 const TEXT = {
-  en: { firing: "firing", resolved: "resolved", since: "since", open: "Open alerts", more: "more on the Alerts page", causedBy: "caused by", incident: "reports an incident", step: "Next step" },
-  id: { firing: "aktif", resolved: "pulih", since: "sejak", open: "Buka Alerts", more: "lagi di halaman Alerts", causedBy: "gara-gara", incident: "lagi ada insiden", step: "Langkah" },
+  en: { firing: "firing", resolved: "resolved", since: "since", open: "Open alerts", more: "more on the Alerts page", causedBy: "caused by", incident: "reports an incident", step: "Next step", test: "test" },
+  id: { firing: "aktif", resolved: "pulih", since: "sejak", open: "Buka Alerts", more: "lagi di halaman Alerts", causedBy: "karena", incident: "lagi ada insiden", step: "Yang perlu kamu lakukan", test: "tes" },
 } satisfies Record<NotifyLang, Record<string, string>>;
 export const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const ORDER: Record<Severity, number> = { critical: 0, warning: 1, info: 2 };
@@ -78,24 +80,52 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     MonitorDomainMoved: "pencet Update monitor di halaman Uptime (atau approve usulannya) biar monitor ngecek domain baru; app-nya sendiri aman.",
   },
 };
+// The step alone, for a custom text's {step} (its own words go before it).
+export const stepText = (ruleKey: string, lang: NotifyLang = "en"): string | null => (Object.hasOwn(NEXT_STEP[lang], ruleKey) ? NEXT_STEP[lang][ruleKey] ?? null : null);
 export const nextStep = (ruleKey: string, lang: NotifyLang = "en"): string | null => {
-  const s = Object.hasOwn(NEXT_STEP[lang], ruleKey) ? NEXT_STEP[lang][ruleKey] : undefined;
+  const s = stepText(ruleKey, lang);
   return s ? `${TEXT[lang].step}: ${s}` : null;
 };
 
-export function composeMessage(list: Notice[], now: Date, siteUrl: string, lang: NotifyLang = "en"): { telegram: string; discord: string } {
+// `templates` (1.2.4): a rule with a custom text in this language is written from it (message-template.ts), its first
+// line bold like Watchbell's own. Every other rule keeps the lines below, unchanged.
+// `opts.test` (owner 26 Oct, Rules › Edit › Send test): the head says "Watchbell (tes)" and the alerts' text is the sample
+// sentence in this language, so nobody in the chat takes it for a real alert.
+export function composeMessage(list: Notice[], now: Date, siteUrl: string, lang: NotifyLang = "en", templates: MessageTemplates = {}, opts: { test?: boolean } = {}): { telegram: string; discord: string } {
   const url = `${siteUrl.replace(/\/+$/, "")}/alerts`;
   const tx = TEXT[lang];
   const head = (n: Notice) => `${WORD[lang][n.kind]} · ${SEVERITY_WORD[lang][n.severity]} · `;
-  const message = (n: Notice) => (lang === "id" ? translateAlertText(n.ruleKey, n.message) : n.message);
+  const message = (n: Notice) => (opts.test ? SAMPLE_DETAIL[lang] : lang === "id" ? translateAlertText(n.ruleKey, n.message) : n.message);
+  const name = opts.test ? `Watchbell (${tx.test})` : "Watchbell";
   const step = (n: Notice): string | null => (n.kind === "resolve" ? null : nextStep(n.ruleKey, lang));
   const extra = (n: Notice) => [n.causedBy ? `${tx.causedBy} ${n.causedBy}` : "", n.provider ? `${n.provider} ${tx.incident}` : ""].filter(Boolean).join(" · ");
   const more = (k: number) => `\n+${k} ${tx.more}`;
+  const values = (n: Notice, clean: (s: string) => string): TemplateValues => ({
+    status: WORD[lang][n.kind], severity: SEVERITY_WORD[lang][n.severity], rule: n.ruleKey, target: clean(n.title), detail: clean(message(n)), cause: clean(extra(n)),
+    step: n.kind === "resolve" ? "" : stepText(n.ruleKey, lang) ?? "", since: `${clock(n.startedAt)} ${zoneLabel(n.startedAt)}`,
+    threshold: n.threshold == null ? "" : n.threshold.toLocaleString("en-US"),
+  });
+  // [first line, the rest] of the rule's custom text, or null when it has none in this language.
+  const custom = (n: Notice, clean: (s: string) => string): [string, string] | null => {
+    const t = Object.hasOwn(templates, n.ruleKey) ? templates[n.ruleKey]?.[lang] : undefined;
+    if (!t) return null;
+    const [first = "", ...rest] = renderTemplate(t, values(n, clean)).split("\n");
+    return [first, rest.join("\n")];
+  };
+  const unmark = (s: string) => s.replace(/[*_`~|\[\]<>]/g, "");
   const telegram = build(list, 4096,
-    (n) => `\n<b>${head(n)}${esc(n.ruleKey)} · ${esc(n.title)}</b>\n${esc(message(n))}${extra(n) ? `\n<i>${esc(extra(n))}</i>` : ""}${step(n) ? `\n👉 ${esc(step(n)!)}` : ""}\n${tx.since} ${clock(n.startedAt)} ${zoneLabel(n.startedAt)}`,
-    `<b>Watchbell</b>: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n<a href="${esc(url)}">${tx.open}</a>`, more);
+    (n) => {
+      const c = custom(n, (s) => s);
+      if (c) return `\n<b>${esc(c[0])}</b>${c[1] ? `\n${esc(c[1])}` : ""}`;
+      return `\n<b>${head(n)}${esc(n.ruleKey)} · ${esc(n.title)}</b>\n${esc(message(n))}${extra(n) ? `\n<i>${esc(extra(n))}</i>` : ""}${step(n) ? `\n👉 ${esc(step(n)!)}` : ""}\n${tx.since} ${clock(n.startedAt)} ${zoneLabel(n.startedAt)}`;
+    },
+    `<b>${name}</b>: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n<a href="${esc(url)}">${tx.open}</a>`, more);
   const discord = build(list, 2000,
-    (n) => `\n**${head(n)}${n.ruleKey} · ${n.title.replace(/[*_`~|\[\]<>]/g, "")}**\n${message(n).replace(/[*_`~|\[\]<>]/g, "")}${extra(n) ? `\n_${extra(n)}_` : ""}${step(n) ? `\n👉 ${step(n)}` : ""}`,
-    `**Watchbell**: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n${url}`, more);
+    (n) => {
+      const c = custom(n, unmark);
+      if (c) return `\n**${c[0]}**${c[1] ? `\n${c[1]}` : ""}`;
+      return `\n**${head(n)}${n.ruleKey} · ${unmark(n.title)}**\n${unmark(message(n))}${extra(n) ? `\n_${extra(n)}_` : ""}${step(n) ? `\n👉 ${step(n)}` : ""}`;
+    },
+    `**${name}**: ${summary(list, lang)} · ${clock(now)} ${zoneLabel(now)}`, `\n${url}`, more);
   return { telegram, discord };
 }

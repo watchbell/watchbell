@@ -150,6 +150,9 @@ branches, Actions runs and dependency advisories. Shows "GitHub isn't connected"
 
 ## Manage
 
+The menu splits Manage into three headings: **Alerting** (Alerts, Auto-actions, Status page), **Setup** (Connections,
+Settings, Sections, Backups) and **AI & API** (AI Gateway, API explorer).
+
 **Connections** (owner only). The provider accounts Watchbell reads: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
 Cloudflare, GitHub and the optional GitHub PR-write token, as tiles grouped by section (Hosting, Database, DevOps,
 and Google Drive under Manage). A tile opens a drawer with the provider's accounts and the form to add one. Tokens are

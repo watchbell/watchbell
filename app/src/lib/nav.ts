@@ -53,14 +53,15 @@ const ITEMS: Record<SectionId, NavItem[]> = {
     { key: "repos", label: "Repositories", href: "/repos", icon: "github", stage: 9, sub: "Automation" },
   ],
   // Alerts sit here for every role (the bell in the top bar too); the rest is the owner's. Extension pages (Auto-actions
-  // after Alerts, AI Gateway and API explorer after Settings) are inserted by navGroups.
+  // after Alerts, AI Gateway and API explorer after Backups) are inserted by navGroups.
+  // 1.2.4 (owner 26 Oct: "Manage has too many"): three sub-headings, so the nine pages read as Alerting, Setup, AI & API.
   manage: [
-    { key: "connections", label: "Connections", href: "/connections", icon: "plug", stage: 1, ownerOnly: true },
-    { key: "alerts", label: "Alerts", href: "/alerts", icon: "bell", stage: 5 },
-    { key: "sections", label: "Sections", href: "/manage/sections", icon: "layout", stage: 12, ownerOnly: true },
-    { key: "settings", label: "Settings", href: "/settings", icon: "settings", stage: 1, ownerOnly: true },
-    { key: "backups", label: "Backups", href: "/backups", icon: "cloud-upload", stage: 7, ownerOnly: true },
-    { key: "status-page", label: "Status page", href: "/settings?tab=status-page", icon: "page", stage: 7, ownerOnly: true },
+    { key: "alerts", label: "Alerts", href: "/alerts", icon: "bell", stage: 5, sub: "Alerting" },
+    { key: "status-page", label: "Status page", href: "/settings?tab=status-page", icon: "page", stage: 7, ownerOnly: true, sub: "Alerting" },
+    { key: "connections", label: "Connections", href: "/connections", icon: "plug", stage: 1, ownerOnly: true, sub: "Setup" },
+    { key: "settings", label: "Settings", href: "/settings", icon: "settings", stage: 1, ownerOnly: true, sub: "Setup" },
+    { key: "sections", label: "Sections", href: "/manage/sections", icon: "layout", stage: 12, ownerOnly: true, sub: "Setup" },
+    { key: "backups", label: "Backups", href: "/backups", icon: "cloud-upload", stage: 7, ownerOnly: true, sub: "Setup" },
   ],
 };
 

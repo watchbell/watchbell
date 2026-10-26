@@ -2,6 +2,23 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.4
+
+### Notifications
+
+- Indonesian alert messages say "karena" instead of "gara-gara" and "Yang perlu kamu lakukan" instead of "Langkah"
+  (UI audit N3): calmer words for a message that can wake someone up.
+- Email (SMTP) messages are plain text: no Discord bold or italic marks, and the Alerts link once.
+- Your own wording, like Grafana's annotations: Alerts › Rules › Edit › Message words a rule's notification yourself,
+  per language, from fields like `{target}`, `{detail}` and `{step}`, with a preview. A rule you never changed keeps
+  Watchbell's wording, later fixes included.
+- Email (SMTP) goes to up to 10 addresses at once.
+- Rules › Edit › Send test sends the rule's message, as it is in the box, to the ticked channels before you save.
+
+### Console
+
+- The Manage menu is split into Alerting, Setup and AI & API, so its nine pages are easier to scan.
+
 ## 1.2.3
 
 ### Security fixes

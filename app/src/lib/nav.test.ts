@@ -19,7 +19,7 @@ describe("nav", () => {
       Hosting: ["apps", "deployments", "domains", "dns", "uptime", "logs"],
       Database: ["supabase", "neon", "firebase", "turso", "upstash", "d1", "sql", "catalog"],
       DevOps: ["repos"],
-      Manage: ["connections", "alerts", "sections", "settings", "backups", "status-page"],
+      Manage: ["alerts", "status-page", "connections", "settings", "sections", "backups"],
     });
     const all = NAV.flatMap((g) => g.items.map((i) => i.key));
     expect(new Set(all).size).toBe(all.length);
@@ -98,7 +98,7 @@ describe("nav", () => {
 
     it("puts the registry's pages into their section after their anchor, for owners only", () => {
       expect(visibleNav("owner", ext).find((g) => g.section === "manage")?.items.map((i) => i.key))
-        .toEqual(["connections", "alerts", "auto-actions", "sections", "settings", "ai", "api-docs", "backups", "status-page"]);
+        .toEqual(["alerts", "auto-actions", "status-page", "connections", "settings", "ai", "api-docs", "sections", "backups"]);
       for (const role of ["operator", "viewer"] as const) {
         const k = visibleNav(role, ext).flatMap((g) => g.items.map((i) => i.key));
         expect(k).not.toContain("ai");

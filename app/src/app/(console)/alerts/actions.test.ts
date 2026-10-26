@@ -5,16 +5,17 @@ const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const member = { id: "mem-1", userId: "user-1", email: "op@example.com", role: "operator" as const };
 
 const h = vi.hoisted(() => ({
-  requireActionMember: vi.fn(), limit: vi.fn(), refresh: vi.fn(), recordAction: vi.fn(), silenceAlert: vi.fn(), saveRule: vi.fn(),
+  requireActionMember: vi.fn(), limit: vi.fn(), refresh: vi.fn(), recordAction: vi.fn(), silenceAlert: vi.fn(), saveRule: vi.fn(), saveRuleTemplates: vi.fn(), sendRuleTest: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("@/lib/rate-limit-db", () => ({ limit: h.limit }));
 vi.mock("next/cache", () => ({ refresh: h.refresh }));
+vi.mock("@/lib/data/notify-db", () => ({ sendRuleTest: h.sendRuleTest }));
 vi.mock("@/lib/data/audit-db", () => ({ recordAction: h.recordAction }));
-vi.mock("@/lib/data/alerts-db", () => ({ silenceAlert: h.silenceAlert, saveRule: h.saveRule }));
+vi.mock("@/lib/data/alerts-db", () => ({ silenceAlert: h.silenceAlert, saveRule: h.saveRule, saveRuleTemplates: h.saveRuleTemplates }));
 
 import { LIMITS } from "@/lib/rate-limit";
-import { editRule, silence } from "./actions";
+import { editRule, silence, testRule } from "./actions";
 
 const form = { severity: "critical", threshold: "2,000", channels: ["telegram"], enabled: true };
 
@@ -110,5 +111,56 @@ describe("editRule (Owner only)", () => {
     h.limit.mockResolvedValue({ allowed: false, retryAfter: 30 });
     expect(await editRule("HighLatency", form)).toEqual({ ok: false, error: "Too many changes. Try again in 1 minute." });
     expect(h.saveRule).not.toHaveBeenCalled();
+  });
+  it("1.2.4: saves only changed message texts, and none when both are Watchbell's own", async () => {
+    const id = "{target} lagi bermasalah\r\n{detail}  ";
+    expect(await editRule("HighLatency", { ...form, templates: { id, en: "{status} · {severity} · {rule} · {target}\n{detail}\n{cause}\nNext step: {step}\nsince {since}" } })).toMatchObject({ ok: true });
+    expect(h.saveRuleTemplates).toHaveBeenCalledWith("HighLatency", { id: "{target} lagi bermasalah\n{detail}" });
+    expect(h.recordAction).toHaveBeenCalledWith(expect.objectContaining({ detail: "Slowest 5% of checks over 2,000 ms for 10 min · custom message" }));
+    await editRule("HighLatency", { ...form, templates: { id: "", en: "" } });
+    expect(h.saveRuleTemplates).toHaveBeenLastCalledWith("HighLatency", {});
+  });
+
+  it("1.2.4: names a bad field per language and writes nothing", async () => {
+    const r = await editRule("HighLatency", { ...form, templates: { id: "{target} {dashboard}", en: "x".repeat(1001) } });
+    expect(r).toMatchObject({ ok: false, fieldErrors: { template_id: expect.stringMatching(/^\{dashboard\} isn't a field/), template_en: "Keep it under 1,000 characters." } });
+    expect(h.saveRule).not.toHaveBeenCalled();
+    expect(h.saveRuleTemplates).not.toHaveBeenCalled();
+  });
+
+  it("1.2.4: Disable/Enable sends no texts and leaves the saved ones alone", async () => {
+    expect(await editRule("HighLatency", form)).toMatchObject({ ok: true });
+    expect(h.saveRuleTemplates).not.toHaveBeenCalled();
+  });
+});
+
+describe("testRule (1.2.4, Rules › Edit › Send test)", () => {
+  const texts = { id: "{target} mati, cek {threshold}x", en: "" };
+  it("sends the box's text as a made-up alert to the ticked push channels only, under the Send test limit", async () => {
+    h.sendRuleTest.mockResolvedValue([{ kind: "telegram", result: { ok: true } }, { kind: "smtp", result: { ok: true } }]);
+    const r = await testRule("MonitorDown", { severity: "critical", threshold: "3", channels: ["telegram", "smtp", "email_digest"], templates: texts });
+    expect(r).toEqual({ ok: true, message: "Test sent to Telegram, Email (SMTP)." });
+    expect(h.limit).toHaveBeenCalledWith(LIMITS.notifyTest, "mem-1");
+    const [kinds, notice, templates] = h.sendRuleTest.mock.calls[0];
+    expect(kinds).toEqual(["telegram", "smtp"]);
+    expect(notice).toMatchObject({ kind: "open", ruleKey: "MonitorDown", severity: "critical", title: "my-app", message: "3 failed checks in a row", threshold: 3 });
+    expect(templates).toEqual({ MonitorDown: { id: "{target} mati, cek {threshold}x" } });
+    expect(h.saveRule).not.toHaveBeenCalled();
+    expect(h.saveRuleTemplates).not.toHaveBeenCalled();
+  });
+
+  it("says which channel failed and which got it", async () => {
+    h.sendRuleTest.mockResolvedValue([{ kind: "telegram", result: { ok: true } }, { kind: "discord", result: { ok: false, kind: "config", error: "Discord isn't connected." } }]);
+    expect(await testRule("MonitorDown", { severity: "critical", threshold: "3", channels: ["telegram", "discord"] }))
+      .toEqual({ ok: false, error: "Discord: Discord isn't connected. Sent to Telegram." });
+  });
+
+  it("needs a push channel and a valid text, and an owner", async () => {
+    expect(await testRule("MonitorDown", { severity: "critical", threshold: "3", channels: ["email_digest"] })).toEqual({ ok: false, error: "Tick Telegram, Discord, Webhook or Email (SMTP) first." });
+    expect(await testRule("MonitorDown", { severity: "critical", threshold: "3", channels: ["telegram"], templates: { id: "{nope}" } })).toMatchObject({ ok: false, fieldErrors: { template_id: expect.any(String) } });
+    expect(h.sendRuleTest).not.toHaveBeenCalled();
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await testRule("MonitorDown", { severity: "critical", threshold: "3", channels: ["telegram"] })).toEqual({ ok: false, error: "You don't have permission to do that." });
+    expect(h.requireActionMember).toHaveBeenLastCalledWith("owner");
   });
 });

@@ -13,6 +13,7 @@ dan disiapkan di **Alerts › Notifications** (khusus owner; user lain hanya mel
 - [Email (SMTP)](#email-smtp)
 - [Ringkasan email harian](#ringkasan-email-harian)
 - [Bahasa](#bahasa)
+- [Kata-kata sendiri](#kata-kata-sendiri)
 - [Aturan senyap](#aturan-senyap)
 
 ## Apa yang dikirim
@@ -114,7 +115,7 @@ layanan mail lain yang mendukung SMTP. ([Ringkasan email harian](#ringkasan-emai
 Resend.)
 
 1. **Alerts › Notifications › Email (SMTP) › Connect**: server, port, user name dan password, alamat pengirim, dan
-   alamat yang menerima alert.
+   sampai 10 alamat yang menerima alert (tekan Enter atau koma setelah tiap alamat).
 2. Tekan **Send test**, lalu centang **Email (SMTP)** di aturan alert yang Anda mau, sama seperti Discord.
 
 - Port **587** atau **2525** memakai STARTTLS, port **465** memakai TLS dari awal. Watchbell baru mengirim password
@@ -125,6 +126,10 @@ Resend.)
   SMTP AUTH harus diizinkan untuk mailbox itu.
 - Subjeknya adalah baris pertama pesan; isinya teks yang sama dengan Discord, dalam bahasa ringkasan email, dengan link
   ke Alerts. Database disebut db-a, db-b dan email tidak pernah muncul.
+- Satu email dikirim ke semua alamat. Server harus menerima setiap alamat: kalau satu ditolak, pengiriman gagal dan
+  pesan errornya menyebut urutan alamat itu di daftar (console tidak pernah menampilkan alamatnya). Pengirim tes Resend
+  `onboarding@resend.dev` hanya mengirim ke alamat akun Resend Anda sendiri; verifikasi domain untuk mengirim ke orang
+  lain.
 - Semuanya dienkripsi sebelum disimpan. Change menampilkan form kosong; biarkan password kosong untuk tetap memakai
   yang tersimpan.
 
@@ -151,6 +156,26 @@ mengirim satu.
 
 Setiap channel punya bahasanya sendiri: **English** atau **Bahasa Indonesia**. Pilih di samping channel-nya. Ini hanya
 mengubah apa yang dikirim Watchbell; web console tetap dalam bahasa Inggris.
+
+## Kata-kata sendiri
+
+Seperti annotation di Grafana, pesan setiap aturan bisa Anda rangkai sendiri: **Alerts › Rules › Edit › Message**, satu
+teks untuk Bahasa Indonesia dan satu untuk English. Isinya dimulai dari kata-kata bawaan Watchbell; ubah, dan pratinjau
+di bawahnya menunjukkan hasilnya dengan contoh data.
+
+- Isian dalam kurung kurawal diisi saat pesan dikirim: `{status}` (MUNCUL, ULANG, PULIH), `{severity}`, `{rule}`,
+  `{target}` (app, database, atau domain), `{detail}` (apa yang dilihat Watchbell), `{cause}`, `{step}` (langkah
+  berikutnya, untuk aturan yang punya), `{since}`, dan `{threshold}`. Selain itu, isian dalam kurung kurawal ditolak
+  saat disimpan.
+- Baris yang semua isiannya kosong tidak dikirim, jadi `Yang perlu kamu lakukan: {step}` hilang di aturan atau pesan
+  pulih yang tidak punya langkah. Baris tanpa isian, misalnya link runbook atau dashboard, selalu ikut.
+- Baris pertama ditebalkan di Telegram dan Discord. Baris "Watchbell: 1 aktif" dan link Alerts selalu ditambahkan.
+- Setiap channel memakai teks sesuai bahasanya; webhook memakai teks English di `text` dan tetap membawa data alert-nya.
+  Ringkasan harian tetap memakai kata-kata Watchbell.
+- **Send test** di dialog yang sama mengirim pesan sesuai isi kotak, sudah disimpan atau belum, sebagai alert contoh
+  untuk "my-app" dengan judul "Watchbell (tes)", ke channel yang dicentang.
+- Aturan yang teksnya tidak pernah Anda ubah tetap memakai kata-kata Watchbell, termasuk perbaikannya nanti. **Back to
+  Watchbell's wording** membatalkan perubahan Anda.
 
 ## Aturan senyap
 

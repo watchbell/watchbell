@@ -1,10 +1,11 @@
 import "server-only";
 import { and, desc, eq, gte, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { accounts, alertRules, alerts, providerStatus, resources, snapshots } from "@/db/schema";
+import { accounts, alertRules, alerts, providerStatus, resources, settings, snapshots } from "@/db/schema";
 import { isRuleKey, RULE_KEYS, RULES, type RuleConfig, type RuleKey } from "@/lib/alerts/catalog";
 import { evaluate } from "@/lib/alerts/evaluate";
 import { type OpenAlert, type PlanContext, planAlerts } from "@/lib/alerts/lifecycle";
+import { type MessageTemplates, parseTemplates, type RuleTemplates, TEMPLATES_KEY } from "@/lib/alerts/message-template";
 import { maintenanceSet } from "@/lib/maintenance";
 import { alertPaused, type SectionId } from "@/lib/sections";
 import { silenceUntil } from "@/lib/view/alerts";
@@ -143,4 +144,23 @@ export async function silenceAlert(id: string, choice: "1h" | "resolved" | "off"
 export async function saveRule(key: RuleKey, v: Omit<RuleConfig, "key">): Promise<boolean> {
   const rows = await db().update(alertRules).set({ ...v, updatedAt: new Date() }).where(eq(alertRules.key, key)).returning({ key: alertRules.key });
   return rows.length > 0;
+}
+
+// 1.2.4: the rules' custom notification texts, one ops.settings row (no migration): { "<rule key>": { id?, en? } }.
+// Unreadable means none, so every rule falls back to Watchbell's wording.
+export async function readMessageTemplates(): Promise<MessageTemplates> {
+  try {
+    const [row] = await db().select({ value: settings.value }).from(settings).where(eq(settings.key, TEMPLATES_KEY)).limit(1);
+    return parseTemplates(row?.value);
+  } catch {
+    return {};
+  }
+}
+
+// Replaces one rule's texts; an empty `t` removes the rule from the row.
+export async function saveRuleTemplates(key: RuleKey, t: RuleTemplates): Promise<void> {
+  const all = await readMessageTemplates();
+  if (Object.keys(t).length) all[key] = t;
+  else delete all[key];
+  await db().insert(settings).values({ key: TEMPLATES_KEY, value: all }).onConflictDoUpdate({ target: settings.key, set: { value: all, updatedAt: new Date() } });
 }

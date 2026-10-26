@@ -3,7 +3,7 @@ import { alerts, channels, checks, events, resources, settings } from "@/db/sche
 import { PgDialect } from "drizzle-orm/pg-core";
 import { type Call, fakeDb, payloadOf, whereOf } from "./fake-db";
 
-const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, readAliasBook: vi.fn(), readLang: vi.fn(), readLangs: vi.fn(), sendEmail: vi.fn() }));
+const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown }, readAliasBook: vi.fn(), readLang: vi.fn(), readLangs: vi.fn(), sendEmail: vi.fn(), readTemplates: vi.fn() }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 // Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
 const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
@@ -16,8 +16,10 @@ vi.mock("@/lib/env", () => ({ serverEnv: () => ({ OPS_ENCRYPTION_KEY: "key", SIT
 // The notification language has its own reader (settings-db), so it doesn't take a queued read either.
 vi.mock("@/lib/notify/lang", async (orig) => ({ ...(await orig<typeof import("@/lib/notify/lang")>()), readNotifyLang: h.readLang, readNotifyLangs: h.readLangs }));
 vi.mock("@/lib/notify/resend", () => ({ sendEmail: h.sendEmail }));
+// 1.2.4: the rules' custom texts have their own reader too.
+vi.mock("./alerts-db", () => ({ readMessageTemplates: h.readTemplates }));
 
-import { deliverPending, digestData, rememberTelegramThread, sendTest, taskDigest, TELEGRAM_THREADS_KEY, telegramThread, THREAD_KEEP_MS } from "./notify-db";
+import { deliverPending, digestData, rememberTelegramThread, sendRuleTest, sendTest, taskDigest, TELEGRAM_THREADS_KEY, telegramThread, THREAD_KEEP_MS } from "./notify-db";
 
 const NOW = new Date("2026-10-13T12:00:00Z");
 const alert = (o: Record<string, unknown> = {}) => ({
@@ -45,6 +47,8 @@ beforeEach(() => {
   h.readLangs.mockReset();
   h.readLangs.mockResolvedValue({ telegram: "en", discord: "en", email: "en" });
   h.sendEmail.mockReset();
+  h.readTemplates.mockReset();
+  h.readTemplates.mockResolvedValue({});
   h.readAliasBook.mockResolvedValue({ db: [{ id: "db1", name: "someone@gmail.com's Project", alias: "db-a" }, { id: "db2", name: "ticketer", alias: "db-b" }], app: [] });
 });
 
@@ -139,7 +143,37 @@ describe("deliverPending with a paused section (D11)", () => {
   });
 });
 
+describe("sendRuleTest (1.2.4)", () => {
+  it("sends the rule's text in each channel's language and names a channel that isn't connected", async () => {
+    h.readLangs.mockResolvedValue({ telegram: "id", discord: "en", email: "en" });
+    use([]);
+    const send = vi.fn().mockResolvedValue(ok);
+    const notice = { kind: "open" as const, ruleKey: "MonitorDown", severity: "critical" as const, title: "my-app", message: "3 failed checks in a row", startedAt: NOW, causedBy: null, provider: null, threshold: 3 };
+    const r = await sendRuleTest(["telegram", "discord"], notice, { MonitorDown: { id: "{target} mati, {threshold}x gagal" } }, NOW, { sender: { send, configured: new Set(["telegram"]) } });
+    expect(r).toEqual([{ kind: "telegram", result: ok }, { kind: "discord", result: { ok: false, kind: "config", error: "Discord isn't connected." } }]);
+    expect(send).toHaveBeenCalledOnce();
+    expect(send.mock.calls[0][1]).toContain("<b>my-app mati, 3x gagal</b>");
+    // Owner 26 Oct: marked as a test, and the sample sentence in the channel's language (not the English condition).
+    expect(send.mock.calls[0][1]).toMatch(/^<b>Watchbell \(tes\)<\/b>: 1 aktif/);
+    const plain = await sendRuleTest(["telegram"], { ...notice, ruleKey: "HighLatency" }, {}, NOW, { sender: { send, configured: new Set(["telegram"]) } });
+    expect(plain[0].result).toEqual(ok);
+    expect(send.mock.calls[1][1]).toContain("Pesan tes: di sini nanti kalimat Watchbell");
+    expect(send.mock.calls[1][1]).not.toContain("failed checks");
+  });
+});
+
 describe("deliverPending", () => {
+  it("1.2.4: writes a rule with its own text in each channel's language, with the rule's threshold", async () => {
+    h.readLangs.mockResolvedValue({ telegram: "id", discord: "en", email: "en" });
+    h.readTemplates.mockResolvedValue({ HighLatency: { id: "{target} lambat, batas {threshold} ms" } });
+    use([[{ a: alert({ ruleKey: "HighLatency", severity: "warning", title: "api /" }), channels: ["telegram", "discord"], threshold: 2000 }]]);
+    const send = vi.fn().mockResolvedValue(ok);
+    await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["telegram", "discord"]) } });
+    const text = Object.fromEntries(send.mock.calls.map(([kind, t]) => [kind, t as string]));
+    expect(text.telegram).toContain("<b>api / lambat, batas 2,000 ms</b>");
+    expect(text.discord).toContain("FIRING · warning · HighLatency · api /");
+  });
+
   it("sends one grouped message and marks the alert as notified, releasing the claim", async () => {
     const f = use([[{ a: alert(), channels: ["telegram"] }]]);
     const send = vi.fn().mockResolvedValue(ok);
@@ -534,5 +568,12 @@ describe("email subject (1.2.3)", () => {
     const { mailSubject } = await import("./notify-db");
     expect(mailSubject("**FIRING** · critical · `orbit-blog` down\nmore")).toBe("FIRING · critical · orbit-blog down");
     expect(mailSubject("")).toBe("Watchbell alert");
+  });
+  it("the body is plain text: no Discord marks, the link once (26 Oct test mail)", async () => {
+    const { mailBody } = await import("./notify-db");
+    const text = "**Watchbell**: 1 aktif · 17:16 WIB\n\n**MUNCUL · info · Test · Pesan tes**\nKalau pesan ini kebaca, alert udah nyampe ke sini.\n_karena DatabasePaused · db-a_ and `ops_app`\n\nhttps://ops.example.com/alerts";
+    const body = mailBody(text);
+    expect(body).toBe("Watchbell: 1 aktif · 17:16 WIB\n\nMUNCUL · info · Test · Pesan tes\nKalau pesan ini kebaca, alert udah nyampe ke sini.\nkarena DatabasePaused · db-a and ops_app\n\nhttps://ops.example.com/alerts");
+    expect(body.match(/https:\/\//g)).toHaveLength(1);
   });
 });

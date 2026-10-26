@@ -13,6 +13,7 @@ they are set up on **Alerts › Notifications** (owner only; everyone else sees 
 - [Email (SMTP)](#email-smtp)
 - [Daily email digest](#daily-email-digest)
 - [Language](#language)
+- [Your own wording](#your-own-wording)
 - [Quiet rules](#quiet-rules)
 
 ## What gets sent
@@ -121,7 +122,7 @@ Each alert message by email through your own mail server, for teams that live in
 service that speaks SMTP. (The [daily email digest](#daily-email-digest) is separate and goes through Resend.)
 
 1. **Alerts › Notifications › Email (SMTP) › Connect**: the server, the port, the user name and password, the address
-   the mail comes from and the one that gets the alerts.
+   the mail comes from and up to 10 addresses that get the alerts (press Enter or a comma after each).
 2. Press **Send test**, then tick **Email (SMTP)** on the alert rules you want, like Discord.
 
 - Port **587** or **2525** use STARTTLS, port **465** uses TLS from the start. Watchbell sends the password only after
@@ -132,6 +133,9 @@ service that speaks SMTP. (The [daily email digest](#daily-email-digest) is sepa
   SMTP AUTH must be allowed for the mailbox.
 - The subject is the message's first line; the body is the same text as Discord, in the email digest's language, with
   a link to Alerts. Databases are named db-a, db-b and emails never appear.
+- One email goes to every address. The server has to accept each of them: if it refuses one, the send fails and the
+  error says which one by its place in the list (the console never shows the addresses). Resend's test sender
+  `onboarding@resend.dev` only delivers to your own Resend account address; verify a domain to reach other people.
 - Everything is encrypted before it's saved. Change shows the form empty; leave the password empty to keep the saved
   one.
 
@@ -157,6 +161,25 @@ The digest is sent through [Resend](https://resend.com). The free plan allows 10
 
 Each channel has its own language: **English** or **Bahasa Indonesia**. Pick it next to the channel. This changes only
 what Watchbell sends; the web console stays in English.
+
+## Your own wording
+
+Like annotations in Grafana, each rule's message can be worded by you: **Alerts › Rules › Edit › Message**, one text
+for Bahasa Indonesia and one for English. It starts as Watchbell's own wording; change it, and the preview below shows
+the result with sample values.
+
+- Fields in braces are filled in when the message goes out: `{status}` (FIRING, REPEAT, RESOLVED), `{severity}`,
+  `{rule}`, `{target}` (the app, database or domain), `{detail}` (what Watchbell saw), `{cause}`, `{step}` (the next
+  step, for rules that have one), `{since}` and `{threshold}`. Anything else in braces is refused when you save.
+- A line whose fields are all empty is left out, so `Next step: {step}` disappears on a rule or a resolve without one.
+  Lines without fields, a runbook or dashboard link for example, always stay.
+- The first line is bold on Telegram and Discord. The "Watchbell: 1 firing" line and the Alerts link are always added.
+- Each channel uses the text of its language; the webhook uses the English one in `text` and still carries the alerts
+  as data. The daily digest keeps Watchbell's wording.
+- **Send test** in the same dialog sends the message as it is in the box, saved or not, as a made-up alert
+  for "my-app", headed "Watchbell (test)", to the ticked channels.
+- A rule whose text you never changed keeps Watchbell's wording, including later fixes to it. **Back to Watchbell's
+  wording** undoes your change.
 
 ## Quiet rules
 

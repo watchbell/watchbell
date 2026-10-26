@@ -66,17 +66,17 @@ describe("composeMessage in Indonesian", () => {
     ], now, url, "id");
     expect(m.telegram).toContain("<b>Watchbell</b>: 2 aktif, 1 pulih · 19:44 WIB");
     expect(m.telegram).toContain("<b>MUNCUL · kritis · MonitorDown · orbit-blog /</b>\napp-a.example.com/: 3 cek gagal berturut-turut (HTTP 502).");
-    expect(m.telegram).toContain("<i>gara-gara CollectorStale · Vercel lagi ada insiden</i>");
+    expect(m.telegram).toContain("<i>karena CollectorStale · Vercel lagi ada insiden</i>");
     expect(m.telegram).toContain("ULANG · peringatan · CredentialExpiring");
     expect(m.telegram).toContain("Credential vercel acme habis dalam 3 hari.");
-    expect(m.telegram).toContain("👉 Langkah: bikin token baru dan ganti di Settings → Connections sebelum habis.");
+    expect(m.telegram).toContain("👉 Yang perlu kamu lakukan: bikin token baru dan ganti di Settings → Connections sebelum habis.");
     expect(m.telegram).toContain("PULIH · info · HighLatency");
     expect(m.telegram).toContain("sejak 19:44 WIB");
     expect(m.telegram).toContain('<a href="https://ops.example.com/alerts">Buka Alerts</a>');
     expect(m.discord).toContain("**Watchbell**: 2 aktif, 1 pulih");
     expect(m.discord).toContain("**MUNCUL · kritis · MonitorDown");
-    expect(m.discord).toContain("_gara-gara CollectorStale · Vercel lagi ada insiden_");
-    expect(m.discord).toContain("👉 Langkah: bikin token baru");
+    expect(m.discord).toContain("_karena CollectorStale · Vercel lagi ada insiden_");
+    expect(m.discord).toContain("👉 Yang perlu kamu lakukan: bikin token baru");
     for (const s of [m.telegram, m.discord]) expect(s).not.toMatch(/FIRING|REPEAT|RESOLVED|critical|warning|Next step|since |Open alerts|caused by|reports an incident|consecutive|expires/);
   });
 
@@ -114,11 +114,11 @@ describe("composeMessage in Indonesian", () => {
   // Review T1 minor 9: FrameworkVulnerable says how to get the update PR (or to update next by hand).
   it("FrameworkVulnerable carries the next step in both languages", () => {
     expect(nextStep("FrameworkVulnerable")).toBe("Next step: if the app's GitHub repository isn't linked yet, link it on the app page to get an update PR from the office; or update next yourself.");
-    expect(nextStep("FrameworkVulnerable", "id")).toBe("Langkah: kalau repo GitHub app-nya belum di-link, link di halaman app biar office bikinin PR update; atau update next sendiri.");
+    expect(nextStep("FrameworkVulnerable", "id")).toBe("Yang perlu kamu lakukan: kalau repo GitHub app-nya belum di-link, link di halaman app biar office bikinin PR update; atau update next sendiri.");
   });
 
   it("restores the Indonesian next steps", () => {
-    expect(nextStep("CollectorStale", "id")).toBe("Langkah: watchdog udah jalanin collector sendiri tiap 5 menit. Cek job di cron-job.org dan deploy terakhir di Vercel.");
+    expect(nextStep("CollectorStale", "id")).toBe("Yang perlu kamu lakukan: watchdog udah jalanin collector sendiri tiap 5 menit. Cek job di cron-job.org dan deploy terakhir di Vercel.");
     expect(nextStep("MonitorDown", "id")).toBeNull();
     expect(nextStep("CollectorStale")).toMatch(/^Next step: the watchdog/);
   });
@@ -146,5 +146,41 @@ describe("composeMessage in the configured zone (1.1)", () => {
     expect(m.telegram).toContain("· 13:44 CET");
     expect(m.telegram).toContain("sejak 14:00 CEST"); // it started before the clocks went back
     expect(m.telegram).not.toContain("WIB");
+  });
+});
+
+describe("composeMessage with a rule's own text (1.2.4)", () => {
+  const vuln = (o: Partial<Notice> = {}) => n({ ruleKey: "VulnerableDependency", severity: "warning", title: "orbit-blog", message: "1 vulnerable package (1 high): zod 4.6.5 → 4.6.6.", ...o });
+  const templates = { VulnerableDependency: { id: "{status} {target} <rentan>\n{detail}\nLangkah: {step}\nRunbook: https://wiki.example.com/deps", en: "**{target}** has a {severity} advisory\n{detail}" } };
+
+  it("writes that rule from its text, escaped for Telegram, first line bold, and leaves other rules as they were", () => {
+    const plain = composeMessage([n()], now, "https://ops.example.com", "id");
+    const m = composeMessage([vuln(), n()], now, "https://ops.example.com", "id", templates);
+    expect(m.telegram).toContain("\n<b>MUNCUL orbit-blog &lt;rentan&gt;</b>\n1 paket rentan");
+    expect(m.telegram).toContain("Runbook: https://wiki.example.com/deps");
+    expect(m.telegram).not.toContain("Langkah:"); // VulnerableDependency has no next step, so the line goes
+    expect(m.telegram).toContain(plain.telegram.split("\n").slice(2, 5).join("\n")); // MonitorDown unchanged
+    expect(m.telegram).toContain('<a href="https://ops.example.com/alerts">Buka Alerts</a>');
+  });
+
+  it("uses the text of the channel's language only: no English text means Watchbell's English wording", () => {
+    const en = composeMessage([vuln()], now, "https://ops.example.com", "en", { VulnerableDependency: { id: "{target} rentan" } });
+    expect(en.telegram).toContain("FIRING · warning · VulnerableDependency · orbit-blog");
+  });
+
+  it("keeps the person's own Discord marks but strips them from Watchbell's values", () => {
+    const m = composeMessage([vuln({ title: "*evil*_app" })], now, "https://ops.example.com", "en", templates);
+    expect(m.discord).toContain("\n****evilapp** has a warning advisory**\n1 vulnerable package");
+    expect(m.discord).not.toContain("*evil*");
+  });
+
+  it("fills {step} on a firing alert, not on a resolve, and {threshold} from the rule", () => {
+    const t = { DomainExpiringSoon: { en: "{target} expires\nDo this: {step}\nWarn at {threshold} days" } };
+    const open = composeMessage([n({ ruleKey: "DomainExpiringSoon", title: "example.com", threshold: 1500 })], now, "https://ops.example.com", "en", t);
+    expect(open.telegram).toContain("Do this: renew the domain at its registrar");
+    expect(open.telegram).toContain("Warn at 1,500 days");
+    const resolved = composeMessage([n({ kind: "resolve", ruleKey: "DomainExpiringSoon", title: "example.com", threshold: null })], now, "https://ops.example.com", "en", t);
+    expect(resolved.telegram).not.toContain("Do this");
+    expect(resolved.telegram).not.toContain("Warn at");
   });
 });

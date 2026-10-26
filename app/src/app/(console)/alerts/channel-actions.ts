@@ -12,6 +12,7 @@ import { readChannel, sendTest as sendTestMessage, setChannelEnabled as storeEna
 import { readSeenChats, webhookOn } from "@/lib/data/telegram-bot-db";
 import { webhookProblem } from "@/lib/notify/discord";
 import { secretProblem, webhookUrlProblem } from "@/lib/notify/webhook";
+import { recipients } from "@/lib/notify/hints";
 import { smtpProblems } from "@/lib/notify/smtp";
 import { notifyEnv } from "@/lib/notify/env";
 import { NOTIFY_CHANNELS, type NotifyChannel, parseNotifyLangs } from "@/lib/notify/lang";
@@ -108,7 +109,7 @@ export async function saveSmtp(input: { host: string; port: number; user: string
     const port = Number(input?.port);
     let pass = typeof input?.pass === "string" ? input.pass : "";
     if (!pass) pass = (await readChannel("smtp"))?.config.pass ?? "";
-    const c = { host: str(input?.host).toLowerCase(), port, user: str(input?.user), pass, from: str(input?.from), to: str(input?.to) };
+    const c = { host: str(input?.host).toLowerCase(), port, user: str(input?.user), pass, from: str(input?.from), to: recipients(str(input?.to)).join(", ") };
     const fieldErrors = smtpProblems(c);
     if (Object.keys(fieldErrors).length) return { ok: false, error: "Check the highlighted fields.", fieldErrors };
     const q = await quota(member, LIMITS.alertWrite);

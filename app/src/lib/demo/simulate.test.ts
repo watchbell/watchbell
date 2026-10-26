@@ -153,7 +153,7 @@ describe("in demo nothing leaves the server", () => {
     expect((await watchdog.POST(post("/api/watchdog"))).status).toBe(404);
     expect((await telegram.POST(post("/api/telegram/webhook"))).status).toBe(404);
     expect(fetchSpy).not.toHaveBeenCalled();
-  }, 30_000); // four cold route imports inside the test: 4-14 s on a busy machine, past the 5 s default
+  }, 90_000); // four cold route imports inside the test: 4-14 s on a busy machine, and over 30 s in a loaded full run (26 Oct)
 
   // The private edition's extra routes test their demo refusals on their own side.
   it("/api/status refuses before reading the session", async () => {
@@ -211,7 +211,8 @@ describe("in demo nothing leaves the server", () => {
   });
 });
 
-describe("harmless actions are simulated in the visitor's database", () => {
+// Each case opens a fresh PGlite visitor database and imports server actions cold (it failed once at 5 s, 26 Oct).
+describe("harmless actions are simulated in the visitor's database", { timeout: 60_000 }, () => {
   const SEED = "c0ffee00c0ffee00c0ffee00c0ffee00";
   const fetchSpy = vi.fn(async () => new Response("{}"));
   const realFetch = globalThis.fetch;

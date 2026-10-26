@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { buildMessage, sendSmtp, smtpProblems } from "./smtp";
 
 // A scripted SMTP server on 127.0.0.1. `opts` decides what it offers and refuses; `seen` records every command.
-type FakeOpts = { starttls?: boolean; authCode?: number; rcptCode?: number };
+type FakeOpts = { starttls?: boolean; authCode?: number; rcptCode?: number; refuse?: string };
 const servers: net.Server[] = [];
 afterEach(() => servers.splice(0).forEach((s) => s.close()));
 
@@ -30,7 +30,7 @@ function fakeServer(opts: FakeOpts = {}) {
         else if (line === "STARTTLS") sock.write("220 go ahead\r\n");
         else if (line.startsWith("AUTH PLAIN")) sock.write(`${opts.authCode ?? 235} auth\r\n`);
         else if (line.startsWith("MAIL FROM")) sock.write("250 ok\r\n");
-        else if (line.startsWith("RCPT TO")) sock.write(`${opts.rcptCode ?? 250} ok\r\n`);
+        else if (line.startsWith("RCPT TO")) sock.write(`${opts.refuse && line.includes(opts.refuse) ? 550 : opts.rcptCode ?? 250} ok\r\n`);
         else if (line === "DATA") { inData = true; sock.write("354 go\r\n"); }
         else if (line === "QUIT") { sock.write("221 bye\r\n"); sock.end(); }
       }
@@ -78,6 +78,28 @@ describe("SMTP channel (1.2.3)", () => {
     expect(await sendSmtp(cfg, "s", "t", viaFake(f.port))).toMatchObject({ ok: false, kind: "config", error: expect.stringMatching(/user name or password/) });
     const g = await fakeServer({ rcptCode: 451 });
     expect(await sendSmtp(cfg, "s", "t", viaFake(g.port))).toMatchObject({ ok: false, kind: "transient", error: expect.stringMatching(/recipient/) });
+  });
+
+  it("1.2.4: sends one email to several addresses, each one accepted, all in To", async () => {
+    const many = { ...cfg, to: "me@example.com, Ops@example.com;ops@example.com  boss@example.com" };
+    expect(smtpProblems(many)).toEqual({});
+    const f = await fakeServer();
+    expect(await sendSmtp(many, "s", "t", viaFake(f.port))).toEqual({ ok: true });
+    expect(f.seen.filter((l) => l.startsWith("RCPT"))).toEqual(["RCPT TO:<me@example.com>", "RCPT TO:<Ops@example.com>", "RCPT TO:<boss@example.com>"]);
+    expect(f.data()).toContain("To: <me@example.com>, <Ops@example.com>, <boss@example.com>");
+  });
+
+  it("1.2.4: a refused address fails the send by its place in the list, before any mail goes out", async () => {
+    const f = await fakeServer({ refuse: "typo@" });
+    const r = await sendSmtp({ ...cfg, to: "me@example.com, typo@example.con" }, "s", "t", viaFake(f.port));
+    expect(r).toEqual({ ok: false, kind: "config", error: "The mail server refused recipient 2 of 2 (550)." });
+    expect(f.seen).not.toContain("DATA");
+  });
+
+  it("1.2.4: checks every address and the limit of 10", () => {
+    expect(smtpProblems({ ...cfg, to: "me@example.com, nope" }).to).toBe("nope isn't a valid address.");
+    expect(smtpProblems({ ...cfg, to: " , ; " }).to).toBe("Enter the address that gets the alerts.");
+    expect(smtpProblems({ ...cfg, to: Array.from({ length: 11 }, (_, i) => `u${i}@example.com`).join(",") }).to).toBe("Up to 10 addresses.");
   });
 
   it("refuses a server that resolves to a private address", async () => {
