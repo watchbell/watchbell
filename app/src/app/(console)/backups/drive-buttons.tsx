@@ -29,7 +29,7 @@ export function DriveConnectButton({ reconnect = false, quiet = false, size = "m
       cta="Continue to Google"
       onConfirm={async () => {
         const r = await startDriveConnect();
-        if (!r.ok || !r.data) return { ok: false, message: r.ok ? "Something went wrong. Try again." : r.error };
+        if (!r.ok || !r.data) return { ok: false, message: r.ok ? "Watchbell didn't answer. Check that it's still running, then try again." : r.error };
         window.location.assign(r.data.url);
         return { ok: true, message: "Opening Google…" };
       }}
@@ -67,7 +67,7 @@ export function BackUpNowButton({ monthLabel, disabled }: { monthLabel: string; 
         if (r.ok) toast.success(r.message ?? "Saved to Google Drive.", { id });
         else toast.error(r.error, { id });
       } catch {
-        toast.error("Something went wrong. Try again.", { id });
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.", { id });
       } finally {
         busy.current = false;
       }

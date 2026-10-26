@@ -179,7 +179,6 @@ export function Home({ lang, copy: c }: { lang: Lang; copy: HomeCopy }) {
       {/* 3. the board */}
       <section className="board-sec" id="board">
         <div className="wrap">
-          <span className="eyebrow">{c.board.eyebrow}</span>
           <h2>{c.board.title}</h2>
           <p className="sub">{c.board.sub}</p>
 
@@ -232,7 +231,6 @@ export function Home({ lang, copy: c }: { lang: Lang; copy: HomeCopy }) {
       {/* 4. also */}
       <section className="also">
         <div className="wrap">
-          <span className="eyebrow">{c.also.eyebrow}</span>
           <h2>{c.also.title}</h2>
           <dl>
             {c.also.items.map((item) => (
@@ -256,7 +254,6 @@ export function Home({ lang, copy: c }: { lang: Lang; copy: HomeCopy }) {
       <section className="setup" id="setup">
         <div className="wrap">
           <div>
-            <span className="eyebrow">{c.setup.eyebrow}</span>
             <h2>{c.setup.title}</h2>
             <ol>
               {c.setup.steps.map((step, i) => (
@@ -304,7 +301,6 @@ export function Home({ lang, copy: c }: { lang: Lang; copy: HomeCopy }) {
       <section className="fine">
         <div className="wrap">
           <div>
-            <span className="eyebrow">{c.fine.eyebrow}</span>
             <table className="spec">
               <tbody>
                 {c.fine.rows.map(([k, v]) => (

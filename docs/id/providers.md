@@ -167,6 +167,8 @@ Tidak dibutuhkan: Registrar. Tanggal kedaluwarsa domain diambil dari RDAP, yang 
 
 Sync menampilkan repository Anda, aplikasi dihubungkan ke repository-nya masing-masing, dan halaman aplikasi
 menampilkan status GitHub Actions dan dependency advisory-nya. Halaman Repositories menjelajahi repository tersebut.
+Kalau GitHub menolak sebuah pembacaan (permission terlewat atau dicabut belakangan), akun di Connections menulis
+**Connected, some reads refused** dan menyebut permission yang perlu ditambahkan.
 
 ## GitHub (PR write)
 

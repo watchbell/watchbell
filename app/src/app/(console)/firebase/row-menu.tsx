@@ -11,7 +11,7 @@ export function FirestoreRowMenu({ id, label, alias, links }: { id: string; labe
     const t = toast.loading(`Checking ${alias}…`);
     runHealthCheckAction(id)
       .then((r) => (r.ok ? toast.success(`${alias}: ${r.message ?? "checked"}`, { id: t }) : toast.error(`${alias}: ${r.error}`, { id: t })))
-      .catch(() => toast.error("Something went wrong. Try again.", { id: t }));
+      .catch(() => toast.error("Watchbell didn't answer. Check that it's still running, then try again.", { id: t }));
   };
   const items: MenuEntry[] = [...links, { label: "Run health check", onSelect: run }];
   return <RowMenu label={label} items={items} />;

@@ -30,6 +30,7 @@ import { checkUrl, mapLimit } from "./http-check";
 import { acquireLease, releaseLease } from "./lease";
 import { NETWORK_TASKS, refreshNetworkStates, taskCloudflare, taskDomains, taskEol, taskRdap, taskTls } from "./network";
 import { taskNode } from "./node-runtime";
+import { taskSelfUpdate } from "./self-update";
 import { ruleFrom } from "@/lib/body-rule";
 import { writeCheckResult } from "./monitor-write";
 import { appState, deploymentEvent, monitorEvent, type NewEvent, nextMonitorState } from "./rules";
@@ -493,7 +494,10 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
       if (task === "tls") await taskTls(new Date(), workDeadline, errors);
       if (task === "rdap") await taskRdap(new Date(), workDeadline, errors);
       if (task === "eol") await taskEol(new Date(), workDeadline, errors);
-      if (task === "node") await taskNode(new Date(), workDeadline, errors);
+      if (task === "node") {
+        await taskNode(new Date(), workDeadline, errors);
+        await taskSelfUpdate(new Date(), workDeadline, errors); // 1.2.3: self-hosted only, npm latest
+      }
       if (task === "status") await taskStatus(new Date());
       if (task === "logs") await taskLogs(new Date(), workDeadline, errors);
       if (task === "pageviews") await taskPageViews(new Date(), workDeadline, errors);

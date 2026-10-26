@@ -14,7 +14,7 @@ import { SyncButton } from "./sync-dialog";
 export type PanelAccount = {
   id: string; label: string; credentialKind: string; scopeNote: string | null; hint: AccessHint | null;
   expires: string; lastSync: string; problem: string | null; unreadable: boolean; watchNew: boolean;
-  monitored: { repos: number; linked: number } | { on: number; total: number; fresh: number } | null;
+  monitored: { repos: number; linked: number; gaps: string | null } | { on: number; total: number; fresh: number } | null;
 };
 
 const HINT_STATE = { ok: "ok", off: "warn", faint: "off" } as const;
@@ -63,12 +63,20 @@ export function ProviderPanel({ provider, accounts, demo }: { provider: Provider
           <ul className="border-b border-line">
             {accounts.map((a) => {
               const title = `${info.name} · ${hideEmails(a.label)}`;
+              const gaps = a.monitored && "repos" in a.monitored ? a.monitored.gaps : null;
               return (
                 <li key={a.id} className="border-t border-line px-[18px] py-3 first:border-t-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <AccountChip name={a.label} />
-                    <span className="ml-auto">{a.problem ? <Status state="err">{hideEmails(a.problem)}</Status> : <Status state="ok">{demo ? "Demo account" : "Connected"}</Status>}</span>
+                    <span className="ml-auto">
+                      {a.problem ? <Status state="err">{hideEmails(a.problem)}</Status>
+                        : gaps ? <Status state="warn">Connected, some reads refused</Status>
+                        : <Status state="ok">{demo ? "Demo account" : "Connected"}</Status>}
+                    </span>
                   </div>
+                  {!a.problem && gaps && (
+                    <p className="mt-1.5 flex items-start gap-1.5 text-[12.5px] text-ink-soft"><span className="mt-px"><StateIcon state="warn" size={14} /></span><span>{gaps}</span></p>
+                  )}
                   <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 max-[520px]:grid-cols-1">
                     <Fact term="Credential">{a.credentialKind}</Fact>
                     <Fact term="Expires"><span className="text-ink-soft">{a.expires}</span></Fact>

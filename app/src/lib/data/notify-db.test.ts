@@ -66,6 +66,22 @@ describe("notifications never name a database or show an email (privacy)", () =>
     expect(text.telegram).toContain("caused by DatabasePaused · ticketer");
   });
 
+  // 1.2.3: the webhook gets the same masked text as Discord plus the alerts as data, also masked (it leaves the machine).
+  it("the webhook gets the alias and no email, in the text and in the alerts it carries", async () => {
+    use([[
+      { a: alert({ id: "x1", ruleKey: "DatabasePaused", resourceId: "db1", title: "someone@gmail.com's Project", message: "Supabase project someone@gmail.com's Project is paused." }), channels: ["webhook"] },
+    ]]);
+    const send = vi.fn().mockResolvedValue(ok);
+    expect(await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["webhook"]) } })).toEqual({ sent: 1, dropped: 0 });
+    const [kind, text, notices] = send.mock.calls[0] as [string, string, { title: string; message: string; ruleKey: string }[]];
+    expect(kind).toBe("webhook");
+    expect(text).not.toMatch(/gmail/);
+    expect(text).toContain("db-a");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].ruleKey).toBe("DatabasePaused");
+    expect(`${notices[0].title} ${notices[0].message}`).not.toMatch(/gmail/);
+  });
+
   it("still sends, without emails, when the letters can't be read", async () => {
     h.readAliasBook.mockRejectedValue(new Error("down"));
     use([[{ a: alert({ title: "supabase · me@gmail.com", message: "expires" }), channels: ["telegram"] }]]);
@@ -510,5 +526,13 @@ describe("Telegram threads (D18)", () => {
     expect(await telegramThread(A1)).toBeNull();
     expect(await telegramThread("not-an-id")).toBeNull();
     expect(await telegramThread(null)).toBeNull();
+  });
+});
+
+describe("email subject (1.2.3)", () => {
+  it("is the message's first line without Discord's markdown", async () => {
+    const { mailSubject } = await import("./notify-db");
+    expect(mailSubject("**FIRING** · critical · `orbit-blog` down\nmore")).toBe("FIRING · critical · orbit-blog down");
+    expect(mailSubject("")).toBe("Watchbell alert");
   });
 });

@@ -53,7 +53,7 @@ function CreateKeyForm({ onCreated, onCancel }: { onCreated: (k: CreatedKey) => 
           else setFormError(r.error);
         }
       } catch {
-        setFormError("Something went wrong. Try again.");
+        setFormError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

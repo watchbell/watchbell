@@ -14,7 +14,7 @@ export default async function SetupPage() {
       <div className="w-[400px] max-w-full rounded-xl border border-line bg-surface p-7">
         <BellMark className="mb-[18px]" />
         <h1 className="mb-1 text-xl">Set up Watchbell</h1>
-        <p className="mb-[18px] text-ink-soft">Create the owner account. The setup code is in the server log, printed when Watchbell started.</p>
+        <p className="mb-[18px] text-ink-soft">Create the owner account. The setup code is on the screen where you started Watchbell (watchbell start prints it) and in its log file. It is valid for 24 hours.</p>
         <SetupForm />
       </div>
     </main>

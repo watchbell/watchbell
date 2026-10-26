@@ -49,6 +49,36 @@ describe("DependenciesCard: 'Not scanned' with the reason, never a false 'None k
     expect(html).toContain("no linked repository");
   });
 
+  // 1.2.3 (owner 26 Oct): dev-only advisories are local tooling; they are counted apart and say they don't reach
+  // production, so leftovers like drizzle-kit's esbuild don't read as an open production problem.
+  const adv = (pkg: string, severity: "high" | "moderate", dev: boolean) =>
+    ({ package: pkg, installedVersion: "1.0.0", vulnId: `GHSA-${pkg}`, severity, fixedVersion: null, summary: "s", aliases: [], dev, direct: !dev, firstSeenAt: now });
+  const scanned = { scannedAt: now, lockfilePath: "package-lock.json", packageCount: 10, error: null, note: null };
+
+  it("only dev-only advisories: production reads None known, the dev ones are counted apart with no production impact", () => {
+    const html = render({ ...view(scanned), vulns: [adv("esbuild", "moderate", true), adv("drizzle-kit", "moderate", true)] });
+    expect(html).toContain("In production");
+    expect(html).toContain("None known");
+    expect(html).toContain("Development tools");
+    expect(html).toContain("Local development only, no production impact. Not alerted.");
+    expect(html).toContain("dev only, local");
+  });
+
+  it("production and dev-only advisories: each row has its own count", () => {
+    const html = render({ ...view(scanned), vulns: [adv("zod", "high", false), adv("esbuild", "moderate", true)] });
+    expect(html).not.toContain("None known");
+    const prodRow = html.split("In production</dt><dd>")[1]?.split("</dd>")[0] ?? "";
+    expect(prodRow).toContain(">1</span>");
+    expect(prodRow).not.toContain("Local development only");
+    expect(html).toContain("Local development only, no production impact.");
+  });
+
+  it("no dev-only advisories: no Development tools row", () => {
+    const html = render({ ...view(scanned), vulns: [adv("zod", "high", false)] });
+    expect(html).toContain("In production");
+    expect(html).not.toContain("Development tools");
+  });
+
   it("DevOps off: the reason, and an older scan is marked as paused", () => {
     expect(render(view(null), true)).toContain("DevOps is off");
     const html = render(view({ scannedAt: now, lockfilePath: "package-lock.json", packageCount: 10, error: null, note: null }), true);

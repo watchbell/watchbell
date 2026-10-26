@@ -31,7 +31,8 @@ export default async function SectionsPage() {
       <PageHeader
         crumbs={[{ label: "Manage" }, { label: "Sections" }]}
         title="Sections"
-        sub="The menu is grouped into sections. Hosting is there from the start; Database and DevOps appear by themselves when you connect a provider that belongs to them. Turn a section off to hide it and pause its sync, alerts and auto-actions; nothing is deleted, and turning it back on picks up where it left off."
+        sub="Turn a section off to hide it and pause its sync, alerts and auto-actions. Nothing is deleted."
+        more="The menu is grouped into sections. Hosting is there from the start; Database and DevOps appear by themselves when you connect a provider that belongs to them. Turning a section back on picks up where it left off."
       />
       <Card title="Sections" flush>
         <ul className="border-t border-line">

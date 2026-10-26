@@ -118,7 +118,7 @@ export type SetupResult =
 
 type LimitFn = (l: Limit, subject: string) => Promise<LimitDecision>;
 
-const WRONG_CODE: SetupResult = { status: "error", message: "That setup code is wrong. Copy it from the server log.", field: "code" };
+const WRONG_CODE: SetupResult = { status: "error", message: "That setup code is wrong. Copy it from where you started Watchbell, or from its log.", field: "code" };
 const EXPIRED_CODE: SetupResult = {
   status: "error",
   message: "That setup code has expired. Restart Watchbell to print a new one.",
@@ -138,7 +138,7 @@ function checkCode(stored: StoredCode | null, typedHash: string, now: Date): Set
 }
 
 function validate(input: SetupInput): SetupResult | null {
-  if (!input.code.trim()) return { status: "error", message: "Enter the setup code from the server log.", field: "code" };
+  if (!input.code.trim()) return { status: "error", message: "Enter the setup code that watchbell start printed (it is in the log too).", field: "code" };
   if (input.email.length > 320 || !z.email().safeParse(input.email).success) return { status: "error", message: "Enter a valid email address.", field: "email" };
   const problem = passwordProblem(input.password);
   if (problem) return { status: "error", message: problem, field: "password" };

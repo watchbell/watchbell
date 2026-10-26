@@ -26,7 +26,7 @@ export type Touch = { id: string; okStreak: number; lastSampleAt: Date | null; l
 export type Resolve = { id: string; pending: "resolve" | null };
 export type AlertPlan = { open: NewAlert[]; touch: Touch[]; resolve: Resolve[] };
 
-const PUSH = ["telegram", "discord"];
+const PUSH = ["telegram", "discord", "webhook", "smtp"];
 const pushes = (r: RuleConfig) => r.channels.some((c) => PUSH.includes(c));
 
 function muteReason(o: Observation, ctx: PlanContext): string | null {

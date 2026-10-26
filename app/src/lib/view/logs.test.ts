@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { resetTimeZoneForTests } from "@/lib/time";
-import { filterLines, levelBucket, readText, toWire, vercelLogsUrl, type WireLine } from "./logs";
+import { emptyLogText, filterLines, levelBucket, readText, toWire, vercelLogsUrl, type WireLine } from "./logs";
 
 const line = (o: Partial<WireLine>): WireLine => ({ id: "r", time: "19:41:07", level: "error", app: "acme-shop", text: "GET /x 500 boom", ...o });
 
@@ -70,5 +70,14 @@ describe("vercelLogsUrl", () => {
     expect(vercelLogsUrl("acme-team", "acme-shop")).toBe("https://vercel.com/acme-team/acme-shop/logs");
     expect(vercelLogsUrl(undefined, "acme-shop")).toBeNull();
     expect(vercelLogsUrl("", "acme-shop")).toBeNull();
+  });
+});
+
+describe("emptyLogText (1.2.3)", () => {
+  it("explains what Error holds when it is empty", () => {
+    expect(emptyLogText({ live: true, reading: false, level: "error" })).toContain("A wrong password or a missing page is not one");
+    expect(emptyLogText({ live: true, reading: false, level: "" })).toBe("No log lines in this window.");
+    expect(emptyLogText({ live: true, reading: true, level: "error" })).toBe("Reading the last hour…");
+    expect(emptyLogText({ live: false, reading: false, level: "error" })).toBe("No warnings or errors stored in the last 7 days.");
   });
 });

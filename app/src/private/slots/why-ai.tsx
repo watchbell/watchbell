@@ -44,7 +44,7 @@ export function WhyAi({ appId, provider, question, nowMs, agConnected = false }:
           } else setError(r.error);
         }
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };

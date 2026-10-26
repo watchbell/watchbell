@@ -2,7 +2,7 @@ import type { HomeCopy } from "./types";
 
 // English home copy: the approved mockup (mockup/site-home.html), word for word.
 export const homeEn: HomeCopy = {
-  title: "Watchbell — self-hosted ops console",
+  title: "Watchbell: watches your free-plan apps and asks before it fixes",
   description:
     "Watchbell watches your Vercel apps, databases and domains on free plans, and asks you on Telegram before it fixes anything. Free, open source, runs on your machine.",
   hero: {
@@ -50,7 +50,7 @@ export const homeEn: HomeCopy = {
   night: {
     eyebrow: "One night with Watchbell",
     title: "What actually happened.",
-    sub: "Nothing here is a mock-up of a feature we plan to build. It is what Watchbell does today, on a laptop or a small server, with your own free accounts.",
+    sub: "Everything below is what Watchbell does today, on a laptop or a small server, with your own free accounts.",
     pushed: {
       title: "You pushed a small change and went to bed.",
       text: "Vercel built it and put it live. Watchbell saw the new deployment come in.",

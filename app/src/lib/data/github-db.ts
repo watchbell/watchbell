@@ -1,11 +1,12 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { accounts, appRepos, githubRepos, type RepoRun, resources } from "@/db/schema";
+import { accounts, appRepos, githubRepos, type RepoRun, resources, settings } from "@/db/schema";
 import { credentialProblem, statusAfterTest } from "@/lib/accounts";
 import { openOrNull } from "@/lib/crypto";
 import { serverEnv } from "@/lib/env";
 import { autoLinks, packageCandidates, planRepos } from "@/lib/github/links";
+import { parseReadGaps, type ReadGaps, readGapsKey, readGapsText } from "@/lib/github/read-gaps";
 import { isUuid } from "@/lib/ids";
 import { githubUser, latestRun, listRepos, packageName } from "@/lib/providers/github";
 import type { FetchOpts } from "@/lib/providers/http";
@@ -72,11 +73,11 @@ export async function syncGithub(accountId: string | undefined, deadline: number
   if (listed.data.truncated) notes.push("Only the 300 most recently pushed repositories are listed.");
 
   // package.json names, for the app page's suggestions (Contents read).
-  let contentsDenied = false;
+  let contentsDenied = 0;
   await bounded(packageCandidates(repos), deadline, async (r) => {
     const p = await packageName(token, r.fullName, opts);
     if (p.ok) await db().update(githubRepos).set({ packageName: p.data, packageCheckedAt: new Date(), updatedAt: new Date() }).where(eq(githubRepos.id, r.id));
-    else if (p.kind === "scope") contentsDenied = true;
+    else if (p.kind === "scope") contentsDenied++;
   });
   if (contentsDenied) notes.push("Some package.json files can't be read: give the token Contents read on those repositories.");
 
@@ -95,11 +96,11 @@ export async function syncGithub(accountId: string | undefined, deadline: number
   const linked = await db().selectDistinct({ id: githubRepos.id, fullName: githubRepos.fullName, defaultBranch: githubRepos.defaultBranch }).from(appRepos)
     .innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId))
     .where(and(eq(githubRepos.accountId, account.id), isNull(githubRepos.goneAt))).limit(500);
-  let actionsDenied = false;
+  let actionsDenied = 0;
   const started = await bounded(linked, deadline, async (r) => {
     const run = await latestRun(token, r.fullName, r.defaultBranch, opts);
     if (run.ok) await saveRun(r.id, run.data);
-    else if (run.kind === "scope") actionsDenied = true;
+    else if (run.kind === "scope") actionsDenied++;
   });
   if (actionsDenied) notes.push("Some Actions runs can't be read: give the token Actions read on those repositories.");
   if (started < linked.length) notes.push(`${linked.length - started} Actions status${linked.length - started === 1 ? "" : "es"} left for the next run, time budget used.`);
@@ -107,6 +108,11 @@ export async function syncGithub(accountId: string | undefined, deadline: number
   const user = await githubUser(token, opts);
   await db().update(accounts).set({ lastSyncAt: now, status: "ok", lastError: null, updatedAt: now, ...(user.ok ? { expiresAt: user.data.expiresAt } : {}) })
     .where(eq(accounts.id, account.id));
+  // 1.2.3: what this sync couldn't read, kept for Connections. Before, the daily sync dropped these notes, so a token
+  // that lost Actions read on private repositories went unnoticed for days (seen 16–25 Oct).
+  const gaps: ReadGaps = { at: now.toISOString(), actionsDenied, contentsDenied };
+  await db().insert(settings).values({ key: readGapsKey(account.id), value: gaps })
+    .onConflictDoUpdate({ target: settings.key, set: { value: gaps, updatedAt: now } });
   return { ok: true, repos: repos.filter((r) => !r.goneAt).length, linked: linked.length, newLinks: fresh.length, notes };
 }
 
@@ -124,13 +130,21 @@ export async function githubDailyStep(deadline: number): Promise<string | null> 
   return r.ok ? null : r.error;
 }
 
-// Connections: repositories and linked apps per GitHub account.
-export async function githubCounts(): Promise<Map<string, { repos: number; linked: number }>> {
+// Connections: repositories and linked apps per GitHub account, and what the last sync couldn't read (1.2.3).
+export async function githubCounts(): Promise<Map<string, { repos: number; linked: number; gaps: string | null }>> {
   const repos = await db().select({ accountId: githubRepos.accountId, n: sql<number>`count(*)::int` }).from(githubRepos)
     .where(isNull(githubRepos.goneAt)).groupBy(githubRepos.accountId);
-  const linked = await db().select({ accountId: githubRepos.accountId, n: sql<number>`count(*)::int` }).from(appRepos)
-    .innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId)).groupBy(githubRepos.accountId);
-  return new Map(repos.map((r) => [r.accountId, { repos: r.n, linked: linked.find((l) => l.accountId === r.accountId)?.n ?? 0 }]));
+  // The oldest Actions read among the linked repositories: when Actions can't be read, that is when it last worked.
+  const linked = await db().select({ accountId: githubRepos.accountId, n: sql<number>`count(*)::int`, oldest: sql<string | null>`min(${githubRepos.actionsCheckedAt})` })
+    .from(appRepos).innerJoin(githubRepos, eq(githubRepos.id, appRepos.repoId)).groupBy(githubRepos.accountId);
+  const gapRows = repos.length
+    ? await db().select({ key: settings.key, value: settings.value }).from(settings).where(inArray(settings.key, repos.map((r) => readGapsKey(r.accountId)))).limit(repos.length)
+    : [];
+  return new Map(repos.map((r) => {
+    const l = linked.find((x) => x.accountId === r.accountId);
+    const gaps = parseReadGaps(gapRows.find((g) => g.key === readGapsKey(r.accountId))?.value);
+    return [r.accountId, { repos: r.n, linked: l?.n ?? 0, gaps: readGapsText(gaps, l?.oldest ? new Date(l.oldest) : null) }];
+  }));
 }
 
 export type RepoOption = { id: string; fullName: string; archived: boolean };

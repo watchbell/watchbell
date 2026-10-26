@@ -25,7 +25,7 @@ function RenameForm({ id, current, detected, onDone }: { id: string; current: st
           onDone();
         } else setError(r.fieldErrors?.name ?? r.error);
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

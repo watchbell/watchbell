@@ -87,7 +87,9 @@ function stop(app: string, args: string[] = []) {
   });
 }
 
-describe("stop-selfhost.mjs", () => {
+// 1.2.3: these tests start real Node processes and one waits out a 2 s stop timeout on purpose, so under a full
+// parallel run (6,000+ tests and a build) they overran vitest's 5 s default (seen 25-26 Oct). 30 s is room, not a wait.
+describe("stop-selfhost.mjs", { timeout: 30_000 }, () => {
   it("writes the stop request where app/.env says and waits until the server is gone", async () => {
     const box = await makeApp();
     const server = await startFake(box);

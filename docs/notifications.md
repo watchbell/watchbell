@@ -2,12 +2,15 @@
 
 Bahasa Indonesia: [id/notifications.md](id/notifications.md)
 
-Watchbell can send alerts to Telegram, to a Discord channel and as a daily email. All three are free and optional, and
+Watchbell can send alerts to Telegram, to a Discord channel, to a webhook of yours, by email through your own mail
+server, and as a daily email. All are free and optional, and
 they are set up on **Alerts › Notifications** (owner only; everyone else sees their status).
 
 - [What gets sent](#what-gets-sent)
 - [Telegram](#telegram)
 - [Discord](#discord)
+- [Webhook](#webhook)
+- [Email (SMTP)](#email-smtp)
 - [Daily email digest](#daily-email-digest)
 - [Language](#language)
 - [Quiet rules](#quiet-rules)
@@ -78,6 +81,59 @@ Things to know:
 
 The URL is encrypted before it is saved and never shown again. Anyone with the URL can post to that channel, so treat
 it like a password. Discord gets the same messages as Telegram, without buttons.
+
+## Webhook
+
+A JSON POST to an address of yours, for n8n, Zapier, Make or your own server.
+
+1. In your tool, create a webhook that accepts POST requests and copy its address. It must be **https** on a public
+   host, port 443: Watchbell doesn't post into private networks (an n8n at `http://192.168.x.x:5678` needs an https
+   address in front of it) and doesn't follow redirects.
+2. In Watchbell: **Alerts › Notifications › Webhook › Connect**, paste the address, and optionally a secret (16 to
+   200 characters).
+3. Press **Send test**, then tick **Webhook** on the alert rules you want (Alerts › Rules › Edit), like Discord.
+
+Each message is one request with `Content-Type: application/json`:
+
+```json
+{
+  "source": "watchbell",
+  "event": "alerts",
+  "sentAt": "2026-10-26T08:00:00.000Z",
+  "text": "FIRING · critical · MonitorDown · orbit-blog …",
+  "link": "https://your-watchbell/alerts",
+  "alerts": [
+    { "status": "firing", "rule": "MonitorDown", "severity": "critical", "title": "orbit-blog", "message": "orbit-blog is down",
+      "startedAt": "2026-10-26T07:58:00.000Z", "causedBy": null, "provider": null }
+  ]
+}
+```
+
+`status` is `firing`, `repeat` or `resolved`; a test has `"event": "test"` and no alerts. Databases are named
+db-a, db-b, like Discord, and emails never appear. With a secret, the request carries `X-Watchbell-Timestamp` (Unix
+seconds) and `X-Watchbell-Signature: sha256=<hex>`, the HMAC-SHA256 of `<timestamp>.<body>` with your secret: compute
+the same and compare before you trust the request. The address and the secret are encrypted before they are saved;
+the console shows only the host.
+
+## Email (SMTP)
+
+Each alert message by email through your own mail server, for teams that live in Office 365, Zimbra or any other mail
+service that speaks SMTP. (The [daily email digest](#daily-email-digest) is separate and goes through Resend.)
+
+1. **Alerts › Notifications › Email (SMTP) › Connect**: the server, the port, the user name and password, the address
+   the mail comes from and the one that gets the alerts.
+2. Press **Send test**, then tick **Email (SMTP)** on the alert rules you want, like Discord.
+
+- Port **587** or **2525** use STARTTLS, port **465** uses TLS from the start. Watchbell sends the password only after
+  TLS is up and checks the server's certificate; a server that doesn't offer STARTTLS on 587 is refused instead of
+  getting the password in clear. Port 25 isn't offered.
+- The server must be on the public internet, as with monitors and the webhook.
+- Office 365: `smtp.office365.com`, port 587, your address as the user name; with MFA on, use an app password, and
+  SMTP AUTH must be allowed for the mailbox.
+- The subject is the message's first line; the body is the same text as Discord, in the email digest's language, with
+  a link to Alerts. Databases are named db-a, db-b and emails never appear.
+- Everything is encrypted before it's saved. Change shows the form empty; leave the password empty to keep the saved
+  one.
 
 ## Daily email digest
 

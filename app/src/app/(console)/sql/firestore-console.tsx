@@ -38,7 +38,7 @@ export function FirestoreConsole({ targets }: { targets: FirestoreTarget[] }) {
         setCollection(r.data?.collections?.[0] ?? "");
         setError(null);
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -56,7 +56,7 @@ export function FirestoreConsole({ targets }: { targets: FirestoreTarget[] }) {
         setRun(r.data?.run ?? null);
         setError(null);
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

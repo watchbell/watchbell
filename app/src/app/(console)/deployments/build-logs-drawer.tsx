@@ -59,7 +59,7 @@ export function BuildLogsDrawer({ appId, deploymentId, title, open, onOpenChange
     let live = true;
     read(appId, deploymentId)
       .then((r) => { if (live) setState(r.ok && r.data ? { log: r.data } : { error: r.ok ? "No build log came back." : r.error }); })
-      .catch(() => { if (live) setState({ error: "Something went wrong. Try again." }); });
+      .catch(() => { if (live) setState({ error: "Watchbell didn't answer. Check that it's still running, then try again." }); });
     return () => { live = false; setState(null); };
   }, [open, appId, deploymentId, read]);
   return (

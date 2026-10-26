@@ -337,7 +337,7 @@ export const links = ops.table(
 );
 
 export const SEVERITIES = ["critical", "warning", "info"] as const;
-export const CHANNEL_KINDS = ["telegram", "discord", "email_digest"] as const;
+export const CHANNEL_KINDS = ["telegram", "discord", "webhook", "smtp", "email_digest"] as const;
 export type Severity = (typeof SEVERITIES)[number];
 export type ChannelKind = (typeof CHANNEL_KINDS)[number];
 export const severityEnum = ops.enum("alert_severity", SEVERITIES);
@@ -423,7 +423,12 @@ export const storedLogs = ops.table(
   (t) => [index("stored_logs_resource_at").on(t.resourceId, t.at.desc()), index("stored_logs_at").on(t.at.desc())],
 );
 
-export type FeedIncident = { name: string; impact: string; startedAt: string | null; url: string | null };
+// 1.2.3: the affected products/components, the feed's last update, and whether it touches something Watchbell watches
+// (all optional: rows written before 1.2.3 lack them).
+export type FeedIncident = {
+  name: string; impact: string; startedAt: string | null; url: string | null;
+  products?: string[]; updatedAt?: string | null; relevant?: boolean;
+};
 
 // Latest reading of each provider's public status feed (spec §7.6). One row per feed.
 export const providerStatus = ops.table("provider_status", {

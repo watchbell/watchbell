@@ -47,7 +47,7 @@ export function MetricsKeyDialog({ id, projectRef, alias, hasKey, open, onOpenCh
         setKey("");
         show(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

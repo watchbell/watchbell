@@ -28,7 +28,7 @@ describe("runGuarded", () => {
     const result = await runGuarded("viewer", async () => {
       throw new Error("db password is hunter2");
     }, { requireActionMember: async () => member });
-    expect(result).toEqual({ ok: false, error: "Something went wrong. Try again." });
+    expect(result).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
   });
 
   it("lets Next.js control-flow errors such as redirect() through", async () => {

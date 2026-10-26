@@ -51,6 +51,6 @@ export async function runGuarded<T>(
     const notice = isDemo() ? demoNoticeOf(e) : null;
     if (notice) return { ok: false, error: notice };
     console.error("action failed:", e instanceof Error ? e.name : "unknown");
-    return { ok: false, error: "Something went wrong. Try again." };
+    return { ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." };
   }
 }

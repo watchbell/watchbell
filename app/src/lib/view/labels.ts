@@ -149,8 +149,8 @@ export function worst(states: State[]): State {
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 // Overview → status strip, Vercel cell: "6 apps · 1 down, 1 building".
-export function vercelCell(apps: State[]): { state: State; sub: string } {
-  if (!apps.length) return { state: "unknown", sub: "No apps watched yet" };
+export function vercelCell(apps: State[]): { state: State; sub: string; empty?: boolean } {
+  if (!apps.length) return { state: "unknown", sub: "No apps watched yet", empty: true };
   const n = (s: State) => apps.filter((x) => x === s).length;
   const parts = ([["err", "down"], ["warn", "degraded"], ["build", "building"]] as const)
     .filter(([s]) => n(s) > 0).map(([s, w]) => `${n(s)} ${w}`);

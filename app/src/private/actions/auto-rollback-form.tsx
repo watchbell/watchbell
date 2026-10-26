@@ -23,7 +23,7 @@ export function AutoRollbackForm({ saved, choices }: { saved: Value; choices: nu
         else { setValue(before); toast.error(r.error); }
       } catch {
         setValue(before);
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };

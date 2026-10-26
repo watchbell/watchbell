@@ -3,7 +3,7 @@ import type { HomeCopy } from "./types";
 // Indonesian home copy: the same sections and facts as home.en.tsx. Product, page and menu names, commands and the
 // terminal output stay as in English; the Telegram buttons use the bot's own Indonesian labels (Setujui, Tolak, Batal).
 export const homeId: HomeCopy = {
-  title: "Watchbell — konsol ops yang kamu jalankan sendiri",
+  title: "Watchbell: mengawasi aplikasi gratisanmu dan bertanya sebelum memperbaiki",
   description:
     "Watchbell mengawasi aplikasi Vercel, database, dan domain kamu di paket gratis, dan bertanya dulu lewat Telegram sebelum memperbaiki apa pun. Gratis, open source, jalan di mesinmu sendiri.",
   hero: {
@@ -51,7 +51,7 @@ export const homeId: HomeCopy = {
   night: {
     eyebrow: "Satu malam bersama Watchbell",
     title: "Yang sebenarnya terjadi.",
-    sub: "Tidak ada yang di sini berupa rancangan fitur yang baru mau dibuat. Ini yang Watchbell lakukan hari ini, di laptop atau server kecil, dengan akun gratis milikmu sendiri.",
+    sub: "Semua di bawah ini adalah yang Watchbell lakukan hari ini, di laptop atau server kecil, dengan akun gratis milikmu sendiri.",
     pushed: {
       title: "Kamu push perubahan kecil, lalu tidur.",
       text: "Vercel membangunnya dan menayangkannya. Watchbell melihat deployment baru itu masuk.",

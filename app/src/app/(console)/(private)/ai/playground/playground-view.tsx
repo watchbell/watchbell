@@ -91,7 +91,7 @@ export function PlaygroundView({ models, defaultModel }: { models: ModelOption[]
           setError(r.ok ? "No answer." : r.error);
         }
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };
@@ -110,7 +110,7 @@ export function PlaygroundView({ models, defaultModel }: { models: ModelOption[]
           setError(r.ok ? PG.notTaken : r.error);
         }
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };

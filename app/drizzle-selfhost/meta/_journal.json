@@ -50,6 +50,13 @@
       "when": 1792827854843,
       "tag": "0006_monitor_domain_moved",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793000165206,
+      "tag": "0007_webhook_channel",
+      "breakpoints": true
     }
   ]
 }

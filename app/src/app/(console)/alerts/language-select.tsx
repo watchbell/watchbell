@@ -24,7 +24,7 @@ export function LanguageSelect({ channel, label, saved }: { channel: NotifyChann
         }
       } catch {
         setValue(prev);
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

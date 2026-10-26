@@ -97,7 +97,7 @@ export function buildDigest(d: DigestInput, lang: NotifyLang = "en"): { subject:
     h3(tx.resolvedHead), list(resolved, tx.noResolved),
     ...(appLines.length ? [h3(tx.appsHead), list(appLines, "")] : []),
     ...(providers.length ? [h3(tx.providersHead), list(providers, "")] : []),
-    `<p style="margin:18px 0 0"><a href="${esc(url).replace(/"/g, "&quot;")}" style="color:#1f45c9">${esc(tx.open)}</a></p>`,
+    `<p style="margin:18px 0 0"><a href="${esc(url).replace(/"/g, "&quot;")}" style="color:#2f4372">${esc(tx.open)}</a></p>`,
     `</div>`,
   ].join("");
   // Privacy: the caller already names databases by alias (digestData); no address leaves in any form.

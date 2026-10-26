@@ -22,7 +22,7 @@ export function AutoRunForm({ saved, rows }: { saved: AutoRun; rows: Row[] }) {
         else { setValue((v) => ({ ...v, [kind]: !next })); toast.error(r.error); }
       } catch {
         setValue((v) => ({ ...v, [kind]: !next }));
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };

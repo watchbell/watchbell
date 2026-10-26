@@ -263,6 +263,7 @@ describe("first run and the settings file", () => {
     assert.equal(opts.env.WATCHBELL_MODE, "selfhost");
     assert.equal(opts.env.WATCHBELL_DATA_DIR, h.dataDir);
     assert.equal(opts.env.WATCHBELL_MIGRATIONS_DIR, path.join(h.pkgRoot, "server", "drizzle-selfhost"));
+    assert.equal(opts.env.WATCHBELL_VERSION, "9.9.9", "1.2.3: the server shows its own version and compares it with npm's latest");
     assert.equal(opts.env.HOSTNAME, "127.0.0.1");
     assert.equal(opts.env.PORT, "3200", "WATCHBELL_PORT wins over the file");
     assert.equal(opts.env.SITE_URL, "http://localhost:3200", "the address the CLI wrote follows the port");

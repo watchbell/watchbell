@@ -1,6 +1,6 @@
 {
   "name": "watchbell",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "private": true,
   "scripts": {
     "dev": "cross-env NEXT_TELEMETRY_DISABLED=1 next dev --port 3100",
@@ -61,5 +61,10 @@
   },
   "engines": {
     "node": "24.x"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
   }
 }

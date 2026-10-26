@@ -18,9 +18,9 @@ const num = (n: number | null) => (n ?? 0).toLocaleString("en-US");
 export const RULES: Record<RuleKey, RuleDef> = {
   MonitorDown: { key: "MonitorDown", severity: "critical", threshold: 3, bounds: [1, 10], source: "own", needs: null, sampled: true, condition: (n) => `${num(n)} failed checks in a row` },
   CollectorStale: { key: "CollectorStale", severity: "critical", threshold: 5, bounds: [3, 60], source: "own", needs: null, sampled: false, condition: (n) => `No collector run for ${num(n)} min` },
-  HighLatency: { key: "HighLatency", severity: "warning", threshold: 1500, bounds: [100, 30_000], source: "own", needs: null, sampled: true, condition: (n) => `p95 > ${num(n)} ms for 10 min` },
-  DeploymentFailed: { key: "DeploymentFailed", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "Production deployment state = ERROR" },
-  DatabasePaused: { key: "DatabasePaused", severity: "warning", threshold: null, bounds: null, source: "api", needs: "databases", sampled: false, condition: () => "Supabase status = INACTIVE" },
+  HighLatency: { key: "HighLatency", severity: "warning", threshold: 1500, bounds: [100, 30_000], source: "own", needs: null, sampled: true, condition: (n) => `Slowest 5% of checks over ${num(n)} ms for 10 min` },
+  DeploymentFailed: { key: "DeploymentFailed", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "A production deploy fails" },
+  DatabasePaused: { key: "DatabasePaused", severity: "warning", threshold: null, bounds: null, source: "api", needs: "databases", sampled: false, condition: () => "Supabase pauses the project" },
   CertExpiringSoon: { key: "CertExpiringSoon", severity: "warning", threshold: 14, bounds: [1, 90], source: "own", needs: "domains", sampled: false, condition: (n) => `TLS certificate expires in < ${num(n)} days` },
   DomainExpiringSoon: { key: "DomainExpiringSoon", severity: "warning", threshold: 30, bounds: [1, 180], source: "api", needs: "domains", sampled: false, condition: (n) => `Domain expires in < ${num(n)} days` },
   StorageAlmostFull: { key: "StorageAlmostFull", severity: "warning", threshold: 80, bounds: [10, 100], source: "api", needs: "databases", sampled: false, condition: (n) => `Database size > ${num(n)}% of free limit` },
@@ -52,7 +52,7 @@ export const isRuleKey = (v: unknown): v is RuleKey => typeof v === "string" && 
 export type RuleConfig = { key: RuleKey; severity: Severity; threshold: number | null; enabled: boolean; channels: ChannelKind[] };
 
 const SEVERITIES: Severity[] = ["critical", "warning", "info"];
-const CHANNELS: ChannelKind[] = ["telegram", "discord", "email_digest"];
+const CHANNELS: ChannelKind[] = ["telegram", "discord", "webhook", "smtp", "email_digest"];
 
 // Rules → Edit. Input may come from a crafted request, so nothing is assumed.
 export function parseRuleForm(
@@ -74,3 +74,27 @@ export function parseRuleForm(
   if (Object.keys(errors).length || !severity) return { ok: false, fieldErrors: errors };
   return { ok: true, value: { severity, threshold, channels: [...new Set(list as ChannelKind[])], enabled: f.enabled === true } };
 }
+
+// 1.2.3 (UI audit K9): the name people read first. The key stays the rule's identity (API, Telegram's last line, the
+// docs) and shows small after the name. Unknown keys (an old row) fall back to the key itself.
+export const RULE_NAMES: Record<RuleKey, string> = {
+  MonitorDown: "Site down",
+  CollectorStale: "Checks stopped",
+  HighLatency: "Slow responses",
+  DeploymentFailed: "Deploy failed",
+  DatabasePaused: "Database paused",
+  CertExpiringSoon: "Certificate expiring",
+  DomainExpiringSoon: "Domain expiring",
+  StorageAlmostFull: "Database almost full",
+  NeonComputeHigh: "Neon hours running out",
+  FirestoreQuotaHigh: "Firestore reads running out",
+  AutoPauseRisk: "Supabase may pause",
+  DnsProxiedToVercel: "Cloudflare proxy in front of Vercel",
+  ComputeHigh: "Supabase under load",
+  DbQuotaHigh: "Free quota running out",
+  CredentialExpiring: "Token expiring",
+  VulnerableDependency: "Vulnerable package",
+  FrameworkVulnerable: "Next.js needs a security update",
+  MonitorDomainMoved: "App moved to a new domain",
+};
+export const ruleName = (key: string): string => (isRuleKey(key) ? RULE_NAMES[key] : key);

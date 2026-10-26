@@ -17,7 +17,7 @@ export default function GlobalNotFound() {
       <main className="handoff" id="main">
         <div className="wrap">
           <span className="eyebrow">404</span>
-          <h1>This page isn&apos;t here.</h1>
+          <h1>Nothing rings here.</h1>
           <p>
             Try the <Link href="/">home page</Link> or the <Link href="/docs">documentation</Link>.{" "}
             <span lang="id">

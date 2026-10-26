@@ -15,7 +15,7 @@ export function ErrorView({ digest, retry, withSignOut = false, note, notice }: 
     <Card>
       <EmptyState
         icon={IconAlertTriangle}
-        title={notice ? "Try again soon" : "Something went wrong"}
+        title={notice ? "Try again soon" : "This page didn't load"}
         action={
           <div className="flex flex-wrap justify-center gap-2">
             <Button variant="primary" onClick={() => retry()}>Try again</Button>
@@ -23,7 +23,7 @@ export function ErrorView({ digest, retry, withSignOut = false, note, notice }: 
           </div>
         }
       >
-        {notice ?? "The console couldn't load this page. The database or Supabase may be unreachable, or a setting is missing."}
+        {notice ?? "Watchbell couldn't read its database, or a setting is missing. It keeps retrying on its own; the server log has the details (reference below)."}
         {note && <p className="mt-2 text-xs text-ink-soft" role="status">{note}</p>}
         {digest && !notice && <p className="mt-2 font-mono text-xs text-ink-faint">Reference {digest}</p>}
       </EmptyState>

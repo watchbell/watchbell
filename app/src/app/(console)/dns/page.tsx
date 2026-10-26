@@ -68,7 +68,8 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
         crumbs={[{ label: "Hosting" }, { label: "DNS records" }]}
         badge={<ResourceBadge kind="dns" />}
         title={z.name}
-        sub="Cloudflare zone, read every hour. The owner can switch a record between proxied and DNS only, or edit an A, AAAA, CNAME or TXT record, after a review that shows the old and new value. New records are added only through a request the owner approves (Add record); the console never deletes records."
+        sub="Your Cloudflare zones, read every hour. Watchbell never deletes a record."
+        more="Owners can switch a record between proxied and DNS only, or edit an A, AAAA, CNAME or TXT record, after a review that shows the old and new value. New records are added only through a request an owner approves (Add record)."
         actions={<>{options.length > 1 && <ZonePicker zones={options} current={z.id} />}<AccountChip name={z.accountLabel} />{owner && <CreateButton type="dns_record" target={z.id} targetName={z.name} label="Add record" />}</>}
       />
       {/* Stage 6 create requests: the DNS records waiting for the owner's approval. */}

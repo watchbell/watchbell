@@ -100,9 +100,9 @@ describe("editRule (Owner only)", () => {
 
   it("saves, audits with the new condition and refreshes", async () => {
     const r = await editRule("HighLatency", form);
-    expect(r).toEqual({ ok: true, message: "HighLatency: p95 > 2,000 ms for 10 min." });
+    expect(r).toEqual({ ok: true, message: "HighLatency: Slowest 5% of checks over 2,000 ms for 10 min." });
     expect(h.saveRule).toHaveBeenCalledWith("HighLatency", { severity: "critical", threshold: 2000, channels: ["telegram"], enabled: true });
-    expect(h.recordAction).toHaveBeenCalledWith({ kind: "ok", message: "Rule HighLatency saved", detail: "p95 > 2,000 ms for 10 min", resourceId: null, actorUserId: "user-1" });
+    expect(h.recordAction).toHaveBeenCalledWith({ kind: "ok", message: "Rule HighLatency saved", detail: "Slowest 5% of checks over 2,000 ms for 10 min", resourceId: null, actorUserId: "user-1" });
     expect(h.refresh).toHaveBeenCalledOnce();
   });
 

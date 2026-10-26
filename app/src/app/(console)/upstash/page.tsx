@@ -19,7 +19,7 @@ export default async function UpstashPage() {
       <PageHeader
         crumbs={[{ label: "Database" }, { label: "Upstash Redis" }]}
         title="Upstash Redis"
-        sub="Region, commands and bandwidth this month and data size from the Upstash Developer API, read hourly with a read-only key. The console never connects to Redis itself."
+        sub="Region, commands and bandwidth this month and data size from the Upstash Developer API, read hourly with a read-only key. Watchbell never connects to Redis itself."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}
       />
       {views.some((v) => v.stale) && (

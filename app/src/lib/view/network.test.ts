@@ -69,8 +69,8 @@ describe("dnsCell, vercelCell, ttlText, zoneStatusLabel", () => {
 
 describe("cloudflareCell (Overview status strip)", () => {
   it("counts only domains in a watched zone and takes the worst state", () => {
-    expect(cloudflareCell([])).toEqual({ state: "unknown", sub: "No domains in a watched zone yet" });
-    expect(cloudflareCell([{ state: "err", zoneName: null }])).toEqual({ state: "unknown", sub: "No domains in a watched zone yet" });
+    expect(cloudflareCell([])).toEqual({ state: "unknown", sub: "No domains in a watched zone yet", empty: true });
+    expect(cloudflareCell([{ state: "err", zoneName: null }])).toEqual({ state: "unknown", sub: "No domains in a watched zone yet", empty: true });
     expect(cloudflareCell([{ state: "ok", zoneName: "a.id" }, { state: "warn", zoneName: "a.id" }])).toEqual({ state: "warn", sub: "2 domains · 1 needs attention" });
   });
   it("never shows a domain nobody has read as ok", () => {

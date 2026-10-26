@@ -24,7 +24,7 @@ export function ExportButton({ params }: { params: SearchParams }) {
       URL.revokeObjectURL(url);
       toast.success(r.message ?? "Exported.");
     } catch {
-      toast.error("Something went wrong. Try again.");
+      toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
     }
   });
   return <Button onClick={run} disabled={pending}><IconDownload size={16} aria-hidden />{pending ? "Exporting..." : "Export CSV"}</Button>;

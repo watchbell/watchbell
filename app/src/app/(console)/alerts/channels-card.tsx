@@ -13,6 +13,8 @@ import { TelegramApprovals } from "./telegram-approvals";
 const ROWS: { kind: ChannelKind; label: string; help: string }[] = [
   { kind: "telegram", label: "Telegram bot", help: "Free. One message per collector run, listing every alert that opened, repeated (every 6 h) or resolved." },
   { kind: "discord", label: "Discord webhook", help: "Free. Same messages as Telegram." },
+  { kind: "smtp", label: "Email (SMTP)", help: "Each alert message by email through your own mail server (Office 365, Zimbra, any SMTP with TLS)." },
+  { kind: "webhook", label: "Webhook", help: "A JSON POST to your own address (n8n, Zapier, your server) with the same alerts, signed when you set a secret." },
   { kind: "email_digest", label: "Daily email digest", help: "Sent through Resend at 07:00 {zone}: what fired, what resolved, uptime and stored errors of the last 24 h. Free plan: 100 emails a day, we send 1." },
 ];
 
@@ -33,7 +35,8 @@ function status(v: ChannelView, now: Date): { state: State; text: string; shot: 
 // server (R7). The quiet rules are built in and say why a message may not arrive.
 // `approvals`: the Telegram approval buttons exist (Stage 9 slice 7, only with the private feature's handler).
 const DEFAULT_LANGS: NotifyLangs = { telegram: "en", discord: "en", email: "en" };
-const LANG_CHANNEL: Record<ChannelView["kind"], NotifyChannel> = { telegram: "telegram", discord: "discord", email_digest: "email" };
+// The webhook carries JSON for programs, so it has no language of its own (English text, like the field names).
+const LANG_CHANNEL: Record<Exclude<ChannelView["kind"], "webhook">, NotifyChannel> = { telegram: "telegram", discord: "discord", smtp: "email", email_digest: "email" };
 const LANG_LABEL = { en: "English", id: "Bahasa Indonesia" };
 
 export function ChannelsCard({ views, owner, now, approvals = false, langs = DEFAULT_LANGS }: { views: ChannelView[]; owner: boolean; now: Date; approvals?: boolean; langs?: NotifyLangs }) {
@@ -51,7 +54,7 @@ export function ChannelsCard({ views, owner, now, approvals = false, langs = DEF
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Status state={s.state}><Masked kind="text" real={s.text} masked={s.shot} /></Status>
-                {owner ? <LanguageSelect channel={LANG_CHANNEL[v.kind]} label={r.label} saved={langs[LANG_CHANNEL[v.kind]]} /> : <span className="text-[12.5px] text-ink-soft">{LANG_LABEL[langs[LANG_CHANNEL[v.kind]]]}</span>}
+                {v.kind !== "webhook" && (owner ? <LanguageSelect channel={LANG_CHANNEL[v.kind]} label={r.label} saved={langs[LANG_CHANNEL[v.kind]]} /> : <span className="text-[12.5px] text-ink-soft">{LANG_LABEL[langs[LANG_CHANNEL[v.kind]]]}</span>)}
                 {owner && <ChannelControls kind={v.kind} connected={v.connected} enabled={v.enabled} envMissing={v.envMissing} />}
                 {v.lastError && <span className="basis-full text-[12.5px] text-err">The last send failed: <Masked kind="text" real={v.lastError} /></span>}
                 {owner && approvals && v.kind === "telegram" && v.connected && v.envMissing === null && <TelegramApprovals />}

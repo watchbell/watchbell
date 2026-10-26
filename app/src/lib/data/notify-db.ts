@@ -11,6 +11,8 @@ import { activeAlertFilter, pausedSections } from "./sections-db";
 import { listProviderStatus } from "@/lib/data/provider-status-db";
 import { serverEnv } from "@/lib/env";
 import { sendDiscord } from "@/lib/notify/discord";
+import { sendWebhook, webhookPayload } from "@/lib/notify/webhook";
+import { sendSmtp } from "@/lib/notify/smtp";
 import { buildDigest, type DigestContent, type DigestInput, digestDue, type DigestState, stepDigest } from "@/lib/notify/digest";
 import { notifyEnv } from "@/lib/notify/env";
 import { type NotifyLang, readNotifyLang, readNotifyLangs } from "@/lib/notify/lang";
@@ -27,8 +29,12 @@ const MIN_LEFT_MS = 6_000;
 const HOUR = 3_600_000;
 const DIGEST_KEY = "digest.lastSentDay";
 const DIGEST_STATE_KEY = "digest.state";
-type Push = "telegram" | "discord";
-export type Sender = (kind: Push, text: string) => Promise<SendResult>;
+type Push = "telegram" | "discord" | "webhook" | "smtp";
+// `notices` (1.2.3): the alerts behind the text, for the webhook's JSON; the chat channels only use the text.
+export type Sender = (kind: Push, text: string, notices?: Notice[]) => Promise<SendResult>;
+
+// 1.2.3: an email's subject is the message's first line without Discord's markdown.
+export const mailSubject = (text: string): string => (text.split("\n")[0] ?? "").replace(/[*_`~]/g, "").slice(0, 150) || "Watchbell alert";
 
 export async function readChannel<K extends ChannelKind>(kind: K): Promise<{ row: typeof channels.$inferSelect; config: ChannelConfig[K] } | null> {
   const [row] = await db().select().from(channels).where(eq(channels.kind, kind)).limit(1);
@@ -55,11 +61,17 @@ export async function setChannelEnabled(kind: ChannelKind, enabled: boolean): Pr
 
 async function defaultSender(): Promise<{ send: Sender; configured: Set<Push> }> {
   const env = notifyEnv();
-  const [tg, dc] = await Promise.all([readChannel("telegram"), readChannel("discord")]);
+  const [tg, dc, wh, sm] = await Promise.all([readChannel("telegram"), readChannel("discord"), readChannel("webhook"), readChannel("smtp")]);
   const configured = new Set<Push>();
   if (env.telegramToken && tg?.row.enabled && tg.config?.chatId) configured.add("telegram");
   if (dc?.row.enabled && dc.config?.url) configured.add("discord");
-  const send: Sender = (kind, text) => kind === "telegram" ? sendTelegram(env.telegramToken!, tg!.config.chatId, text) : sendDiscord(dc!.config.url, text);
+  if (wh?.row.enabled && wh.config?.url) configured.add("webhook");
+  if (sm?.row.enabled && sm.config?.host) configured.add("smtp");
+  const link = `${serverEnv().SITE_URL.replace(/\/+$/, "")}/alerts`;
+  const send: Sender = (kind, text, notices) => kind === "telegram" ? sendTelegram(env.telegramToken!, tg!.config.chatId, text)
+    : kind === "webhook" ? sendWebhook(wh!.config, webhookPayload(text, notices ?? [], new Date(), link))
+    : kind === "smtp" ? sendSmtp(sm!.config, mailSubject(text), `${text}\n\n${link}`)
+    : sendDiscord(dc!.config.url, text);
   return { send, configured };
 }
 
@@ -157,18 +169,18 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
   // channel is composed in its own language, from this one read.
   const [book, langs] = await Promise.all([lettersOrEmpty(), readNotifyLangs()]);
   const accepted = new Set<string>();
-  for (const kind of ["telegram", "discord"] as Push[]) {
+  for (const kind of ["telegram", "discord", "webhook", "smtp"] as Push[]) {
     if (!configured.has(kind)) continue;
     const mine = rows.filter((r) => r.channels.includes(kind) && !quiet.has(r.a.id));
     if (!mine.length) continue;
-    // Privacy: no emails in any notice, whatever its stored text says. Discord names databases by alias; Telegram is
-    // the owner's own chat, so it keeps the real names (Watchbell 1.2.2, D18).
+    // Privacy: no emails in any notice, whatever its stored text says. Discord, the webhook and email name databases by alias;
+    // Telegram is the owner's own chat, so it keeps the real names (Watchbell 1.2.2, D18).
     const notices: Notice[] = mine.map(({ a }) => {
       const shown = kind === "telegram" ? a : hideAlert(a, book);
       return { kind: a.pending!, ruleKey: a.ruleKey, severity: a.severity, title: shown.title, message: shown.message, startedAt: a.startedAt, causedBy: shown.causedBy, provider: a.providerIncident };
     });
-    const msg = composeMessage(notices, now, serverEnv().SITE_URL, langs[kind]);
-    const r = await send(kind, hideEmails(kind === "telegram" ? msg.telegram : msg.discord));
+    const msg = composeMessage(notices, now, serverEnv().SITE_URL, kind === "webhook" ? "en" : kind === "smtp" ? langs.email : langs[kind]);
+    const r = await send(kind, hideEmails(kind === "telegram" ? msg.telegram : msg.discord), kind === "webhook" ? notices.map((n) => ({ ...n, title: hideEmails(n.title), message: hideEmails(n.message) })) : undefined);
     await db().update(channels).set(r.ok ? { lastSentAt: now, lastError: null } : { lastError: r.error }).where(eq(channels.kind, kind));
     if (r.ok) mine.forEach(({ a }) => accepted.add(a.id));
     // D18: the message that opened an alert on Telegram, so its auto-actions answer it there (a reply, one thread).
@@ -301,9 +313,9 @@ export async function sendTest(kind: ChannelKind, now: Date, deps: { sender?: { 
   if (kind === "email_digest") return sendDigest(now, `test-${now.getTime()}`);
   const { send, configured } = deps.sender ?? (await defaultSender());
   if (!configured.has(kind)) {
-    return { ok: false, kind: "config", error: kind === "telegram" ? `Telegram isn't connected, or ${ENV_COPY.notSet("TELEGRAM_BOT_TOKEN")}` : "Discord isn't connected." };
+    return { ok: false, kind: "config", error: kind === "telegram" ? `Telegram isn't connected, or ${ENV_COPY.notSet("TELEGRAM_BOT_TOKEN")}` : kind === "webhook" ? "The webhook isn't connected." : kind === "smtp" ? "Email (SMTP) isn't connected." : "Discord isn't connected." };
   }
-  const lang = await readNotifyLang(kind);
+  const lang = kind === "webhook" ? "en" : await readNotifyLang(kind === "smtp" ? "email" : kind);
   const msg = composeMessage([{ kind: "open", ruleKey: "Test", severity: "info", ...TEST_NOTICE[lang], startedAt: now, causedBy: null, provider: null }], now, serverEnv().SITE_URL, lang);
   const r = await send(kind, kind === "telegram" ? msg.telegram : msg.discord);
   await recordResult(kind, r, now);
@@ -318,12 +330,14 @@ export async function channelViews(): Promise<ChannelView[]> {
   const missing: Record<ChannelKind, string | null> = {
     telegram: env.telegramToken ? null : ENV_COPY.notSet("TELEGRAM_BOT_TOKEN"),
     discord: null,
+    webhook: null,
+    smtp: null,
     email_digest: env.resendKey && env.digestFrom ? null : ENV_COPY.notSet("RESEND_API_KEY or DIGEST_FROM"),
   };
-  const [tg, dc, em] = await Promise.all([readChannel("telegram"), readChannel("discord"), readChannel("email_digest")]);
+  const [tg, dc, wh, sm, em] = await Promise.all([readChannel("telegram"), readChannel("discord"), readChannel("webhook"), readChannel("smtp"), readChannel("email_digest")]);
   const view = <K extends ChannelKind>(kind: K, ch: { row: typeof channels.$inferSelect; config: ChannelConfig[K] } | null): ChannelView => ({
     kind, connected: ch !== null, enabled: ch?.row.enabled ?? false, hint: ch ? maskHint(kind, ch.config) : null,
     lastSentAt: ch?.row.lastSentAt ?? null, lastError: ch?.row.lastError ?? null, envMissing: missing[kind],
   });
-  return [view("telegram", tg), view("discord", dc), view("email_digest", em)];
+  return [view("telegram", tg), view("discord", dc), view("webhook", wh), view("smtp", sm), view("email_digest", em)];
 }

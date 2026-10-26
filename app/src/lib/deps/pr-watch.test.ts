@@ -23,6 +23,11 @@ describe("watchStep", () => {
     expect(watchStep(w({ checks: "failure" }))).toEqual({ kind: "stop", stage: "failed", reason: "CI failed" });
     expect(watchStep(w({ pr: { state: "open", merged: false, mergeable: false, headSha: SHA } }))).toMatchObject({ kind: "stop", reason: "conflicts with the main branch" });
     expect(watchStep(w({ preview: { state: "error", readyAt: null } }))).toMatchObject({ kind: "stop", reason: "Vercel preview failed" });
+    // 1.2.3: a project whose Ignored Build Step skips previews cancels the preview; say so instead of "failed".
+    expect(watchStep(w({ preview: { state: "canceled", readyAt: null } }))).toEqual({
+      kind: "stop", stage: "failed",
+      reason: "Vercel canceled the preview (an Ignored Build Step that skips previews does this), so the update wasn't smoke-tested; check it and merge by hand",
+    });
     expect(watchStep(w({ smoke: { mode: "http", result: "fail", reason: "/ answered 500" } }))).toEqual({ kind: "stop", stage: "failed", reason: "preview smoke test failed: / answered 500" });
   });
   // Fix round 1 (review minor 3): GitHub retargets a PR when its base branch is deleted; the watcher never merges then.

@@ -218,7 +218,7 @@ describe("status strip", () => {
     expect(vercelCell(["ok"])).toEqual({ state: "ok", sub: "1 app" });
   });
   it("says so when nothing is watched yet (fresh install)", () => {
-    expect(vercelCell([])).toEqual({ state: "unknown", sub: "No apps watched yet" });
+    expect(vercelCell([])).toEqual({ state: "unknown", sub: "No apps watched yet", empty: true });
   });
   it("describes the last collector run, and turns red when it stops", () => {
     expect(collectorCell({ finishedAt: new Date(now.getTime() - 12_000), durationMs: 1900, checks: 18 }, now)).toEqual({ state: "ok", sub: "12s ago · 1.9 s · 18 checks" });

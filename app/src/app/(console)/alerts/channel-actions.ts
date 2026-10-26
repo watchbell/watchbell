@@ -8,9 +8,11 @@ import { type ActionResult, type GuardMember, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import { readNotifyLangSetting, saveNotifyLangs } from "@/lib/data/settings-db";
-import { sendTest as sendTestMessage, setChannelEnabled as storeEnabled, writeChannel } from "@/lib/data/notify-db";
+import { readChannel, sendTest as sendTestMessage, setChannelEnabled as storeEnabled, writeChannel } from "@/lib/data/notify-db";
 import { readSeenChats, webhookOn } from "@/lib/data/telegram-bot-db";
 import { webhookProblem } from "@/lib/notify/discord";
+import { secretProblem, webhookUrlProblem } from "@/lib/notify/webhook";
+import { smtpProblems } from "@/lib/notify/smtp";
 import { notifyEnv } from "@/lib/notify/env";
 import { NOTIFY_CHANNELS, type NotifyChannel, parseNotifyLangs } from "@/lib/notify/lang";
 import { findChats } from "@/lib/notify/telegram";
@@ -21,7 +23,7 @@ import { limit } from "@/lib/rate-limit-db";
 // channel and never the chat id, the webhook URL or the address (R7). The secrets are sealed before they are stored.
 const deps = { requireActionMember };
 const INVALID = "Something in that request wasn't valid.";
-const NAME: Record<ChannelKind, string> = { telegram: "Telegram", discord: "Discord", email_digest: "Daily email digest" };
+const NAME: Record<ChannelKind, string> = { telegram: "Telegram", discord: "Discord", webhook: "Webhook", smtp: "Email (SMTP)", email_digest: "Daily email digest" };
 
 type Limited = typeof LIMITS.alertWrite | typeof LIMITS.notifyTest;
 
@@ -75,6 +77,46 @@ export async function saveDiscord(url: string): Promise<ActionResult> {
     await audit(member, "ok", "Discord channel saved");
     refresh();
     return { ok: true, message: "Discord saved. Send a test to check it." };
+  }, deps);
+}
+
+// 1.2.3: a generic outgoing webhook (n8n and the like). The URL and the secret are sealed like every channel config.
+export async function saveWebhook(url: string, secret: string): Promise<ActionResult> {
+  return runGuarded("owner", async (member) => {
+    const u = typeof url === "string" ? url.trim() : "";
+    const s = typeof secret === "string" ? secret.trim() : "";
+    const fieldErrors: Record<string, string> = {};
+    const urlBad = webhookUrlProblem(u);
+    if (urlBad) fieldErrors.url = urlBad;
+    const secretBad = secretProblem(s);
+    if (secretBad) fieldErrors.secret = secretBad;
+    if (Object.keys(fieldErrors).length) return { ok: false, error: "Check the highlighted fields.", fieldErrors };
+    const q = await quota(member, LIMITS.alertWrite);
+    if (q) return q;
+    await writeChannel("webhook", { url: u, secret: s });
+    await audit(member, "ok", "Webhook channel saved");
+    refresh();
+    return { ok: true, message: "Webhook saved. Send a test to check it, then turn it on for the alert rules you want." };
+  }, deps);
+}
+
+// 1.2.3: alerts by email through the owner's own mail server. The password is sealed like every channel config and
+// never comes back to the page; a Change without a new password keeps the saved one.
+export async function saveSmtp(input: { host: string; port: number; user: string; pass: string; from: string; to: string }): Promise<ActionResult> {
+  return runGuarded("owner", async (member) => {
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    const port = Number(input?.port);
+    let pass = typeof input?.pass === "string" ? input.pass : "";
+    if (!pass) pass = (await readChannel("smtp"))?.config.pass ?? "";
+    const c = { host: str(input?.host).toLowerCase(), port, user: str(input?.user), pass, from: str(input?.from), to: str(input?.to) };
+    const fieldErrors = smtpProblems(c);
+    if (Object.keys(fieldErrors).length) return { ok: false, error: "Check the highlighted fields.", fieldErrors };
+    const q = await quota(member, LIMITS.alertWrite);
+    if (q) return q;
+    await writeChannel("smtp", { ...c, port: port as 465 | 587 | 2525 });
+    await audit(member, "ok", "Email (SMTP) channel saved");
+    refresh();
+    return { ok: true, message: "Email (SMTP) saved. Send a test to check it, then turn it on for the alert rules you want." };
   }, deps);
 }
 

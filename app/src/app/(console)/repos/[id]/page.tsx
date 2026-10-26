@@ -159,7 +159,7 @@ async function FileView({ head, path, entries }: { head: RepoHead; path: string;
   const meta = onGh && outboundLinks() ? <a href={onGh} target="_blank" rel="noopener noreferrer">GitHub {ext}</a> : undefined;
   let body: ReactNode;
   if (plan.kind === "missing") body = <p className="text-ink-soft">That file isn&apos;t in the repository&apos;s tree on {head.ref}.</p>;
-  else if (plan.kind === "hidden") body = <p className="text-ink-soft">This file is {HIDDEN_TEXT[plan.reason]}. The console never reads it.</p>;
+  else if (plan.kind === "hidden") body = <p className="text-ink-soft">This file is {HIDDEN_TEXT[plan.reason]}. Watchbell never reads it.</p>;
   else if (plan.kind === "too-big") body = <p className="text-ink-soft">This file is {sizeText(plan.size)}; over {sizeText(FILE_VIEW_MAX)} it isn&apos;t shown here.</p>;
   else {
     const r = await fileOf(head, path);

@@ -24,7 +24,7 @@ export function AutoSecurityForm({ saved, rollbackOn }: { saved: Value; rollback
         else { setValue(before); toast.error(r.error); }
       } catch {
         setValue(before);
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   };

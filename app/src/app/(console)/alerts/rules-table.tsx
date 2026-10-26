@@ -3,7 +3,7 @@ import { AlertSev } from "@/components/severity";
 import { Src } from "@/components/sources";
 import { Status } from "@/components/status";
 import { type ListRow, rowClass, td } from "@/components/table";
-import { RULES, type RuleConfig } from "@/lib/alerts/catalog";
+import { RULE_NAMES, RULES, type RuleConfig } from "@/lib/alerts/catalog";
 import { ruleState } from "@/lib/view/alerts";
 import { RuleActions } from "./rule-dialog";
 
@@ -17,10 +17,10 @@ export function RulesTable({ rules, owner }: { rules: { rule: RuleConfig; firing
     return {
       key: rule.key,
       state: rule.severity,
-      text: rule.key,
+      text: `${RULE_NAMES[rule.key]} ${rule.key}`,
       row: (
         <tr className={rowClass}>
-          <td className={td}><b className="font-medium">{rule.key}</b><Src kind={def.source} /></td>
+          <td className={td}><b className="font-medium">{RULE_NAMES[rule.key]}</b> <span className="font-mono text-[11px] text-ink-faint">{rule.key}</span><Src kind={def.source} /></td>
           <td className={td}><AlertSev severity={rule.severity} /></td>
           <td className={`${td} text-ink-soft`}>{def.condition(rule.threshold)}</td>
           <td className={td}><Status state={s.state}>{s.text}</Status></td>

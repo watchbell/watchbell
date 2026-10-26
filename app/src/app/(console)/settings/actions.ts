@@ -151,7 +151,7 @@ export async function removeMember(memberId: string): Promise<ActionResult> {
       if (selfhost) await tx.delete(localUsers).where(eq(localUsers.id, target.userId));
       return { ok: true, data: { email: target.email } };
     });
-    if (!result.ok || !result.data) return { ok: false, error: result.ok ? "Something went wrong. Try again." : result.error };
+    if (!result.ok || !result.data) return { ok: false, error: result.ok ? "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." : result.error };
     const { email } = result.data;
     if (selfhost) {
       await audit(actor.userId, `Removed ${email} from the console and deleted their account`);

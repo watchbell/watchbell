@@ -120,8 +120,9 @@ baru: keduanya bertanya ke registry.npmjs.org paling banyak sekali sehari (reque
 informasi apa pun tentang Anda). Keduanya juga memberi peringatan satu baris kalau Node.js yang menjalankannya punya
 perbaikan keamanan yang belum dipasang atau sudah lewat end-of-life. Untuk itu keduanya membaca daftar rilis nodejs.org
 dan endoflife.date paling banyak dua kali sehari. Watchbell yang sedang berjalan membaca kedua daftar yang sama setiap
-12 jam untuk baris di Settings › Collector. `WATCHBELL_NO_UPDATE_CHECK=1`, di `~/.watchbell/.env` atau di environment,
-mematikan semuanya.
+12 jam untuk baris di Settings › Collector, dan sekalian bertanya ke registry.npmjs.org versi terbarunya: owner melihat
+"Watchbell X is available" di bagian atas console, dan sekali setelah update "Updated to Watchbell X" dengan link ke
+apa saja yang baru. `WATCHBELL_NO_UPDATE_CHECK=1`, di `~/.watchbell/.env` atau di environment, mematikan semuanya.
 
 Dari 1.0.x, update sekali secara manual, karena 1.0 belum punya `watchbell update`: `watchbell stop` (atau hentikan
 service yang Anda pasang), lalu `npm install -g watchbell@latest`, lalu jalankan lagi. Mulai 1.1, `watchbell update`

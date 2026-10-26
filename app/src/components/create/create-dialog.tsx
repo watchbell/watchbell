@@ -93,7 +93,7 @@ function CreateForm({ type, target, targetName, onDone }: { type: CreateType; ta
           setError({ field, text: mask("text", r.error) });
         }
       } catch {
-        setError({ field: "form", text: "Something went wrong. Try again." });
+        setError({ field: "form", text: "Watchbell didn't answer. Check that it's still running, then try again." });
       }
     });
   }
@@ -248,7 +248,7 @@ export function ConnectGoogleCreateButton({ reconnect = false }: { reconnect?: b
       cta="Continue to Google"
       onConfirm={async () => {
         const r = await startGoogleCreateConnect();
-        if (!r.ok || !r.data) return { ok: false, message: r.ok ? "Something went wrong. Try again." : r.error };
+        if (!r.ok || !r.data) return { ok: false, message: r.ok ? "Watchbell didn't answer. Check that it's still running, then try again." : r.error };
         window.location.assign(r.data.url);
         return { ok: true, message: "Opening Google…" };
       }}

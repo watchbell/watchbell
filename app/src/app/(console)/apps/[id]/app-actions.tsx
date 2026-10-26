@@ -50,7 +50,7 @@ export function AppActions({ app, owner, current, previous, rolledBack = false }
           if (r.ok) toast.success(r.message ?? "");
           else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         } finally {
           done();
         }

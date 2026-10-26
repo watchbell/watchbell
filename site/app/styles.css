@@ -1,41 +1,41 @@
-/* The public site. Colours are the console's own tokens (app/src/app/globals.css), as in the approved mockup
-   (mockup/site-home.html): light by default, dark when the system asks for it, and the header toggle wins over both. */
+/* The public site. Colours are the console's own tokens (app/src/app/globals.css), navy and yellow since 1.2.3 (matching the
+   bell mark). Light by default, dark when the system asks for it, and the header toggle wins over both. */
 :root {
-  --bg: #f4f5f7; --paper: #fbfbfc; --surface: #ffffff; --sunken: #eceef2; --hover: #f1f3f6;
-  --ink: #14171f; --ink-soft: #596170; --ink-mute: #646b78; --ink-faint: #858d9b;
+  --bg: #f6f7f9; --paper: #fbfbfc; --surface: #ffffff; --sunken: #eceef2; --hover: #f1f3f6;
+  --ink: #14171f; --ink-soft: #596170; --ink-mute: #646b78; --ink-faint: #646b78;
   --line: #e2e5ea; --line-strong: #cbd0d8;
-  --brand: #1f45c9; --brand-hover: #17359c; --brand-soft: #e9efff; --on-brand: #ffffff;
-  --ok: #17773f; --ok-soft: #e5f4ea; --warn: #8f5200; --warn-icon: #d08300; --warn-soft: #fcf1dd;
+  --brand: #14213d; --brand-hover: #22335c; --brand-soft: #e8ecf5; --on-brand: #ffffff; --yellow: #fcc419; --yellow-soft: #fff4cc;
+  --ok: #17773f; --ok-soft: #e5f4ea; --warn: #a63f06; --warn-icon: #e8590c; --warn-soft: #fdeee4;
   --err: #c0272d; --err-soft: #fcebeb;
-  --night: #0d0f12; --night-2: #15181d; --night-line: #252a32; --night-ink: #e8ebf0; --night-soft: #a3aab6; --night-faint: #727a88; --night-mute: #878f9d; --night-brand: #7c9cff; --night-ok: #52c78d; --night-err: #ff7272;
-  --tg-in: #ffffff; --tg-out: #e9efff; --tg-bg: #dfe5ee; --kb-bg: rgba(255,255,255,.6);
+  --night: #0d0f12; --night-2: #15181d; --night-line: #252a32; --night-ink: #e8ebf0; --night-soft: #a3aab6; --night-faint: #8a92a0; --night-mute: #8a92a0; --night-brand: #fcc419; --night-ok: #52c78d; --night-err: #ff7272;
+  --tg-in: #ffffff; --tg-out: #e8ecf5; --tg-bg: #dfe5ee; --kb-bg: rgba(255,255,255,.6);
   --sans: var(--font-geist-sans), "Geist", system-ui, sans-serif;
   --mono: var(--font-geist-mono), "Geist Mono", ui-monospace, monospace;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
   --bell-edge: #2f4372;
-  --bg: #0d0f12; --paper: #111317; --surface: #15181d; --sunken: #111317; --hover: #1d2128;
-  --ink: #e8ebf0; --ink-soft: #a3aab6; --ink-mute: #878f9d; --ink-faint: #727a88;
-  --line: #252a32; --line-strong: #353b45;
-  --brand: #7c9cff; --brand-hover: #9db6ff; --brand-soft: #1b2541; --on-brand: #0d0f12;
-  --ok: #52c78d; --ok-soft: #142a1f; --warn: #f0b456; --warn-icon: #f0b456; --warn-soft: #2d2414;
+  --bg: #0d0f12; --paper: #10131a; --surface: #151a24; --sunken: #10131a; --hover: #1d2433;
+  --ink: #e8ebf0; --ink-soft: #a3aab6; --ink-mute: #8a92a0; --ink-faint: #8a92a0;
+  --line: #252b38; --line-strong: #353d4d;
+  --brand: #fcc419; --brand-hover: #ffd43b; --brand-soft: #2a2410; --on-brand: #14213d; --yellow: #fcc419; --yellow-soft: #2a2410;
+  --ok: #52c78d; --ok-soft: #142a1f; --warn: #ff8a4c; --warn-icon: #ff8a4c; --warn-soft: #2e1a10;
   --err: #ff7272; --err-soft: #321b1c;
   --night: #08090b;
-  --tg-in: #1d2128; --tg-out: #1b2541; --tg-bg: #15181d; --kb-bg: #1d2128;
+  --tg-in: #1d2433; --tg-out: #2a2410; --tg-bg: #151a24; --kb-bg: #1d2433;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bell-edge: #2f4372;
-    --bg: #0d0f12; --paper: #111317; --surface: #15181d; --sunken: #111317; --hover: #1d2128;
-    --ink: #e8ebf0; --ink-soft: #a3aab6; --ink-mute: #878f9d; --ink-faint: #727a88;
-    --line: #252a32; --line-strong: #353b45;
-    --brand: #7c9cff; --brand-hover: #9db6ff; --brand-soft: #1b2541; --on-brand: #0d0f12;
-    --ok: #52c78d; --ok-soft: #142a1f; --warn: #f0b456; --warn-icon: #f0b456; --warn-soft: #2d2414;
+    --bg: #0d0f12; --paper: #10131a; --surface: #151a24; --sunken: #10131a; --hover: #1d2433;
+    --ink: #e8ebf0; --ink-soft: #a3aab6; --ink-mute: #8a92a0; --ink-faint: #8a92a0;
+    --line: #252b38; --line-strong: #353d4d;
+    --brand: #fcc419; --brand-hover: #ffd43b; --brand-soft: #2a2410; --on-brand: #14213d; --yellow: #fcc419; --yellow-soft: #2a2410;
+    --ok: #52c78d; --ok-soft: #142a1f; --warn: #ff8a4c; --warn-icon: #ff8a4c; --warn-soft: #2e1a10;
     --err: #ff7272; --err-soft: #321b1c;
     --night: #08090b;
-    --tg-in: #1d2128; --tg-out: #1b2541; --tg-bg: #15181d; --kb-bg: #1d2128;
+    --tg-in: #1d2433; --tg-out: #2a2410; --tg-bg: #151a24; --kb-bg: #1d2433;
     color-scheme: dark;
   }
 }
@@ -207,7 +207,7 @@ code, .mono { font-family: var(--mono); }
 .term .p { color: var(--night-ok); }
 .term .d { color: var(--night-mute); }
 .term .h { color: var(--night-brand); }
-.term .c { color: #fff; background: #1b2541; padding: 1px 6px; border-radius: 4px; }
+.term .c { color: #14213d; background: #fcc419; padding: 1px 6px; border-radius: 4px; }
 .copyrow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .copy { border: 1px solid var(--line-strong); background: transparent; color: var(--ink-soft); font: 12.5px/1 var(--mono); border-radius: 6px; padding: 8px 10px; cursor: pointer; text-decoration: none; }
 .copy:hover { color: var(--ink); }

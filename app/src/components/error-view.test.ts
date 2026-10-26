@@ -9,13 +9,13 @@ import RootError from "@/app/error";
 import { DEMO_BUSY, DEMO_TOO_MANY, demoNoticeError } from "@/lib/demo/notices";
 import { ErrorView } from "./error-view";
 
-const DEFAULT_TEXT = "The console couldn't load this page.";
+const DEFAULT_TEXT = "Watchbell couldn't read its database, or a setting is missing.";
 const err = (digest: string) => Object.assign(new Error("hidden in production"), { digest });
 
 describe("the error screens", () => {
   it("show the usual text and the reference for an ordinary error", () => {
     const out = renderToStaticMarkup(h(ErrorView, { digest: "1234567", retry: () => undefined }));
-    expect(out).toContain("Something went wrong");
+    expect(out).toContain("This page didn&#x27;t load");
     expect(out).toContain(DEFAULT_TEXT.replace("'", "&#x27;"));
     expect(out).toContain("Reference 1234567");
     for (const Boundary of [ConsoleError, RootError]) {

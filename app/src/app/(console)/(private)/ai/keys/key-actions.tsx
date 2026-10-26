@@ -51,7 +51,7 @@ function EditForm({ mode, k, providers, onDone }: { mode: Mode; k: KeyActionsKey
         } else if (r.fieldErrors) setErrors(r.fieldErrors);
         else setFormError(r.error);
       } catch {
-        setFormError("Something went wrong. Try again.");
+        setFormError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

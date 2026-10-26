@@ -162,7 +162,8 @@ Not needed: Registrar. Domain expiry comes from RDAP, which is public.
 - Set an expiry date.
 
 Sync lists your repositories, apps are linked to theirs, and the app page shows their GitHub Actions status and
-dependency advisories. The Repositories page browses them.
+dependency advisories. The Repositories page browses them. When GitHub refuses a read (a permission was left out or
+removed later), the account in Connections reads **Connected, some reads refused** and names the permission to add.
 
 ## GitHub (PR write)
 

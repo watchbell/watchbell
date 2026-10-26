@@ -127,7 +127,7 @@ function EditForm({ zoneId, r, mask, onDone }: { zoneId: string; r: DnsRow; mask
           toast.error(res.message);
         }
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -142,7 +142,7 @@ function EditForm({ zoneId, r, mask, onDone }: { zoneId: string; r: DnsRow; mask
           <DialogDescription className="mt-0.5 text-[13px] text-ink-soft">
             {review
               ? <>Cloudflare changes this record now. Nothing else in the zone changes, and nothing is deleted.<NowAfter rows={review.map((c) => ({ label: LABEL[c.field], before: mask("text", c.before), after: mask("text", c.after) }))} /></>
-              : "Type and name stay as they are. The console never creates or deletes records."}
+              : "Type and name stay as they are. Watchbell never creates or deletes records here."}
           </DialogDescription>
         </div>
       </div>

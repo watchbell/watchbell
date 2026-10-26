@@ -4,6 +4,8 @@ import { TimeZoneSync } from "@/components/time-zone-sync";
 import { requirePageMember } from "@/lib/auth";
 import { extensions } from "@/lib/extensions";
 import { lastCollectorRunAt } from "@/lib/collector/run";
+import { readUpdateNotice } from "@/lib/collector/self-update";
+import { UpdateBanner } from "./update-banner";
 import { openAlertCount } from "@/lib/data/alerts-db";
 import { aliasBook } from "@/lib/data/cached";
 import { sectionState } from "@/lib/data/sections-db";
@@ -21,9 +23,11 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // The db-a, db-b … letters (privacy) come from a cached read; without them every database shows "db-?", never its name.
   // Screenshot mode is a per-browser cookie (components/alias.tsx), read here so the page is masked from the first paint.
   // Watchbell 1.2: the sections that are on (lib/sections.ts); unreadable means every section, so nothing disappears.
-  const [last, alerts, book, jar, sections] = await Promise.all([
+  // 1.2.3: self-hosted, the owner sees a newer npm version or What's new after an update (null otherwise).
+  const [last, alerts, book, jar, sections, notice] = await Promise.all([
     lastCollectorRunAt().catch(() => null), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies(),
     sectionState().then((s) => s.on).catch(() => undefined),
+    member.role === "owner" ? readUpdateNotice().catch(() => null) : null,
   ]);
   const shot = jar.get(SHOT_COOKIE)?.value === "1";
   // 5c (R2): the private feature's nav and palette entries reach owners only; others never get them in the payload.
@@ -34,7 +38,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <>
       <TimeZoneSync zone={timeZone()} />
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections}>{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo() }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

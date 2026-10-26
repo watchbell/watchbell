@@ -19,7 +19,7 @@ export function GithubSyncButton({ accountId }: { accountId: string }) {
           if (r.ok) toast.success(r.message ?? "Synced.", { id });
           else toast.error(r.error, { id });
         } catch {
-          toast.error("Something went wrong. Try again.", { id });
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.", { id });
         }
       })}
     >

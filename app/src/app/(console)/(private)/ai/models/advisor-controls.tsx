@@ -23,7 +23,7 @@ export function AdvisorNotesControls({ enabled, model, models, defaultLabel }: {
       if (r.ok) toast.success(r.message ?? "Saved.");
       else { setOn(enabled); setPick(model ?? ""); toast.error(r.error); }
     } catch {
-      toast.error("Something went wrong. Try again.");
+      toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
     }
   });
 
@@ -44,7 +44,7 @@ export function AdvisorNotesControls({ enabled, model, models, defaultLabel }: {
             const r = await runAdvisorNowAction();
             if (r.ok) toast.success(r.message ?? "Done."); else toast.error(r.error);
           } catch {
-            toast.error("Something went wrong. Try again.");
+            toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
           }
         })}
       >

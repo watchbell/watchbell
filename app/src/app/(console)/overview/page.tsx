@@ -24,6 +24,7 @@ import { hideEvent, hideRec } from "@/lib/view/display-name";
 import { appStatus, canAct, collectorCell, credentialBanner, monitorStatus, problemBanners, vercelCell } from "@/lib/view/labels";
 import { cloudflareCell } from "@/lib/view/network";
 import { securityBanners } from "@/lib/view/security";
+import { overviewSummary } from "@/lib/view/overview-summary";
 import { PAGE_ROWS } from "@/lib/view/windows";
 import { appHead, appListRows } from "../apps/app-table";
 import { ActivityCard } from "./activity-card";
@@ -62,11 +63,13 @@ export default async function OverviewPage() {
     id: a.id, name: a.name, state: a.state, gone: a.gone, since: a.stateSince, monitors: a.monitors, lastDeploy: a.lastDeploy, dbPaused: a.dbPaused,
   })), now);
   const vulnerable = securityBanners(apps.map((a) => ({ id: a.id, name: a.name, gone: a.gone, security: a.security })));
+  // 1.2.3 (UI audit C2): the answer to "is everything OK?" in one sentence, from what this page shows below.
+  const summary = overviewSummary(apps.filter((a) => !a.gone).map((a) => appStatus(a).state), banners.length + dbWarnings.length + vulnerable.length + (cred ? 1 : 0));
 
   return (
     <>
       <AutoRefresh at={now.getTime()} />
-      <PageHeader crumbs={[{ label: "Home" }, { label: "Overview" }]} title="Overview" actions={act ? <RefreshButton /> : undefined} />
+      <PageHeader crumbs={[{ label: "Home" }, { label: "Overview" }]} title="Overview" sub={summary ?? undefined} actions={act ? <RefreshButton /> : undefined} />
       <StatusStrip vercel={vercelCell(appStates)} supabase={supabaseCell(supa, now)} neon={neonCell(neon, now, book)} firebase={firebaseCell(fire, now)} cloudflare={cloudflareCell(domains)} collector={isDemo() ? { state: "ok", sub: DEMO_COLLECTOR_TEXT } : collectorCell(run, now)} />
       {cred && (
         <Banner tone="danger" title={cred.title} action={member.role === "owner" ? <Link href="/connections" className={buttonClass({ size: "sm" })}>Open connections</Link> : undefined}>

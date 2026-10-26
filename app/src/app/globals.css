@@ -4,13 +4,17 @@
 
 @custom-variant dark (&:is([data-theme="dark"] *));
 
+/* 1.2.3 brand theme (owner-approved 24 Oct): navy + yellow, matching the bell mark. Light: navy primary (16:1 on
+   white), links #2f4372 (9.7:1), yellow only as an accent (active nav, highlights), never as text on white. Dark:
+   yellow primary with navy text on it (9.9:1). Warning moves to orange so it never reads as the brand's yellow. */
 :root {
-  --oc-bg: #f4f5f7; --oc-surface: #ffffff; --oc-surface-2: #f8f9fb; --oc-sunken: #eceef2; --oc-hover: #f1f3f6;
-  --oc-nav-bg: #ffffff; --oc-nav-text: #3b4250; --oc-nav-active-bg: #e9efff; --oc-nav-active-text: #1f45c9;
+  --oc-bg: #f6f7f9; --oc-surface: #ffffff; --oc-surface-2: #f8f9fb; --oc-sunken: #eceef2; --oc-hover: #f1f3f6;
+  --oc-nav-bg: #ffffff; --oc-nav-text: #3b4250; --oc-nav-active-bg: #fff4cc; --oc-nav-active-text: #14213d;
   --oc-ink: #14171f; --oc-ink-soft: #596170; --oc-ink-faint: #646b78;
   --oc-line: #e2e5ea; --oc-line-strong: #cbd0d8;
-  --oc-brand: #1f45c9; --oc-brand-hover: #17359c; --oc-brand-soft: #e9efff; --oc-on-brand: #ffffff;
-  --oc-ok: #17773f; --oc-ok-soft: #e5f4ea; --oc-warn: #8f5200; --oc-warn-icon: #d08300; --oc-warn-soft: #fcf1dd;
+  --oc-brand: #14213d; --oc-brand-hover: #22335c; --oc-brand-soft: #e8ecf5; --oc-on-brand: #ffffff;
+  --oc-link: #2f4372; --oc-yellow: #fcc419; --oc-yellow-soft: #fff4cc; --oc-yellow-ink: #5c4400;
+  --oc-ok: #17773f; --oc-ok-soft: #e5f4ea; --oc-warn: #a63f06; --oc-warn-icon: #e8590c; --oc-warn-soft: #fdeee4;
   --oc-err: #c0272d; --oc-err-soft: #fcebeb; --oc-idle: #6b7280;
   --oc-teal: #0d6b52; --oc-teal-soft: #e2f4ee; --oc-amber: #8f5200; --oc-amber-soft: #fcf1dd; --oc-gray-soft: #eceef2;
   --oc-code-bg: #0f1218; --oc-code-text: #d6dae1;
@@ -29,12 +33,13 @@
 }
 
 :root[data-theme="dark"] {
-  --oc-bg: #0d0f12; --oc-surface: #15181d; --oc-surface-2: #1a1e24; --oc-sunken: #111317; --oc-hover: #1d2128;
-  --oc-nav-bg: #111317; --oc-nav-text: #b3b9c4; --oc-nav-active-bg: #1b2541; --oc-nav-active-text: #9db6ff;
+  --oc-bg: #0d0f12; --oc-surface: #151a24; --oc-surface-2: #1a2030; --oc-sunken: #10131a; --oc-hover: #1d2433;
+  --oc-nav-bg: #10131a; --oc-nav-text: #b3b9c4; --oc-nav-active-bg: #2a2410; --oc-nav-active-text: #fcc419;
   --oc-ink: #e8ebf0; --oc-ink-soft: #a3aab6; --oc-ink-faint: #8a92a0;
-  --oc-line: #252a32; --oc-line-strong: #353b45;
-  --oc-brand: #7c9cff; --oc-brand-hover: #9db6ff; --oc-brand-soft: #1b2541; --oc-on-brand: #0d0f12;
-  --oc-ok: #52c78d; --oc-ok-soft: #142a1f; --oc-warn: #f0b456; --oc-warn-icon: #f0b456; --oc-warn-soft: #2d2414;
+  --oc-line: #252b38; --oc-line-strong: #353d4d;
+  --oc-brand: #fcc419; --oc-brand-hover: #ffd43b; --oc-brand-soft: #2a2410; --oc-on-brand: #14213d;
+  --oc-link: #93a7d6; --oc-yellow: #fcc419; --oc-yellow-soft: #2a2410; --oc-yellow-ink: #fcc419;
+  --oc-ok: #52c78d; --oc-ok-soft: #142a1f; --oc-warn: #ff8a4c; --oc-warn-icon: #ff8a4c; --oc-warn-soft: #2e1a10;
   --oc-err: #ff7272; --oc-err-soft: #321b1c; --oc-idle: #8a92a0;
   --oc-teal: #5fd0b0; --oc-teal-soft: #13282a; --oc-amber: #f0b456; --oc-amber-soft: #2d2414; --oc-gray-soft: #1d2128;
   color-scheme: dark;
@@ -62,6 +67,7 @@
   --color-line: var(--oc-line); --color-line-strong: var(--oc-line-strong);
   --color-brand: var(--oc-brand); --color-brand-hover: var(--oc-brand-hover); --color-brand-soft: var(--oc-brand-soft);
   --color-on-brand: var(--oc-on-brand);
+  --color-link: var(--oc-link); --color-yellow: var(--oc-yellow); --color-yellow-soft: var(--oc-yellow-soft); --color-yellow-ink: var(--oc-yellow-ink);
   --color-ok: var(--oc-ok); --color-ok-soft: var(--oc-ok-soft);
   --color-warn: var(--oc-warn); --color-warn-icon: var(--oc-warn-icon); --color-warn-soft: var(--oc-warn-soft);
   --color-err: var(--oc-err); --color-err-soft: var(--oc-err-soft); --color-idle: var(--oc-idle);
@@ -79,7 +85,7 @@
 @layer base {
   html, body { margin: 0; }
   body { font-size: 14px; line-height: 1.45; }
-  a { color: var(--oc-brand); text-decoration: none; }
+  a { color: var(--oc-link); text-decoration: none; }
   a:hover { text-decoration: underline; }
   h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
 }

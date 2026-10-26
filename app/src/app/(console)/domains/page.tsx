@@ -45,7 +45,7 @@ export default async function DomainsPage() {
       <PageHeader
         crumbs={[{ label: "Hosting" }, { label: "Domains" }]}
         title="Domains"
-        sub="Every domain of a watched app. DNS from Cloudflare, configuration from Vercel, domain expiry from RDAP, certificate expiry from our own TLS check."
+        sub="Every domain of a watched app. DNS from Cloudflare, configuration from Vercel, domain expiry from RDAP, certificate expiry from Watchbell's own TLS check."
       />
       {proxied.map((d) => (
         <Banner key={d.id} tone="warning" title={`${d.name} is proxied by Cloudflare`} action={act ? dnsOnlyAction(d, member.role === "owner") : undefined}>

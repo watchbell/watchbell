@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { markCollectorRun } from "@/components/live";
 import { collectorHealth, DEMO_COLLECTOR_TEXT } from "@/lib/collector/status";
 import { cn } from "@/lib/utils";
 
@@ -10,6 +11,10 @@ const DOT = { ok: "bg-ok", warn: "bg-warn-icon", err: "bg-err", idle: "bg-idle" 
 export function CollectorStatus({ initialLastRunAt, initialNow, demo = false }: { initialLastRunAt: string | null; initialNow: number; demo?: boolean }) {
   const [lastRunAt, setLastRunAt] = useState(initialLastRunAt);
   const [now, setNow] = useState(initialNow);
+  // 1.2.3: the refresh picker's Auto refreshes the page once a run newer than its data is known.
+  useEffect(() => {
+    markCollectorRun(demo || !lastRunAt ? null : Date.parse(lastRunAt));
+  }, [lastRunAt, demo]);
 
   useEffect(() => {
     if (demo) return;

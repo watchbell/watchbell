@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { parseGoogle, parseStatusIo, parseStatuspage, readFeed, safeLink } from "./status-feeds";
+import { FIREBASE_USED, incidentFacts, incidentNote, parseGoogle, parseStatusIo, parseStatuspage, readFeed, safeLink, SUPABASE_CONTROL_PLANE } from "./status-feeds";
 
 // MSW lets unmatched requests for .json through to the real network; every feed here ends in .json. This catch-all,
 // kept by resetHandlers, turns any unmatched request into a network error and records it (same as osv.test.ts).
@@ -103,6 +103,68 @@ describe("parseGoogle", () => {
   it("points a Firebase incident at the Firebase status page", () => {
     const r = parseGoogle([inc({})], now, { host: "status.firebase.google.com" });
     expect(r?.incidents[0].url).toBe("https://status.firebase.google.com/incidents/i");
+  });
+
+  // 1.2.3 (owner 24 Oct: Firebase went yellow for a Test Lab-only incident): name the product, and colour only the
+  // products Watchbell watches; the rest is grey information.
+  it("names the affected product and keeps the time of its last update", () => {
+    const r = parseGoogle([inc({ modified: "2026-10-13T10:30:00+00:00" })], now, { host: "status.firebase.google.com", used: FIREBASE_USED });
+    expect(r).toMatchObject({ state: "warn", description: "Cloud Firestore: Firestore errors" });
+    expect(r?.incidents[0]).toMatchObject({ products: ["Cloud Firestore"], updatedAt: "2026-10-13T10:30:00+00:00", relevant: true });
+  });
+  it("a Firebase product Watchbell doesn't watch is information, not a warning", () => {
+    const r = parseGoogle([inc({ affected_products: [{ title: "Firebase Test Lab" }], external_desc: "Test runs delayed" })], now, { host: "status.firebase.google.com", used: FIREBASE_USED });
+    expect(r).toMatchObject({ state: "info", indicator: "info", description: "Firebase Test Lab: Test runs delayed (not Firestore, Authentication or Hosting)" });
+    expect(r?.incidents[0].relevant).toBe(false);
+  });
+  it("keeps the 'not watched' note on a long incident text (26 Oct prod: it was cut off)", () => {
+    const long = "We are tracking a networking issue that may affect a significant part of the fleet. Devices may be unable to connect to backends that support IPv4 only (IPv6 are unaffected).";
+    const r = parseGoogle([inc({ affected_products: [{ title: "Test Lab" }], external_desc: long })], now, { host: "status.firebase.google.com", used: FIREBASE_USED });
+    expect(r?.description.endsWith("… (not Firestore, Authentication or Hosting)")).toBe(true);
+    expect(r?.description.length).toBeLessThanOrEqual(160);
+  });
+});
+
+describe("Supabase: a Management API or dashboard incident isn't a database problem (1.2.3)", () => {
+  const status = { indicator: "minor", description: "Minor Service Outage" };
+  const inc = (components: string[]) => ({ name: "Elevated errors", impact: "minor", started_at: "2026-10-26T01:00:00Z", updated_at: "2026-10-26T02:00:00Z", components: components.map((name) => ({ name })) });
+  it("control-plane only: information, says what is affected", () => {
+    const r = parseStatuspage({ status, incidents: [inc(["Management API", "Dashboard"])] }, { controlPlane: SUPABASE_CONTROL_PLANE });
+    expect(r).toMatchObject({ state: "info", description: "Management API, Dashboard: Elevated errors (projects and databases aren't affected)" });
+    expect(r?.incidents[0]).toMatchObject({ products: ["Management API", "Dashboard"], updatedAt: "2026-10-26T02:00:00Z", relevant: false });
+  });
+  it("no components listed (the real 23 Oct feed): the name decides", () => {
+    const real = { name: "Elevated Mgmt API Error Rates in Multiple Regions", impact: "minor", updated_at: "2026-10-23T10:54:49Z", components: [] };
+    const r = parseStatuspage({ status, incidents: [real] }, { controlPlane: SUPABASE_CONTROL_PLANE });
+    expect(r).toMatchObject({ state: "info", description: "Elevated Mgmt API Error Rates in Multiple Regions (projects and databases aren't affected)" });
+    expect(parseStatuspage({ status, incidents: [{ ...real, name: "Database connectivity issues in ap-southeast-1" }] }, { controlPlane: SUPABASE_CONTROL_PLANE })?.state).toBe("warn");
+  });
+  it("a database component keeps the warning and names it", () => {
+    const r = parseStatuspage({ status, incidents: [inc(["Database", "Management API"])] }, { controlPlane: SUPABASE_CONTROL_PLANE });
+    expect(r).toMatchObject({ state: "warn", description: "Database, Management API: Elevated errors" });
+    expect(r?.incidents[0].relevant).toBe(true);
+  });
+});
+
+describe("incidentFacts (1.2.3: the line under a provider's status)", () => {
+  const at = new Date("2026-10-26T12:00:00Z");
+  it("the real 25-26 Oct Firebase Test Lab incident: no repeated sentence, says it isn't watched and is stale", () => {
+    const desc = "We are tracking a networking issue that may affect a significant part of the fleet.";
+    const i = { name: desc, impact: "SERVICE_DISRUPTION", startedAt: "2026-10-22T20:00:00Z", url: null, products: ["Test Lab"], updatedAt: "2026-10-22T22:56:05+00:00", relevant: false };
+    expect(incidentFacts(i, `Test Lab: ${desc} (not Firestore, Authentication or Hosting)`, at)).toBe("not something Watchbell watches · no update for 3 days, may be stale");
+  });
+  it("names products and the incident when the status text doesn't", () => {
+    const i = { name: "Elevated errors", impact: "minor", startedAt: null, url: null, products: ["Database"], updatedAt: "2026-10-26T11:00:00Z", relevant: true };
+    expect(incidentFacts(i, "Minor incident", at)).toBe("Database · Elevated errors");
+  });
+});
+
+describe("incidentNote (1.2.3: an incident nobody has updated for a day is flagged)", () => {
+  const at = new Date("2026-10-26T12:00:00Z");
+  it("says how long since the last update once it is over 24 hours", () => {
+    expect(incidentNote({ name: "x", impact: "minor", startedAt: null, url: null, updatedAt: "2026-10-26T02:00:00Z" }, at)).toBeNull();
+    expect(incidentNote({ name: "x", impact: "minor", startedAt: null, url: null, updatedAt: "2026-10-24T09:00:00Z" }, at)).toBe("no update for 2 days, may be stale");
+    expect(incidentNote({ name: "x", impact: "minor", startedAt: "2026-10-25T08:00:00Z", url: null }, at)).toBe("no update for 1 day, may be stale");
   });
 });
 

@@ -14,6 +14,11 @@ interval-nya sendiri sudah lewat) dan job harian pukul 03:00 di [zona waktu](con
 ada yang berjalan selama mesin sedang sleep atau Watchbell sedang berhenti; job harian yang terlewat dijalankan sekali
 saat Watchbell kembali. Waktu di halaman-halaman ini dan di pesan memakai zona tersebut.
 
+Top bar menulis kapan data halaman terakhir datang ("Updated 12s ago · Auto · after each check"). Klik untuk memilih
+cara halaman diperbarui: **Auto** (bawaan, tepat setelah setiap run collector), setiap 1, 5, 15, atau 30 menit, atau
+**Off**. Pilihan disimpan di browser ini. Tab yang tersembunyi tidak diperbarui dan menyusul begitu Anda kembali; tab
+yang tidak disentuh selama 30 menit diperbarui paling sering setiap 4 menit.
+
 - [Home](#home)
 - [Hosting](#hosting)
 - [Database](#database)
@@ -50,7 +55,10 @@ tercatat di sini.
 
 **Provider status.** Feed status publik dari Vercel, Supabase, Neon, Cloudflare, Firebase, dan Google Cloud, diambil
 setiap 5 menit. Saat sebuah provider mengalami insiden, alert yang berkaitan diberi label supaya Anda tahu masalahnya
-bukan di aplikasi Anda.
+bukan di aplikasi Anda. Setiap insiden menyebut apa yang terdampak. Insiden pada sesuatu yang tidak dipantau Watchbell
+(Firebase Test Lab, dashboard atau Management API Supabase) tampil abu-abu dan tidak memunculkan apa pun; hanya
+Firestore, Authentication, dan Hosting yang mewarnai Firebase, dan hanya project dan database yang mewarnai Supabase.
+Insiden yang feed-nya tidak berubah lebih dari sehari ditandai "no update for N days, may be stale".
 
 ## Hosting
 
@@ -66,7 +74,9 @@ satunya untuk melihat:
   Dependencies men-scan Root Directory project Vercel (misalnya `apps/web/package-lock.json`), dan Scan now men-scan
   folder aplikasi itu. "None known" hanya muncul setelah scan berhasil; kalau tidak, kartunya menulis **Not scanned**
   beserta alasannya (belum ada repository yang ditautkan, DevOps mati, tidak ada lockfile atau package.json, atau scan
-  gagal).
+  gagal). Advisory yang hanya ada di alat development (paket yang tidak pernah ikut ke production, misalnya alat
+  migrasi) dihitung terpisah di baris **Development tools**, ditandai "local development only, no production impact",
+  dan tidak pernah memunculkan alert.
 - Tab Metrics, Deployments, dan Logs untuk aplikasi itu.
 - Aksi untuk operator dan owner: redeploy, roll back, check now. Menu baris di daftar Applications juga punya Redeploy
   (dengan konfirmasi yang sama) dan View logs (tab Logs aplikasi itu).

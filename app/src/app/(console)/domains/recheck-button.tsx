@@ -20,7 +20,7 @@ export function RecheckButton({ domainId, name }: { domainId: string; name: stri
         if (!r.ok) toast.error(r.error, { id });
         else toast.success(r.message ?? "", { id });
       } catch {
-        toast.error("Something went wrong. Try again.", { id });
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.", { id });
       } finally {
         busy.current = false;
       }

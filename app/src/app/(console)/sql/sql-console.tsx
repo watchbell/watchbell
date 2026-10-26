@@ -79,7 +79,7 @@ export function SqlConsole({ targets }: { targets: ConsoleTarget[] }) {
       try {
         await exec(false);
       } catch {
-        setError("Something went wrong. Try again.");
+        setError("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -153,7 +153,7 @@ export function SqlConsole({ targets }: { targets: ConsoleTarget[] }) {
           try {
             return await exec(true);
           } catch {
-            return { ok: false, message: "Something went wrong. Try again." };
+            return { ok: false, message: "Watchbell didn't answer. Check that it's still running, then try again." };
           }
         }}
       />

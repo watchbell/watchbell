@@ -99,7 +99,11 @@ export function watchStep(w: WatchInput): WatchStep {
   const late = w.now.getTime() - w.openedAt.getTime() > WATCH_TIMEOUT_MS;
   if (w.checks === "failure") return { kind: "stop", stage: "failed", reason: "CI failed" };
   if (w.pr.mergeable === false) return { kind: "stop", stage: "failed", reason: "conflicts with the main branch" };
-  if (w.preview.state === "error" || w.preview.state === "canceled") return { kind: "stop", stage: "failed", reason: "Vercel preview failed" };
+  if (w.preview.state === "error") return { kind: "stop", stage: "failed", reason: "Vercel preview failed" };
+  // 1.2.3: never a merge without a smoke-tested preview; a canceled one is usually the project skipping previews.
+  if (w.preview.state === "canceled") {
+    return { kind: "stop", stage: "failed", reason: "Vercel canceled the preview (an Ignored Build Step that skips previews does this), so the update wasn't smoke-tested; check it and merge by hand" };
+  }
   if (w.checks === "pending" || w.pr.mergeable === null) {
     return late ? { kind: "stop", stage: "timeout", reason: "CI not finished within 45 minutes" } : { kind: "wait", stage: "checks", reason: null };
   }

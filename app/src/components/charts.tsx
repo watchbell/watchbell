@@ -7,6 +7,11 @@ import type { Bar } from "@/lib/view/uptime";
 // Two optional extras (the app page's Response time chart, mockup respChart): `second`, a dashed line on the same
 // scale (p50 under p95, A6), and `ticks`, thin vertical lines with a tooltip (production deploys, A1). With either, a
 // small legend follows the chart.
+// 1.2.3 (owner 26 Oct): an error chart with nothing in it (5xx = 0) is drawn grey, not red, so a quiet app doesn't
+// look broken at a glance.
+export const sparkColor = (tone: "accent" | "err", values: (number | null)[]): string =>
+  tone === "err" ? (values.some((v) => (v ?? 0) > 0) ? "text-err" : "text-ink-faint") : "text-brand";
+
 export function Sparkline({
   values, second, ticks = [], width, height, tone = "accent", fluid = false, label,
 }: {
@@ -16,7 +21,7 @@ export function Sparkline({
   const range = sparkRange(values, second ?? []);
   const { line, area, dots } = sparkPaths(values, width, height, range);
   const median = second ? sparkPaths(second, width, height, range) : null;
-  const color = tone === "err" ? "text-err" : "text-brand";
+  const color = sparkColor(tone, values);
   const paths = (
     <>
       {ticks.map((t) => <line key={`${t.x}-${t.title}`} x1={t.x} x2={t.x} y1={0} y2={height} className="stroke-ink-faint" strokeWidth={1} vectorEffect="non-scaling-stroke"><title>{t.title}</title></line>)}

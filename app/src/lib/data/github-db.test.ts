@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { accounts, appRepos, githubRepos } from "@/db/schema";
+import { accounts, appRepos, githubRepos, settings } from "@/db/schema";
 import { seal } from "@/lib/crypto";
 import { fakeDb, payloadOf } from "@/lib/data/fake-db";
 
@@ -70,10 +70,13 @@ describe("syncGithub (B7)", () => {
     expect(payloadOf(f.writes[0].calls)).toMatchObject({ status: "error" });
   });
 
-  it("names a missing Actions permission instead of failing the sync", async () => {
-    h.current = fakeDb([[account], [], [{ ...storedRepo, packageCheckedAt: new Date("2026-10-15T00:00:00Z") }], [], [], [{ id: REPO, fullName: "acme/acme-shop", defaultBranch: "main" }]]);
+  it("names a missing Actions permission instead of failing the sync, and keeps it for Connections (1.2.3)", async () => {
+    const f = fakeDb([[account], [], [{ ...storedRepo, packageCheckedAt: new Date("2026-10-15T00:00:00Z") }], [], [], [{ id: REPO, fullName: "acme/acme-shop", defaultBranch: "main" }]]);
+    h.current = f;
     const r = await syncGithub(ACC, Date.now() + 10_000, { fetch: github({ runs: () => json({ message: "Resource not accessible" }, 403) }).fetch });
     expect(r).toMatchObject({ ok: true, notes: ["Some Actions runs can't be read: give the token Actions read on those repositories."] });
+    const kept = f.writes.find((w) => w.kind === "insert" && w.table === settings)!;
+    expect(payloadOf(kept.calls)).toMatchObject({ key: `github.readGaps.${ACC}`, value: { actionsDenied: 1, contentsDenied: 0 } });
   });
 
   it("is a clear no-op without a GitHub connection", async () => {

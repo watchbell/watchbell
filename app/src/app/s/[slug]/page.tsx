@@ -70,7 +70,7 @@ export default async function PublicStatusPage({ params }: Props) {
         </Notice>
       ))}
       <section className="min-w-0 rounded-lg border border-line bg-surface">
-        {v.monitors.length === 0 && <p className="px-[18px] py-4 text-ink-soft">Nothing is shown on this page yet.</p>}
+        {v.monitors.length === 0 && <p className="px-[18px] py-4 text-ink-soft">No services on this page yet.</p>}
         {v.monitors.map((m) => (
           <div key={m.badge} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-t border-line px-[18px] py-3 first:border-t-0">
             <b className="min-w-0 truncate font-medium">{m.name}</b>

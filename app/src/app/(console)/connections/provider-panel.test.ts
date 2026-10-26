@@ -69,4 +69,15 @@ describe("Provider drawer", () => {
   it("demo accounts read as demo accounts", () => {
     expect(render({ provider: "turso", accounts: [account()], demo: true })).toContain("Demo account");
   });
+
+  // 1.2.3: a sync that was refused some reads (seen 16–25 Oct: Actions read lost on private repositories) says so.
+  it("GitHub: shows what the last sync couldn't read, and stays quiet when it read everything", () => {
+    const gaps = "Actions can't be read on 12 repositories (last read 15 Oct): give the token Actions: Read.";
+    const warned = render({ provider: "github", accounts: [account({ monitored: { repos: 40, linked: 6, gaps } })], demo: false });
+    expect(warned).toContain("Connected, some reads refused");
+    expect(warned).toContain("be read on 12 repositories (last read 15 Oct): give the token Actions: Read.");
+    const clean = render({ provider: "github", accounts: [account({ monitored: { repos: 40, linked: 6, gaps: null } })], demo: false });
+    expect(clean).not.toContain("some reads refused");
+    expect(clean).toContain("Connected");
+  });
 });

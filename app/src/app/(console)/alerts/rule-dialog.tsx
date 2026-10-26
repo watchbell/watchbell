@@ -10,7 +10,7 @@ import { RULES, type RuleConfig } from "@/lib/alerts/catalog";
 import { SEV_OPTIONS } from "@/lib/view/alerts";
 import { editRule } from "./actions";
 
-const CHANNEL_OPTIONS = [["telegram", "Telegram"], ["discord", "Discord"], ["email_digest", "Daily email digest"]] as const;
+const CHANNEL_OPTIONS = [["telegram", "Telegram"], ["discord", "Discord"], ["webhook", "Webhook"], ["smtp", "Email (SMTP)"], ["email_digest", "Daily email digest"]] as const;
 const toForm = (r: RuleConfig) => ({
   severity: r.severity as string, threshold: r.threshold === null ? "" : r.threshold.toLocaleString("en-US"), channels: [...r.channels] as string[], enabled: r.enabled,
 });
@@ -45,7 +45,7 @@ export function RuleActions({ rule, condition }: { rule: RuleConfig; condition: 
         onSaved(r.message ?? "");
         setOpen(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

@@ -86,7 +86,8 @@ export function helpText(version) {
     "plain GET of the version number, nothing about you), and nodejs.org and endoflife.date at most twice a day whether",
     "this Node.js has a security fix waiting or is past end of life (plain GETs of their public lists; a warning is",
     "printed only then). The running Watchbell reads those two lists every 12 h as well, for its Settings › Collector",
-    "page. WATCHBELL_NO_UPDATE_CHECK=1 turns all of it off; NO_UPDATE_NOTIFIER=1 or CI turn off the commands' part.",
+    "page, and npm's latest version, for the owner's update notice in the console. WATCHBELL_NO_UPDATE_CHECK=1 turns",
+    "all of it off; NO_UPDATE_NOTIFIER=1 or CI turn off the commands' part.",
   ].join("\n");
 }
 
@@ -298,7 +299,7 @@ export function resolveContext(d) {
   // own SITE_URL names that address: localhost would not answer.
   if (siteUrl === null || (!isSet(d.env.WATCHBELL_SITE_URL) && siteUrl === `http://localhost:${filePort}`)) siteUrl = defaultSiteUrl(host, port);
   const serverDir = path.join(d.pkgRoot, "server");
-  return { home, envFile, merged, dataDir, host, port, siteUrl, serverDir, lockFile: lockFileOf(dataDir), healthUrl: healthUrlOf(host, port) };
+  return { home, envFile, merged, dataDir, host, port, siteUrl, serverDir, version: packageVersion(d.pkgRoot), lockFile: lockFileOf(dataDir), healthUrl: healthUrlOf(host, port) };
 }
 
 /** The environment of the server (and of reset-login): absolute folders, since server.js changes into its own dir. */
@@ -307,6 +308,8 @@ export function serverEnv(ctx) {
     ...selfhostEnv({ ...ctx.merged, WATCHBELL_DATA_DIR: ctx.dataDir }),
     WATCHBELL_HOME: ctx.home,
     WATCHBELL_MIGRATIONS_DIR: path.join(ctx.serverDir, "drizzle-selfhost"),
+    // 1.2.3: the console's "a newer Watchbell is available" and "What's new" compare against this.
+    ...(ctx.version && ctx.version !== "unknown" ? { WATCHBELL_VERSION: ctx.version } : {}),
     HOST: ctx.host,
     HOSTNAME: ctx.host, // what Next's standalone server.js reads
     PORT: ctx.port,

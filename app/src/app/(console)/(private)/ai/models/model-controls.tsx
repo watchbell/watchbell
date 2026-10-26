@@ -27,7 +27,7 @@ export function ModelSwitch({ providerId, modelId, publicId, enabled, disabled }
             else { setOn(!next); toast.error(r.error); }
           } catch {
             setOn(!next);
-            toast.error("Something went wrong. Try again.");
+            toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
           }
         });
       }}
@@ -47,7 +47,7 @@ export function MakeDefaultButton({ publicId }: { publicId: string }) {
           const r = await makeDefaultModel(publicId);
           if (r.ok) toast.success(r.message ?? "Saved."); else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         }
       })}
     >
@@ -66,7 +66,7 @@ export function RefreshModelsButton() {
           const r = await refreshAllModels();
           if (r.ok) toast.success(r.message ?? "Refreshed."); else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         }
       })}
     >
@@ -85,7 +85,7 @@ export function SyncNowButton() {
           const r = await syncModelsNowAction();
           if (r.ok) toast.success(r.message ?? "Synced."); else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         }
       })}
     >
@@ -106,7 +106,7 @@ export function TestModelButton({ providerId, modelId, publicId }: { providerId:
           const r = await testModelAction(providerId, modelId);
           if (r.ok) toast.success(r.message ?? "Works."); else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         }
       })}
     >
@@ -124,7 +124,7 @@ export function ScanAllButton({ providerId, name }: { providerId: string; name: 
           const r = await scanModelsAction(providerId);
           if (r.ok) toast.success(r.message ?? "Scanned."); else toast.error(r.error);
         } catch {
-          toast.error("Something went wrong. Try again.");
+          toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
         }
       })}
     >

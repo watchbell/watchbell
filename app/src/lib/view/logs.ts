@@ -36,3 +36,15 @@ export function readText(readAt: number | null, now: number): string {
 export function vercelLogsUrl(teamSlug: unknown, appName: string): string | null {
   return typeof teamSlug === "string" && teamSlug ? `https://vercel.com/${encodeURIComponent(teamSlug)}/${encodeURIComponent(appName)}/logs` : null;
 }
+
+// 1.2.3 (owner 26 Oct: a wrong password tried on purpose didn't show under Error): the empty log box says what each
+// level holds, so an empty Error list reads as "nothing broke", not as "Watchbell missed it".
+export function emptyLogText(o: { live: boolean; reading: boolean; level: string }): string {
+  if (!o.live) return "No warnings or errors stored in the last 7 days.";
+  if (o.reading) return "Reading the last hour…";
+  if (o.level === "error") {
+    return "No errors in the last hour. Error means the server failed (a 5xx or a crash). A wrong password or a missing page is not one, and a sign-in the browser sends straight to Supabase or Firebase never reaches these logs.";
+  }
+  if (o.level === "warning") return "No warnings in the last hour.";
+  return "No log lines in this window.";
+}

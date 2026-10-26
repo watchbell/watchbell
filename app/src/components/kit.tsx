@@ -129,12 +129,17 @@ export const fieldClass =
 
 export type Crumb = { label: string; href?: string };
 
+// `more` (1.2.3, UI audit K7): the subtitle is one sentence with the main point; the rest of the notes fold away under
+// "How this works", so nobody has to read a paragraph before the table.
 export function PageHeader({
-  crumbs, title, badge, sub, actions,
-}: { crumbs: Crumb[]; title: ReactNode; badge?: ReactNode; sub?: ReactNode; actions?: ReactNode }) {
+  crumbs, title, badge, sub, more, actions,
+}: { crumbs: Crumb[]; title: ReactNode; badge?: ReactNode; sub?: ReactNode; more?: ReactNode; actions?: ReactNode }) {
+  // 1.2.3 (UI audit C4): crumbs that only repeat the title ("Home / Overview" over "Overview", no link in them) say
+  // nothing the sidebar doesn't; they show once one of them leads somewhere.
+  const echo = crumbs.every((c) => !c.href) && crumbs.at(-1)?.label === title;
   return (
     <div>
-      <div className="text-[12.5px] text-ink-faint">
+      <div className={echo ? "sr-only" : "text-[12.5px] text-ink-faint"}>
         {crumbs.map((c, i) => (
           <span key={`${c.label}-${i}`}>
             {i > 0 && " / "}
@@ -146,6 +151,12 @@ export function PageHeader({
         <div>
           <h1 className="flex items-center gap-2.5 text-[22px]">{badge}{masked(title)}</h1>
           {sub && <p className="mt-1 max-w-[820px] text-ink-soft">{sub}</p>}
+          {more && (
+            <details className="mt-1 max-w-[820px] text-[13px] text-ink-soft">
+              <summary className="cursor-pointer select-none text-ink-faint hover:text-ink-soft">How this works</summary>
+              <p className="mt-1">{more}</p>
+            </details>
+          )}
         </div>
         {actions && <div className="ml-auto flex flex-wrap items-center gap-2">{actions}</div>}
       </div>

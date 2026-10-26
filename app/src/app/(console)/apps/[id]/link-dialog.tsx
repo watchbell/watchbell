@@ -29,7 +29,7 @@ export function LinkDialog({ app, options, current, suggested }: { app: { id: st
         toast.success("Link saved", { description: r.message ? mask("text", r.message) : undefined });
         setOpen(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

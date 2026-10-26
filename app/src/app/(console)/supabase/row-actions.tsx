@@ -28,7 +28,7 @@ function checkServices(id: string, projectRef: string, alias: string) {
   const t = toast.loading(`Checking ${alias}'s services…`);
   checkServicesAction(id, projectRef)
     .then((r) => (r.ok ? toast.success(`${alias}: services healthy`, { id: t, description: r.message }) : toast.error(`${alias}: services`, { id: t, description: r.error })))
-    .catch(() => toast.error("Something went wrong. Try again.", { id: t }));
+    .catch(() => toast.error("Watchbell didn't answer. Check that it's still running, then try again.", { id: t }));
 }
 
 // The toast shows our own sentence (with the alias) on success, the server's sentence on failure.
@@ -96,7 +96,7 @@ function PauseFirstDialog({ alias, account, choices }: { alias: string; account:
         toast.success("Pause started", { description: `Pausing ${pick.alias}. Restore ${alias} once ${pick.alias} shows Paused, about 2 minutes.` });
         setOpen(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -161,7 +161,7 @@ export function KeepActiveBoxes({ id, alias, keep, autoRestore, owner, sent }: {
         toast.success("Keep active saved", { description: SAVED[field](alias, on) });
       } catch {
         setValue(before);
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

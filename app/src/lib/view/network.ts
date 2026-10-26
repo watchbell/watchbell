@@ -66,9 +66,9 @@ export function zoneStatusLabel(status: string | null, paused: boolean): { state
 
 // Overview → status strip, Cloudflare cell (mockup: "1 cert expires in 12 days"): the domains that sit in a watched
 // Cloudflare zone, their worst state and how many need attention. Unknown is never shown as ok.
-export function cloudflareCell(domains: { state: State; zoneName: string | null }[]): { state: State; sub: string } {
+export function cloudflareCell(domains: { state: State; zoneName: string | null }[]): { state: State; sub: string; empty?: boolean } {
   const zoned = domains.filter((d) => d.zoneName);
-  if (!zoned.length) return { state: "unknown", sub: "No domains in a watched zone yet" };
+  if (!zoned.length) return { state: "unknown", sub: "No domains in a watched zone yet", empty: true };
   const attention = zoned.filter((d) => d.state === "warn" || d.state === "err" || d.state === "fail").length;
   const unread = zoned.filter((d) => d.state === "unknown").length;
   const parts = [`${zoned.length} domain${zoned.length === 1 ? "" : "s"}`, attention ? `${attention} need${attention === 1 ? "s" : ""} attention` : null, unread ? `${unread} not read yet` : null];

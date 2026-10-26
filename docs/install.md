@@ -115,7 +115,9 @@ packages), stop Watchbell and run the `sudo npm install -g ...` command it names
 `watchbell status` tell you when a newer version is out: they ask registry.npmjs.org at most once a day (a plain
 request for the version number, nothing about you). They also warn in one line when the Node.js they run on has a
 security fix waiting or is past end of life. For that they read nodejs.org's release list and endoflife.date at most
-twice a day. The running Watchbell reads the same two lists every 12 hours for its Settings › Collector line.
+twice a day. The running Watchbell reads the same two lists every 12 hours for its Settings › Collector line, and
+asks registry.npmjs.org for the latest version then too: the owner sees "Watchbell X is available" at the top of the
+console, and once after an update "Updated to Watchbell X" with a link to what's new.
 `WATCHBELL_NO_UPDATE_CHECK=1`, in `~/.watchbell/.env` or in the environment, turns all of it off.
 
 From 1.0.x, update once by hand, because 1.0 has no `watchbell update`: `watchbell stop` (or stop the service you set

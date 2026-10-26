@@ -145,8 +145,8 @@ function staleSub(rows: DbRow[], now: Date): string | null {
 }
 
 // Overview → status strip cells (mockup: "2 accounts · 1 paused", "ticketer is asleep · 41 of 100 compute hours used this month", "3 projects reachable").
-export function supabaseCell(rows: DbRow[], now: Date): { state: State; sub: string } {
-  if (!rows.length) return { state: "unknown", sub: "No projects watched yet" };
+export function supabaseCell(rows: DbRow[], now: Date): { state: State; sub: string; empty?: boolean } {
+  if (!rows.length) return { state: "unknown", sub: "No projects watched yet", empty: true };
   const stale = staleSub(rows, now);
   if (stale) return { state: "unknown", sub: stale };
   const paused = rows.filter((r) => r.state === "paused").length;
@@ -155,8 +155,8 @@ export function supabaseCell(rows: DbRow[], now: Date): { state: State; sub: str
   return { state: worst(rows.map((r) => r.state)), sub: parts.filter(Boolean).join(" · ") };
 }
 
-export function neonCell(rows: DbRow[], now: Date, book: AliasBook = EMPTY_BOOK): { state: State; sub: string } {
-  if (!rows.length) return { state: "unknown", sub: "No projects watched yet" };
+export function neonCell(rows: DbRow[], now: Date, book: AliasBook = EMPTY_BOOK): { state: State; sub: string; empty?: boolean } {
+  if (!rows.length) return { state: "unknown", sub: "No projects watched yet", empty: true };
   const stale = staleSub(rows, now);
   if (stale) return { state: "unknown", sub: stale };
   const blocks = neonBlocks(rows, now, book);
@@ -170,8 +170,8 @@ export function neonCell(rows: DbRow[], now: Date, book: AliasBook = EMPTY_BOOK)
   return { state: worst(rows.map((r) => r.state)), sub: `${plural(rows.length, "project")} · ${rows.filter((r) => r.state === "ok").length} active` };
 }
 
-export function firebaseCell(rows: DbRow[], now: Date): { state: State; sub: string } {
-  if (!rows.length) return { state: "unknown", sub: "No projects watched yet" };
+export function firebaseCell(rows: DbRow[], now: Date): { state: State; sub: string; empty?: boolean } {
+  if (!rows.length) return { state: "unknown", sub: "No projects watched yet", empty: true };
   const stale = staleSub(rows, now);
   if (stale) return { state: "unknown", sub: stale };
   const bad = rows.filter((r) => r.state !== "ok").length;

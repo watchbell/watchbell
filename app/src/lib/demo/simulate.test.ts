@@ -81,7 +81,7 @@ describe("runGuarded in demo (fail-closed)", () => {
       expect(await runGuarded("operator", async () => { throw wrapped; }, { requireActionMember: async () => { throw wrapped; } })).toEqual({ ok: false, error: notice });
     }
     // The same text without the notice's digest is just an error.
-    expect(await runGuarded("operator", async () => { throw new Error(DEMO_BUSY); }, deps, "local")).toEqual({ ok: false, error: "Something went wrong. Try again." });
+    expect(await runGuarded("operator", async () => { throw new Error(DEMO_BUSY); }, deps, "local")).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
   });
 
   it("changes nothing in cloud and self-host", async () => {
@@ -90,8 +90,8 @@ describe("runGuarded in demo (fail-closed)", () => {
       else delete process.env.WATCHPOST_MODE;
       expect(await runGuarded("operator", ok, deps)).toEqual({ ok: true, message: "ran" });
       expect(await runGuarded("operator", ok, deps, async () => ({ ok: false, error: "never" }))).toEqual({ ok: true, message: "ran" });
-      expect(await runGuarded("operator", async () => { throw new Error(DEMO_UNAVAILABLE); }, deps)).toEqual({ ok: false, error: "Something went wrong. Try again." });
-      expect(await runGuarded("operator", async () => { throw demoNoticeError(DEMO_BUSY); }, deps)).toEqual({ ok: false, error: "Something went wrong. Try again." });
+      expect(await runGuarded("operator", async () => { throw new Error(DEMO_UNAVAILABLE); }, deps)).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
+      expect(await runGuarded("operator", async () => { throw demoNoticeError(DEMO_BUSY); }, deps)).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
     }
   });
 });

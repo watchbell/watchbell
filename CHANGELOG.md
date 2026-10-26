@@ -2,6 +2,78 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.3
+
+### Security fixes
+
+- `npm audit` reports nothing, development tools included: the esbuild inside drizzle-kit's loader (GHSA-67mh-4wv8-2f99,
+  moderate, development server only) is held at 0.25 by an override. Migrations generate as before.
+
+### Console
+
+- A navy and yellow theme that matches the bell mark. Light: navy buttons and charts, the active menu item on a soft
+  yellow. Dark: yellow buttons with navy text, yellow charts. Warnings are orange now, so they never read as the
+  brand's yellow; down stays red and up green. Every text colour keeps at least 4.5:1 contrast. The public status page
+  and the email digest follow.
+- A refresh picker in the top bar: click "Updated 12s ago" to choose **Auto** (the default: right after each collector
+  run instead of on a fixed 60 s clock), every 1, 5, 15 or 30 minutes, or **Off**. The choice is kept per browser; a
+  hidden tab still waits and catches up on return. See [Pages](docs/pages.md).
+- Provider status names what an incident affects and colours only what Watchbell watches. A Firebase incident on Test
+  Lab (or anything but Firestore, Authentication and Hosting), or a Supabase incident on the dashboard or Management
+  API, is grey information and raises no alert; before, it turned the provider yellow. An incident not updated for over
+  a day says "no update for N days, may be stale", and the incident line no longer repeats the status text.
+  See [Pages › Home](docs/pages.md#home).
+- The app page's 5xx chart is grey when there were none, not a red line at zero. An empty Logs list under **Error**
+  says what Error holds: the server failing (a 5xx or a crash), not a wrong password or a missing page, and that a
+  sign-in the browser sends straight to Supabase or Firebase never reaches these logs.
+- Plainer words where something fails: "Watchbell didn't answer. Check that it's still running, then try again." when a
+  request doesn't come back, "That didn't go through, and Watchbell couldn't tell why…" when the server stops it, and
+  "This page didn't load" on the error screen. A mistyped address shows "Nothing rings here" with a way back instead
+  of a bare 404. Setup says where the setup code is (the screen where you started Watchbell, and its log; valid 24
+  hours). Smaller touches: "Add your authenticator", "No services on this page yet", dialogs fade without the blur,
+  and page headers drop crumbs that only repeat the title.
+- The Dependencies card counts production and development tools apart: **In production** (what ships) and, when there
+  are any, **Development tools** with "Local development only, no production impact. Not alerted." Before, a
+  migration tool's advisory made the card read like an open production problem. The Dev officer's notes say the same.
+  See [Pages › Hosting](docs/pages.md#hosting).
+- Connections › GitHub says when the last sync was refused some reads, for example "Actions can't be read on 12
+  repositories (last read 15 Oct): give the token Actions: Read.", and the account reads **Connected, some reads
+  refused**. Before, the daily sync only noted it in its own result, so a token that lost a permission went unnoticed.
+
+- Self-hosted, the owner sees **Watchbell X is available (this is Y)** at the top of the console when npm has a newer
+  version, with how to update and a link to its changes, and once after an update **Updated to Watchbell X** with
+  What's new and Got it. The check runs with the 12-hourly Node.js read (one GET to registry.npmjs.org);
+  `WATCHBELL_NO_UPDATE_CHECK=1` turns it off. See [Install](docs/install.md#quick-install-with-npm).
+
+- Alerts read by plain names first: **Site down**, **Slow responses**, **Deploy failed**, **Database paused**, **Token
+  expiring** and so on, with the rule key (MonitorDown…) small after it for searching. Three conditions read as
+  sentences: "A production deploy fails", "Supabase pauses the project", "Slowest 5% of checks over 1,500 ms for 10
+  min".
+- Overview starts with one sentence that answers "is everything OK?": "All 5 apps are up. Nothing needs you.", or
+  "4 of 5 apps are up, 1 down. 2 things need you; they are below."
+- The provider strip on Overview shows only providers you watch something in, plus the collector, instead of grey
+  "No projects watched yet" cells; Connections lists the rest.
+- Long page subtitles are one sentence now (Supabase, Sections, DNS records, Provider status), with the details under
+  **How this works**, and Watchbell speaks as "Watchbell" and to you as "you" (no more "the console", "our" or "the
+  owner" in those texts).
+
+### Notifications
+
+- A **Webhook** channel: Watchbell POSTs each alert message as JSON (the text plus every alert as data) to an https
+  address on a public host, for n8n, Zapier, Make or your own server, signed with HMAC-SHA256 when you set a secret.
+  Turn it on per rule like Discord. Databases are named db-a, db-b and emails never appear. Needs migration 0058 in the
+  cloud edition (self-hosted applies it on start). See [Notifications](docs/notifications.md#webhook).
+- An **Email (SMTP)** channel: each alert message by email through your own mail server (Office 365, Zimbra, any
+  SMTP with TLS), without a mail library. Port 587/2525 with STARTTLS or 465 with TLS; the password is sent only
+  inside TLS and the certificate is checked; the server must be public. Same migration 0058. See
+  [Notifications](docs/notifications.md#email-smtp).
+
+### Auto-actions
+
+- An update pull request whose Vercel preview was canceled (an Ignored Build Step that skips previews does this) stops
+  with "the update wasn't smoke-tested; check it and merge by hand" instead of "Vercel preview failed". It was never
+  merged without a smoke-tested preview, and still isn't.
+
 ## 1.2.2
 
 ### Security fixes

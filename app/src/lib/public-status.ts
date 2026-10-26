@@ -63,7 +63,7 @@ export function overallLine(monitors: { name: string; state: PublicState }[]): {
 }
 
 // The console's light-theme state colours, dark enough for white 11 px text (≥ 4.5:1).
-const COLOR: Record<PublicState, string> = { ok: "#17773f", warn: "#8f5200", err: "#c0272d", maint: "#1f45c9", unknown: "#5f6670" };
+const COLOR: Record<PublicState, string> = { ok: "#17773f", warn: "#a63f06", err: "#c0272d", maint: "#2f4372", unknown: "#5f6670" };
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const width = (s: string) => Math.round(s.length * 6.6) + 12; // Verdana 11 px, close enough for short words
 

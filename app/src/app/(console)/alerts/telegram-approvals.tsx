@@ -29,14 +29,14 @@ export function TelegramApprovals() {
       try {
         const r = await job();
         if (!r.ok) {
-          toast.error(r.error ?? "Something went wrong. Try again.");
+          toast.error(r.error ?? "Watchbell didn't answer. Check that it's still running, then try again.");
           return;
         }
         if (r.data) setV(r.data);
         after?.();
         if (r.message) toast.success("Approval buttons", { description: r.message });
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -46,9 +46,9 @@ export function TelegramApprovals() {
       try {
         const r = await telegramLinkCode();
         if (r.ok && r.data) setCode(r.data);
-        else toast.error(r.ok ? "Something went wrong. Try again." : r.error);
+        else toast.error(r.ok ? "Watchbell didn't answer. Check that it's still running, then try again." : r.error);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }

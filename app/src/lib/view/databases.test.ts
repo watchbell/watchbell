@@ -114,7 +114,7 @@ describe("neonBlocks / neonCell", () => {
   it("summarises one project, and a provider that stopped answering", () => {
     expect(neonCell([{ ...neon, id: "t" }], now, book)).toEqual({ state: "idle", sub: "db-d is asleep · 41 of 100 compute hours used this month" });
     expect(neonCell([{ ...neon, state: "unknown", collectedAt: new Date(now.getTime() - 14 * 60_000) }], now)).toEqual({ state: "unknown", sub: "API not responding · data from 14 min ago" });
-    expect(neonCell([], now)).toEqual({ state: "unknown", sub: "No projects watched yet" });
+    expect(neonCell([], now)).toEqual({ state: "unknown", sub: "No projects watched yet", empty: true });
   });
 });
 

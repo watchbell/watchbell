@@ -73,7 +73,7 @@ describe("createKeyAction", () => {
   it("anything else becomes the generic message, with no detail", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     h.createKey.mockRejectedValue(new Error("insert into ops.api_keys … key_hash = abc"));
-    expect(await createKeyAction(form)).toEqual({ ok: false, error: "Something went wrong. Try again." });
+    expect(await createKeyAction(form)).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
     expect(JSON.stringify(spy.mock.calls)).not.toContain("key_hash");
     spy.mockRestore();
   });

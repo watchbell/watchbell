@@ -74,7 +74,7 @@ export function SqlAccessDialog({ id, alias, provider, connected }: Props) {
         toast.success(`SQL access created for ${alias}`, { description: `Read-only role ${RO_ROLE}, checked and saved. Open Databases → SQL console to run a query.` });
         setOpen(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -108,7 +108,7 @@ export function SqlAccessDialog({ id, alias, provider, connected }: Props) {
         setDsn("");
         setOpen(false);
       } catch {
-        toast.error("Something went wrong. Try again.");
+        toast.error("Watchbell didn't answer. Check that it's still running, then try again.");
       }
     });
   }
@@ -122,7 +122,7 @@ export function SqlAccessDialog({ id, alias, provider, connected }: Props) {
           <div>
             <DialogTitle className="text-base">{connected ? "Replace" : "Add"} SQL access for {alias}</DialogTitle>
             <DialogDescription className="mt-0.5 text-[13px] text-ink-soft">
-              The SQL console connects with a read-only Postgres role you create. The console never reads your app&apos;s own secrets.
+              The SQL console connects with a read-only Postgres role you create. Watchbell never reads your app&apos;s own secrets.
             </DialogDescription>
           </div>
         </div>

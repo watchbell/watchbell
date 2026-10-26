@@ -66,7 +66,7 @@ export async function enqueue(a: { kind: QuestionContextKind; contextId: string 
   const [row] = await db().insert(aiQuestions)
     .values({ contextKind: a.kind, contextId: a.contextId, question, status: "pending", createdBy: a.by, createdAt: a.now, requestedModel: model, purpose: "ask" })
     .returning({ id: aiQuestions.id });
-  return row ? { ok: true, id: row.id, reused: false } : { ok: false, error: "Something went wrong. Try again." };
+  return row ? { ok: true, id: row.id, reused: false } : { ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." };
 }
 
 // A question the owner's provider already answered (owner 14 Oct): stored answered in one insert so AI › Ask keeps

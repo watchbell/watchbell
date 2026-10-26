@@ -30,7 +30,10 @@ export function DependenciesCard({ app, view, canAct, owner, now, devopsOff = fa
   const { repo, scan, vulns } = view;
   // "None known" only after a successful scan; otherwise "Not scanned" and why (1.2.1, owner 24 Oct).
   const cover = depsCoverage(view, devopsOff);
-  const counts = countBySeverity(vulns);
+  // 1.2.3 (owner 26 Oct): dev-only advisories are local tooling (never alerted, never shipped), so they get their own
+  // row instead of swelling the production count.
+  const prodVulns = vulns.filter((v) => !v.dev);
+  const devVulns = vulns.filter((v) => v.dev);
   const fixable = upgradesFor(vulns).length;
   return (
     <Card title="Dependencies" meta={<><Src kind="api">OSV.dev</Src>{canAct && repo && !devopsOff && <DepsScanButton appId={app.id} appName={app.name} />}</>} flush>
@@ -46,16 +49,17 @@ export function DependenciesCard({ app, view, canAct, owner, now, devopsOff = fa
         ) : (
           <>
             <dl className={KV}>
-              <dt>Open advisories</dt>
-              <dd>
-                {vulns.length === 0 ? <span className="inline-flex items-center gap-1.5"><StateIcon state="ok" />None known</span> : (
-                  <span className="flex flex-wrap gap-x-3 gap-y-1">
-                    {SEVERITY_ORDER.filter((s) => counts[s] > 0).map((s) => (
-                      <span key={s} className="inline-flex items-center gap-1.5"><span className={mono}>{counts[s]}</span><SevTag severity={UPPER[s]} /></span>
-                    ))}
-                  </span>
-                )}
-              </dd>
+              <dt>In production</dt>
+              <dd>{prodVulns.length === 0 ? <span className="inline-flex items-center gap-1.5"><StateIcon state="ok" />None known</span> : <SeverityCounts vulns={prodVulns} />}</dd>
+              {devVulns.length > 0 && (
+                <>
+                  <dt>Development tools</dt>
+                  <dd>
+                    <SeverityCounts vulns={devVulns} />
+                    <div className="mt-0.5 text-[12.5px] text-ink-faint">Local development only, no production impact. Not alerted.</div>
+                  </dd>
+                </>
+              )}
               <dt>Lockfile</dt>
               <dd>{scan.lockfilePath ? <><span className={mono}>{scan.lockfilePath}</span><span className="text-ink-faint"> · {scan.packageCount} packages</span></> : <span className="text-ink-faint">None found</span>}</dd>
               <dt>Last scan</dt><dd>{ago(scan.scannedAt, now)}</dd>
@@ -95,7 +99,7 @@ export function DependenciesCard({ app, view, canAct, owner, now, devopsOff = fa
                 <tr className={rowClass}>
                   <td className={td}>
                     <span className={mono}>{v.package}</span>
-                    {(v.dev || !v.direct) && <div className="mt-0.5 text-xs text-ink-faint">{[v.direct ? null : "transitive", v.dev ? "dev only" : null].filter(Boolean).join(" · ")}</div>}
+                    {(v.dev || !v.direct) && <div className="mt-0.5 text-xs text-ink-faint">{[v.direct ? null : "transitive", v.dev ? "dev only, local" : null].filter(Boolean).join(" · ")}</div>}
                   </td>
                   <td className={cn(td, mono, "whitespace-nowrap")}>
                     {v.installedVersion} {v.fixedVersion ? <>→ {v.fixedVersion}</> : <span className="font-sans text-ink-faint">· no fix yet</span>}
@@ -113,5 +117,16 @@ export function DependenciesCard({ app, view, canAct, owner, now, devopsOff = fa
         />
       )}
     </Card>
+  );
+}
+
+function SeverityCounts({ vulns }: { vulns: AppDepsView["vulns"] }) {
+  const counts = countBySeverity(vulns);
+  return (
+    <span className="flex flex-wrap gap-x-3 gap-y-1">
+      {SEVERITY_ORDER.filter((s) => counts[s] > 0).map((s) => (
+        <span key={s} className="inline-flex items-center gap-1.5"><span className={mono}>{counts[s]}</span><SevTag severity={UPPER[s]} /></span>
+      ))}
+    </span>
   );
 }

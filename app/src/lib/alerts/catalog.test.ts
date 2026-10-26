@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRuleForm, RULE_KEYS, RULES } from "./catalog";
+import { parseRuleForm, RULE_KEYS, RULES, ruleName } from "./catalog";
 
 describe("RULES", () => {
   it("has the 13 rules of spec §10 (+ Stage 12 ComputeHigh, Stage 9 slice 5 VulnerableDependency, Stage 8 DbQuotaHigh) with the mockup's conditions", () => {
@@ -8,9 +8,9 @@ describe("RULES", () => {
     expect(RULES.DbQuotaHigh.condition(80)).toBe("Turso, Upstash or D1 usage > 80% of a free-plan quota");
     expect(RULES.VulnerableDependency).toMatchObject({ severity: "warning", threshold: null, bounds: null, needs: null, sampled: false });
     expect(RULES.MonitorDown.condition(3)).toBe("3 failed checks in a row");
-    expect(RULES.HighLatency.condition(1500)).toBe("p95 > 1,500 ms for 10 min");
+    expect(RULES.HighLatency.condition(1500)).toBe("Slowest 5% of checks over 1,500 ms for 10 min");
     expect(RULES.CollectorStale.condition(5)).toBe("No collector run for 5 min");
-    expect(RULES.DeploymentFailed.condition(null)).toBe("Production deployment state = ERROR");
+    expect(RULES.DeploymentFailed.condition(null)).toBe("A production deploy fails");
     expect(RULES.CredentialExpiring.condition(14)).toBe("Account credential expires in < 14 days");
   });
   it("marks the rules that need stage 3 or 4 data", () => {
@@ -33,5 +33,13 @@ describe("parseRuleForm", () => {
   it("ignores a threshold on a rule without one", () => {
     expect(parseRuleForm("DeploymentFailed", { severity: "warning", threshold: "9", channels: [], enabled: false }))
       .toEqual({ ok: true, value: { severity: "warning", threshold: null, channels: [], enabled: false } });
+  });
+});
+
+describe("RULE_NAMES (1.2.3, UI audit K9)", () => {
+  it("every rule has a plain name, and an unknown key reads as itself", () => {
+    for (const key of Object.keys(RULES)) expect(ruleName(key)).not.toBe(key);
+    expect(ruleName("MonitorDown")).toBe("Site down");
+    expect(ruleName("SomethingOld")).toBe("SomethingOld");
   });
 });

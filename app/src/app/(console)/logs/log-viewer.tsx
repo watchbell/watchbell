@@ -6,7 +6,7 @@ import { useMask } from "@/components/alias";
 import { Button, buttonClass, fieldClass } from "@/components/kit";
 import { Src } from "@/components/sources";
 import { cn } from "@/lib/utils";
-import { filterLines, levelBucket, readText, type WireLine } from "@/lib/view/logs";
+import { emptyLogText, filterLines, levelBucket, readText, type WireLine } from "@/lib/view/logs";
 import { readLastHour } from "./actions";
 
 const LEVEL_TONE = { info: "text-code-info", warning: "text-code-warn", error: "text-code-err" } as const;
@@ -124,7 +124,7 @@ export function LogViewer({ mode, apps, appId, initial, vercelUrl }: {
       <div ref={box} tabIndex={0} aria-label={live ? "Request log lines of the last hour" : "Stored warning and error log lines"}
         className="h-[420px] overflow-auto rounded-b-lg bg-code-bg px-4 py-3 font-mono text-[12.5px] leading-[1.7] text-code-text">
         {shown.length === 0 ? (
-          <div className="text-code-dim">{live ? (readAt === null && !error ? "Reading the last hour…" : "No log lines in this window.") : "No warnings or errors stored in the last 7 days."}</div>
+          <div className="whitespace-normal text-code-dim">{emptyLogText({ live, reading: readAt === null && !error, level })}</div>
         ) : shown.map((l) => (
           <div key={l.id} className="whitespace-pre">
             <time className="text-code-dim">{l.time}</time>{" "}

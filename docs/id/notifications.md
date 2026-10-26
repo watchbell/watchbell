@@ -2,12 +2,15 @@
 
 English: [../notifications.md](../notifications.md)
 
-Watchbell bisa mengirim alert ke Telegram, ke channel Discord, dan sebagai email harian. Ketiganya gratis dan opsional,
+Watchbell bisa mengirim alert ke Telegram, ke channel Discord, ke webhook milik Anda, lewat email dari server mail
+Anda sendiri, dan sebagai email harian. Semuanya gratis dan opsional,
 dan disiapkan di **Alerts › Notifications** (khusus owner; user lain hanya melihat statusnya).
 
 - [Apa yang dikirim](#apa-yang-dikirim)
 - [Telegram](#telegram)
 - [Discord](#discord)
+- [Webhook](#webhook)
+- [Email (SMTP)](#email-smtp)
 - [Ringkasan email harian](#ringkasan-email-harian)
 - [Bahasa](#bahasa)
 - [Aturan senyap](#aturan-senyap)
@@ -83,6 +86,47 @@ Yang perlu diketahui:
 URL-nya dienkripsi sebelum disimpan dan tidak pernah ditampilkan lagi. Siapa pun yang memegang URL itu bisa mengirim
 pesan ke channel tersebut, jadi perlakukan seperti password. Discord menerima pesan yang sama dengan Telegram, tanpa
 tombol.
+
+## Webhook
+
+POST JSON ke alamat milik Anda, untuk n8n, Zapier, Make, atau server Anda sendiri.
+
+1. Di tool Anda, buat webhook yang menerima request POST lalu salin alamatnya. Alamatnya harus **https** di host publik,
+   port 443: Watchbell tidak mengirim ke jaringan privat (n8n di `http://192.168.x.x:5678` butuh alamat https di
+   depannya) dan tidak mengikuti redirect.
+2. Di Watchbell: **Alerts › Notifications › Webhook › Connect**, tempel alamatnya, dan kalau mau sebuah secret (16
+   sampai 200 karakter).
+3. Tekan **Send test**, lalu centang **Webhook** di aturan alert yang Anda mau (Alerts › Rules › Edit), sama seperti
+   Discord.
+
+Setiap pesan adalah satu request dengan `Content-Type: application/json`. Isinya:
+`source`, `event` (`alerts` atau `test`), `sentAt`, `text`, `link`,
+dan `alerts` (masing-masing dengan `status` `firing`/`repeat`/`resolved`, `rule`, `severity`, `title`, `message`,
+`startedAt`, `causedBy`, `provider`). Database disebut db-a, db-b seperti di Discord, dan email tidak pernah muncul.
+Kalau ada secret, request membawa `X-Watchbell-Timestamp` (detik Unix) dan `X-Watchbell-Signature: sha256=<hex>`, yaitu
+HMAC-SHA256 dari `<timestamp>.<body>` dengan secret Anda: hitung hal yang sama lalu bandingkan sebelum memercayai request
+itu. Alamat dan secret dienkripsi sebelum disimpan; console hanya menampilkan host-nya.
+
+## Email (SMTP)
+
+Setiap pesan alert dikirim lewat email melalui server mail Anda sendiri, untuk tim yang memakai Office 365, Zimbra, atau
+layanan mail lain yang mendukung SMTP. ([Ringkasan email harian](#ringkasan-email-harian) terpisah dan dikirim lewat
+Resend.)
+
+1. **Alerts › Notifications › Email (SMTP) › Connect**: server, port, user name dan password, alamat pengirim, dan
+   alamat yang menerima alert.
+2. Tekan **Send test**, lalu centang **Email (SMTP)** di aturan alert yang Anda mau, sama seperti Discord.
+
+- Port **587** atau **2525** memakai STARTTLS, port **465** memakai TLS dari awal. Watchbell baru mengirim password
+  setelah TLS aktif dan memeriksa sertifikat server; server yang tidak menawarkan STARTTLS di port 587 ditolak, bukan
+  dikirimi password tanpa enkripsi. Port 25 tidak disediakan.
+- Server harus ada di internet publik, sama seperti monitor dan webhook.
+- Office 365: `smtp.office365.com`, port 587, alamat Anda sebagai user name; kalau MFA aktif, pakai app password, dan
+  SMTP AUTH harus diizinkan untuk mailbox itu.
+- Subjeknya adalah baris pertama pesan; isinya teks yang sama dengan Discord, dalam bahasa ringkasan email, dengan link
+  ke Alerts. Database disebut db-a, db-b dan email tidak pernah muncul.
+- Semuanya dienkripsi sebelum disimpan. Change menampilkan form kosong; biarkan password kosong untuk tetap memakai
+  yang tersimpan.
 
 ## Ringkasan email harian
 

@@ -14,6 +14,11 @@ interval has passed) and a daily job at 03:00 in your [time zone](configuration.
 machine is asleep or Watchbell is stopped; a missed daily job runs once when it is back. Times on these pages and in
 messages are in that zone.
 
+The top bar says when the page's data arrived ("Updated 12s ago · Auto · after each check"). Click it to choose how
+the page refreshes: **Auto** (the default, right after each collector run), every 1, 5, 15 or 30 minutes, or **Off**.
+The choice is kept in this browser. A hidden tab doesn't refresh and catches up when you come back; a tab nobody has
+touched for 30 minutes refreshes every 4 minutes at most.
+
 - [Home](#home)
 - [Hosting](#hosting)
 - [Database](#database)
@@ -46,7 +51,10 @@ auto-runs, sign-in related changes and setting changes are here.
 
 **Provider status.** Public status feeds of Vercel, Supabase, Neon, Cloudflare, Firebase and Google Cloud, polled
 every 5 minutes. When a provider has an incident, related alerts are labelled so you know the problem
-isn't your app.
+isn't your app. Each incident names what it affects. One on something Watchbell doesn't watch (Firebase Test Lab, the
+Supabase dashboard or Management API) shows in grey and raises nothing; only Firestore, Authentication and Hosting
+colour Firebase, and only projects and databases colour Supabase. An incident whose feed hasn't changed for over a day
+says "no update for N days, may be stale".
 
 ## Hosting
 
@@ -60,7 +68,9 @@ isn't your app.
   Collector (Watchbell runtime). In a monorepo, the Dependencies card scans the Vercel
   project's Root Directory (for example `apps/web/package-lock.json`), and Scan now scans that app's folder. "None
   known" only appears after a successful scan; otherwise the card says **Not scanned** and why (no linked repository,
-  DevOps is off, no lockfile or package.json, or the scan failed).
+  DevOps is off, no lockfile or package.json, or the scan failed). Advisories in development tools only (packages
+  that never reach production, such as a migration tool) are counted on their own **Development tools** row, marked
+  "local development only, no production impact", and never raise an alert.
 - Metrics, Deployments and Logs tabs for that app.
 - Actions for operators and owners: redeploy, roll back, check now. The row menu of the Applications list has Redeploy
   (the same confirm) and View logs (the app's Logs tab) too.

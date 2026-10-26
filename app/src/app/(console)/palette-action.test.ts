@@ -31,6 +31,6 @@ describe("loadPaletteSource", () => {
     h.requireActionMember.mockResolvedValue({ id: "m", userId: "u", email: "v@example.com", role: "viewer" });
     h.paletteSource.mockRejectedValue(new Error("db down"));
     vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(await loadPaletteSource()).toEqual({ ok: false, error: "Something went wrong. Try again." });
+    expect(await loadPaletteSource()).toEqual({ ok: false, error: "That didn't go through, and Watchbell couldn't tell why. Try again in a moment; if it keeps failing, the server log has the details." });
   });
 });
