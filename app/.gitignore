@@ -43,3 +43,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# demo builds: the migrated PGlite snapshot (scripts/demo-snapshot.mjs)
+/demo-snapshot/

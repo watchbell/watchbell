@@ -91,7 +91,8 @@ describe("self-host smoke (PGlite, no production database)", () => {
     } finally {
       scheduler.stop();
     }
-  }, 60_000);
+  }, 180_000); // a fresh PGlite, its migrations, cold imports of the collector and one run: 12 s alone, past 60 s in a
+  // loaded full run (timed out 4 times, 25-26 Oct; the logs show the 60 s limit, never a failed assertion)
 
   // 1.1: the zone is a bound parameter of the uptime-days query, which Postgres only accepts because the query groups by
   // the column's position. Days follow the configured zone (Europe/Berlin here) in both the rollups and the raw checks.

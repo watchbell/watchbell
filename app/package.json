@@ -1,9 +1,10 @@
 {
   "name": "watchbell",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "scripts": {
     "dev": "cross-env NEXT_TELEMETRY_DISABLED=1 next dev --port 3100",
+    "prebuild": "node scripts/demo-snapshot.mjs",
     "build": "cross-env NEXT_TELEMETRY_DISABLED=1 next build",
     "start": "cross-env NEXT_TELEMETRY_DISABLED=1 next start --port 3100",
     "lint": "eslint .",

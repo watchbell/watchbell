@@ -86,7 +86,6 @@ const TEXT: Record<string, string[]> = {
 
 /** Faint colours that are allowed because they aren't body-size text. Large text (≥ 24 px) needs 3:1. */
 const DECORATIVE: Record<string, { token: string; large?: string }> = {
-  ".lang .sep": { token: "ink-faint" }, // the "/" between EN and ID, aria-hidden
   ".home h1 span": { token: "ink-faint", large: "bg" }, // the second line of the 40–66 px headline
   ".fine summary::after": { token: "ink-faint" }, // the "+" / "–" marker
   ".docs-menu summary::after": { token: "ink-faint" },

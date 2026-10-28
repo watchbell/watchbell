@@ -40,6 +40,16 @@ const appRoot = path.resolve(/*turbopackIgnore: true*/ ".");
 
 const nextConfig: NextConfig = {
   poweredByHeader: false, // 1.2.1: no X-Powered-By: Next.js
+  // PGlite finds its .wasm and .data files with new URL("./x", import.meta.url). Bundled, Turbopack swaps that for a
+  // URL-like object without a protocol, which fs.readFile refuses on Vercel ("Received an instance of URL"; the demo
+  // failed every sign-in with it). Loaded by Node from node_modules it gets a real file: URL, and output tracing keeps
+  // the files next to it. Not in the npm package's standalone build: there the external becomes a symlink in
+  // .next/node_modules, which a package can't carry, and the bundled PGlite works as it did up to 1.2.4.
+  ...(standalone ? {} : { serverExternalPackages: ["@electric-sql/pglite"] }),
+  // The PGlite migrator reads every .sql its journal lists, from a runtime path tracing can't follow, so a Vercel build
+  // (the demo) shipped only meta/_journal.json and every sign-in failed with "No file …0000_….sql found". A few KB of SQL.
+  // demo-snapshot/ (about 5 MB) exists only in a demo build: the migrated database src/lib/demo/template.ts loads.
+  outputFileTracingIncludes: { "/**": ["./drizzle-selfhost/**/*", "./demo-snapshot/**/*"] },
   ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: appRoot, experimental: { isrFlushToDisk: false } } : {}),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }, ...officeFrame];

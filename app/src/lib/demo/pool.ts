@@ -1,16 +1,15 @@
 import "server-only";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
-import { selfhostMigrationsFolder } from "@/db/pglite";
 import * as schema from "@/db/schema";
 import { readEnv } from "@/lib/brand-env";
 import { DEMO_BUSY, DEMO_TOO_MANY, demoNoticeError } from "./notices";
 import { seedDemoDb } from "./seed";
 import { currentDemoClientKey, currentDemoEmail } from "./session";
+import { createMigratedPglite } from "./template";
 import { demoCreations } from "./visitor-limits";
 
-// Demo mode: one in-memory PGlite per visitor seed, migrated from drizzle-selfhost/ and seeded on first use. An evicted
+// Demo mode: one in-memory PGlite per visitor seed, loaded from the migrated template (./template) and seeded on first use. An evicted
 // visitor's next request re-creates the same data from the same seed (their own writes are lost, which the banner says).
 //
 // Memory cap: at most demoPoolMax() LIVE instances per server process (about 200-250 MB each, measured; a Vercel
@@ -171,22 +170,28 @@ function endCreationTurn(): void {
 
 async function create(entry: Entry, email: string | undefined): Promise<PGlite> {
   // Counted per client before anything is spent; re-creating the same seed within the window doesn't count again.
+  const started = performance.now();
   if (!demoCreations.take(await currentDemoClientKey(), entry.seed)) throw demoNoticeError(DEMO_TOO_MANY);
   await claimSlot(entry);
   try {
     const visitorEmail = email ?? (await currentDemoEmail());
     await takeCreationTurn();
     try {
-      const pglite = await PGlite.create();
+      const turn = performance.now();
+      const pglite = await createMigratedPglite();
+      const loaded = performance.now();
       try {
         const db = drizzle({ client: pglite, schema });
-        await migrate(db, { migrationsFolder: selfhostMigrationsFolder() });
         await seedDemoDb(db, entry.seed, new Date(), visitorEmail);
       } catch (e) {
         await pglite.close().catch(() => undefined);
         throw e;
       }
       entry.created = true;
+      // One line per visitor database, so the wait a visitor sees can be read from the function logs.
+      const ms = (a: number, b: number) => Math.round(b - a);
+      const done = performance.now();
+      console.info(`demo: visitor database ready in ${ms(started, done)} ms (waited ${ms(started, turn)}, schema ${ms(turn, loaded)}, seed ${ms(loaded, done)})`);
       return pglite;
     } finally {
       endCreationTurn();

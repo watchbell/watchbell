@@ -252,16 +252,18 @@ describe("rendering", () => {
       { title: null, items: [{ title: "Watchbell documentation", slug: "", href: "/docs" }] },
       {
         title: "Start here",
+        anchor: "start-here",
         items: [
-          { title: "Install", slug: "install", href: "/docs/install" },
+          { title: "Install", slug: "install", href: "/docs/install", summary: "every way to install." },
           { title: "FAQ", slug: "faq", href: "/docs/faq" },
         ],
       },
     ]);
     expect(docsSidebar("id", both)[1]).toEqual({
       title: "Mulai di sini",
+      anchor: "mulai-di-sini",
       items: [
-        { title: "Instalasi", slug: "install", href: "/id/docs/install" },
+        { title: "Instalasi", slug: "install", href: "/id/docs/install", summary: "semua cara memasang." },
         { title: "FAQ", slug: "faq", href: "/id/docs/faq" },
       ],
     });
@@ -307,7 +309,12 @@ describe("Indonesian fallback", () => {
       otherHref: "/docs/install",
     });
     expect(loadDocPage("id", "", enOnly)?.kind).toBe("pending");
-    expect(docsSidebar("id", enOnly)[1].items[0]).toEqual({ title: "Install", slug: "install", href: "/id/docs/install" });
+    expect(docsSidebar("id", enOnly)[1].items[0]).toEqual({
+      title: "Install",
+      slug: "install",
+      href: "/id/docs/install",
+      summary: "every way to install.",
+    });
     const en = loadDocPage("en", "install", enOnly);
     expect(en?.kind === "doc" && en.otherAnchors).toEqual([]);
   });

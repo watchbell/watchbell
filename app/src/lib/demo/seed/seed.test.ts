@@ -74,6 +74,15 @@ describe("seedDemoDb: apps, deployments and uptime", () => {
     expect(seedMs).toBeLessThan(10_000);
   });
 
+  // The pool seeds without foreign-key checks (they were half its time); every row the seed writes must still point at
+  // one that exists, for both seeds this file uses.
+  it("writes only rows whose foreign keys hold", async () => {
+    const checkedA = await fresh();
+    await seedDemoDb(checkedA, SEED_A, NOW, EMAIL, { foreignKeyChecks: true });
+    expect(await dump(checkedA)).toEqual(await dump(a)); // and the same rows as the unchecked seed
+    await expect(seedDemoDb(await fresh(), SEED_B, NOW, EMAIL, { foreignKeyChecks: true })).resolves.toBeUndefined();
+  }, 120_000);
+
   it("makes the visitor the only member, an owner, with a stable user id", async () => {
     const rows = await a.select().from(members);
     expect(rows).toHaveLength(1);

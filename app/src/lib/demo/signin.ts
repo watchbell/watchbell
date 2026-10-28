@@ -16,5 +16,8 @@ export function demoSignIn(input: { email: string; password: string; next?: stri
   if (input.password.length < 1 || input.password.length > MAX_DEMO_PASSWORD) {
     return { ok: false, message: `Enter a password of 1 to ${MAX_DEMO_PASSWORD} characters (any password works in the demo).`, field: "password" };
   }
-  return { ok: true, cookie: signDemoCookie({ email, seed: newDemoSeed() }, key, now), redirectTo: safeNext(input.next) };
+  // Straight to the Overview, where "/" would send a demo visitor anyway (the seed always connects accounts). "/" asks the
+  // visitor's database first, and on Vercel it and the Overview often ran on two functions, so one sign-in built the
+  // database twice (about 5 s each, 27 Oct).
+  return { ok: true, cookie: signDemoCookie({ email, seed: newDemoSeed() }, key, now), redirectTo: safeNext(input.next, "/overview") };
 }

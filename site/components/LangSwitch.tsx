@@ -40,20 +40,21 @@ export function LangSwitch({
     e.preventDefault();
     window.location.assign(section ? `${otherHref}#${encodeURIComponent(section)}` : otherHref);
   }
-  const other: Lang = lang === "en" ? "id" : "en";
-  const link = (
-    <a href={otherHref} hrefLang={other} lang={other} onClick={keepSection}>
-      {other.toUpperCase()}
-    </a>
-  );
-  const current = <span aria-current="true">{lang.toUpperCase()}</span>;
+  // A two-way switch: the current language is the pressed half, the other half is the link.
+  const langs: Lang[] = ["en", "id"];
   return (
     <span className="lang" role="group" aria-label={label}>
-      {lang === "en" ? current : link}
-      <span className="sep" aria-hidden="true">
-        /
-      </span>
-      {lang === "en" ? link : current}
+      {langs.map((l) =>
+        l === lang ? (
+          <span key={l} aria-current="true">
+            {l.toUpperCase()}
+          </span>
+        ) : (
+          <a key={l} href={otherHref} hrefLang={l} lang={l} onClick={keepSection}>
+            {l.toUpperCase()}
+          </a>
+        ),
+      )}
     </span>
   );
 }

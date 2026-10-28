@@ -37,6 +37,39 @@ function Menu({ groups, slug }: { groups: SidebarGroup[]; slug: string }) {
   );
 }
 
+const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+// The docs index: the README's own words, except that each menu section is laid out as a contents page (the page name
+// on the left, what it covers on the right) instead of a bullet list of "Name: what it does" lines. A section that
+// isn't in the menu ("Other files") stays as written.
+function IndexBody({ html, groups }: { html: string; groups: SidebarGroup[] }) {
+  const byAnchor = new Map(groups.filter((g) => g.anchor).map((g) => [g.anchor, g]));
+  const parts = html.split(/(?=<h2[\s>])/);
+  return (
+    <article className="doc doc-index">
+      {parts.map((part, i) => {
+        const id = /^<h2 id="([^"]+)"/.exec(part)?.[1];
+        const group = id ? byAnchor.get(id) : undefined;
+        if (!group) return <div key={i} dangerouslySetInnerHTML={{ __html: part }} />;
+        const heading = part.slice(0, part.indexOf("</h2>") + 5);
+        return (
+          <section key={i}>
+            <div dangerouslySetInnerHTML={{ __html: heading }} />
+            <ul className="toc">
+              {group.items.map((item) => (
+                <li key={item.slug}>
+                  <Link href={item.href}>{item.title}</Link>
+                  {item.summary ? <span>{capital(item.summary)}</span> : null}
+                </li>
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+    </article>
+  );
+}
+
 function load(lang: Lang, slug: string): DocPage {
   const page = loadDocPage(lang, slug);
   if (!page) notFound();
@@ -81,7 +114,11 @@ export function DocsView({ lang, slug }: { lang: Lang; slug: string }) {
         <main className="doc-main" id="main">
           {page.kind === "doc" ? (
             <>
-              <article className="doc" dangerouslySetInnerHTML={{ __html: page.doc.html }} />
+              {slug === "" ? (
+                <IndexBody html={page.doc.html} groups={groups} />
+              ) : (
+                <article className="doc" dangerouslySetInnerHTML={{ __html: page.doc.html }} />
+              )}
               <div className="doc-foot">
                 <a href={page.doc.editUrl}>{t.edit}</a>
                 {page.doc.updated ? (

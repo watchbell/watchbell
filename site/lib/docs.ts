@@ -359,9 +359,13 @@ export interface SidebarItem {
   title: string;
   slug: string;
   href: string;
+  /** The words after the link in the index ("[Install](install.md): every way to install." → "every way to install."). */
+  summary?: string;
 }
 export interface SidebarGroup {
   title: string | null;
+  /** The id of the group's "##" heading in the rendered index, so the index page can find its section. */
+  anchor?: string;
   items: SidebarItem[];
 }
 
@@ -379,7 +383,8 @@ export function docsSidebar(lang: Lang, source: DocsSource = getSource()): Sideb
   const seen = new Set<string>([""]);
   for (const node of tree.children) {
     if (node.type === "heading" && node.depth === 2) {
-      current = { title: mdToString(node), items: [] };
+      const anchor = (node.data?.hProperties as { id?: string } | undefined)?.id; // set by analyse()
+      current = { title: mdToString(node), anchor, items: [] };
       groups.push(current);
     } else if (node.type === "list" && current) {
       for (const item of node.children) {
@@ -394,6 +399,11 @@ export function docsSidebar(lang: Lang, source: DocsSource = getSource()): Sideb
         const found = link as SidebarItem | null;
         if (found && !seen.has(found.slug)) {
           seen.add(found.slug);
+          const words = mdToString(item).trim();
+          const rest = words.startsWith(found.title)
+            ? words.slice(found.title.length).replace(/^\s*[:–—-]\s*/, "").replace(/\s+/g, " ")
+            : "";
+          if (rest) found.summary = rest;
           current.items.push(found);
         }
       }

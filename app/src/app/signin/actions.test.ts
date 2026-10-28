@@ -131,14 +131,14 @@ describe("sign-in in demo", () => {
     expect(await counts()).toEqual({ limits: [{ n: 0 }], sessions: [{ n: 0 }] });
     expect(h.jar.has("wp_session")).toBe(false);
     // Ruling F: the same account again is a dataset of its own.
-    await expect(signInWithPassword({ status: "idle" }, form({ email: PUBLISHED_DEMO_EMAIL, password: PUBLISHED_DEMO_PASSWORD }))).rejects.toThrow(/^REDIRECT \/$/);
+    await expect(signInWithPassword({ status: "idle" }, form({ email: PUBLISHED_DEMO_EMAIL, password: PUBLISHED_DEMO_PASSWORD }))).rejects.toThrow(/^REDIRECT \/overview$/);
     expect(verifyDemoCookie(h.jar.get("wp_demo")!.value, demoKey)?.seed).not.toBe(first?.seed);
   });
 
   it("any other email and password: their own random seed, new on every sign-in", async () => {
-    await expect(signInWithPassword({ status: "idle" }, form({ email: "Ana@Example.com", password: "x" }))).rejects.toThrow(/^REDIRECT \/$/);
+    await expect(signInWithPassword({ status: "idle" }, form({ email: "Ana@Example.com", password: "x" }))).rejects.toThrow(/^REDIRECT \/overview$/);
     const first = verifyDemoCookie(h.jar.get("wp_demo")!.value, demoKey);
-    await expect(signInWithPassword({ status: "idle" }, form({ email: "ana@example.com", password: "y" }))).rejects.toThrow(/^REDIRECT \/$/);
+    await expect(signInWithPassword({ status: "idle" }, form({ email: "ana@example.com", password: "y" }))).rejects.toThrow(/^REDIRECT \/overview$/);
     const second = verifyDemoCookie(h.jar.get("wp_demo")!.value, demoKey);
     expect(first?.email).toBe("ana@example.com");
     expect(second?.email).toBe("ana@example.com");
@@ -149,16 +149,16 @@ describe("sign-in in demo", () => {
     const signIn = () => signInWithPassword({ status: "idle" }, form({ email: "ana@example.com", password: "x" })).catch((e: Error) => e.message);
     vi.stubEnv("VERCEL", "1");
     h.forwardedFor = "198.51.100.7, 10.0.0.1";
-    for (let i = 0; i < SIGN_INS_PER_CLIENT; i++) expect(await signIn()).toBe("REDIRECT /");
+    for (let i = 0; i < SIGN_INS_PER_CLIENT; i++) expect(await signIn()).toBe("REDIRECT /overview");
     h.jar.clear();
     expect(await signIn()).toEqual({ status: "error", message: DEMO_SIGN_IN_LIMITED, email: "ana@example.com" });
     expect(h.jar.size).toBe(0);
     h.forwardedFor = "203.0.113.9"; // another client is not affected
-    expect(await signIn()).toBe("REDIRECT /");
+    expect(await signIn()).toBe("REDIRECT /overview");
 
     vi.stubEnv("VERCEL", "");
     resetDemoLimitsForTests();
-    for (let i = 0; i < SIGN_INS_SHARED; i++) expect(await signIn()).toBe("REDIRECT /");
+    for (let i = 0; i < SIGN_INS_SHARED; i++) expect(await signIn()).toBe("REDIRECT /overview");
     h.forwardedFor = "192.0.2.1"; // a header outside Vercel is never trusted: still the shared bucket
     expect(await signIn()).toMatchObject({ status: "error", message: DEMO_SIGN_IN_LIMITED });
   });

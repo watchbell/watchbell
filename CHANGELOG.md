@@ -2,6 +2,17 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.5
+
+### Demo mode
+
+- Signing in to a demo hosted on Vercel works again. The built app now loads PGlite from `node_modules` (bundled, it
+  couldn't find its own `.wasm` file), and the self-host migrations ship with the build.
+- A new visitor's console opens about twice as fast: sign-in goes straight to the Overview instead of building the
+  visitor's database a second time on another function, a demo build ships the migrated empty database
+  (`demo-snapshot/`, made by `npm run build` in demo mode only), and the made-up data is written without per-row
+  foreign-key checks.
+
 ## 1.2.4
 
 ### Notifications

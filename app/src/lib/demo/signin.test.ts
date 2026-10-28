@@ -38,7 +38,7 @@ describe("demoSignIn", () => {
 
   it("sends the visitor where they were heading, same-site only", () => {
     expect(demoSignIn({ email: "ana@visitor.test", password: "pw", next: "/alerts?x=1" }, KEY, NOW)).toMatchObject({ ok: true, redirectTo: "/alerts?x=1" });
-    expect(demoSignIn({ email: "ana@visitor.test", password: "pw", next: "//evil.example" }, KEY, NOW)).toMatchObject({ ok: true, redirectTo: "/" });
-    expect(demoSignIn({ email: "ana@visitor.test", password: "pw" }, KEY, NOW)).toMatchObject({ ok: true, redirectTo: "/" });
+    expect(demoSignIn({ email: "ana@visitor.test", password: "pw", next: "//evil.example" }, KEY, NOW)).toMatchObject({ ok: true, redirectTo: "/overview" });
+    expect(demoSignIn({ email: "ana@visitor.test", password: "pw" }, KEY, NOW)).toMatchObject({ ok: true, redirectTo: "/overview" });
   });
 });

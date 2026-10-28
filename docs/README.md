@@ -17,7 +17,8 @@ pages.
 ## Using Watchbell
 
 - [Pages](pages.md): every page in the console and what it shows.
-- [Notifications](notifications.md): Telegram, Discord and the daily email digest.
+- [Notifications](notifications.md): Telegram, Discord, a webhook, email through your own mail server, and the
+  daily email digest.
 - [Auto-actions](auto-actions.md): fixes proposed for firing alerts, safe auto-run, approvals on Telegram.
 - [AI](ai.md): your own AI provider keys, the gateway, API keys and the MCP server for AI agents.
 - [Backups](backups.md): monthly summaries in your Google Drive, and how to back up and restore Watchbell itself.
