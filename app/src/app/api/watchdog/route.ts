@@ -2,7 +2,7 @@ import { Receiver } from "@upstash/qstash";
 import { db } from "@/db/client";
 import { settings } from "@/db/schema";
 import { collectorEnv } from "@/lib/collector/env";
-import { lastMinuteRunAt } from "@/lib/collector/last-run";
+import { collectorStaleLimit, lastMinuteRunAt } from "@/lib/collector/last-run";
 import { runCollector } from "@/lib/collector/run";
 import { isStale } from "@/lib/collector/staleness";
 import { evaluateAlerts } from "@/lib/data/alerts-db";
@@ -19,7 +19,8 @@ function failed(stale: boolean | null, e: unknown) {
   return Response.json({ stale, ran: false });
 }
 
-// Upstash QStash, every 5 minutes. If the minute collector (cron-job.org) stopped, record it and run a collection ourselves.
+// Upstash QStash, every 5 minutes. If the collector (cron-job.org) stopped for longer than the CollectorStale rule allows,
+// record it and run a collection ourselves.
 export async function POST(request: Request) {
   const gone = demoRouteGone(); // the demo has no collector to watch
   if (gone) return gone;
@@ -46,7 +47,8 @@ export async function POST(request: Request) {
       .onConflictDoUpdate({ target: settings.key, set: { value: { at: now.toISOString() }, updatedAt: now } });
     // Judge the primary scheduler only: the watchdog's own runs must not make a dead cron-job.org look alive.
     const last = await lastMinuteRunAt();
-    stale = isStale(last, now);
+    // The same limit as the CollectorStale rule, so the two never disagree about a slower cron-job.org schedule.
+    stale = isStale(last, now, await collectorStaleLimit());
     // CollectorStale through the alert engine, so it is opened, notified and resolved like any other rule. Only this
     // rule: the watchdog shouldn't judge the others from a collector it thinks is dead.
     await evaluateAlerts(now, { only: ["CollectorStale"] })

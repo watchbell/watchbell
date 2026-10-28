@@ -1,5 +1,6 @@
 import { pageGate } from "@/lib/auth";
 import { listNotes } from "@/private/notes/notes-view";
+import { DismissAllNotesButton } from "./dismiss-note-button";
 import { NoteCard } from "./note-card";
 
 // Registry slot AiNotesSlot (R2, R8): the agents' notes that haven't been dismissed. Overview shows every note (with
@@ -12,6 +13,7 @@ export async function AiNotesSlot({ appId }: { appId?: string }) {
   if (!notes.length) return null;
   return (
     <div className="mb-3 flex flex-col gap-2.5">
+      {notes.length > 1 && <div className="flex justify-end"><DismissAllNotesButton ids={notes.map((n) => n.id)} /></div>}
       {notes.map((n) => <NoteCard key={n.id} note={n} now={now} showApp={appId === undefined} />)}
     </div>
   );

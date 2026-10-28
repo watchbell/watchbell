@@ -1,7 +1,8 @@
 import "server-only";
-import { and, desc, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { collectorRuns } from "@/db/schema";
+import { alertRules, collectorRuns } from "@/db/schema";
+import { staleLimitMs } from "./staleness";
 
 // A leaf module (no import of run.ts), so the alert code can ask when the collector last ran without an import cycle.
 
@@ -21,4 +22,11 @@ export async function lastMinuteRunAt(): Promise<Date | null> {
     .where(and(isNotNull(collectorRuns.finishedAt), inArray(collectorRuns.trigger, ["cron_job_org", "manual"])))
     .orderBy(desc(collectorRuns.finishedAt)).limit(1);
   return row?.at ?? null;
+}
+
+// The CollectorStale rule's limit (Alerts › Rules), 5 minutes when unset or unreadable: when the collector counts as
+// late or stopped, for the watchdog, the sidebar footer and Overview alike.
+export async function collectorStaleLimit(): Promise<number> {
+  const [rule] = await db().select({ threshold: alertRules.threshold }).from(alertRules).where(eq(alertRules.key, "CollectorStale")).limit(1);
+  return staleLimitMs(rule?.threshold);
 }

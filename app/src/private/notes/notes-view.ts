@@ -56,3 +56,13 @@ export async function dismiss(id: string, by: string, now: Date): Promise<Dismis
     .returning({ id: aiNotes.id, title: aiNotes.title, appId: aiNotes.appId, source: aiNotes.source, client: aiNotes.client });
   return r ? { id: r.id, title: r.title, appId: r.appId, from: r.client || r.source } : null;
 }
+
+// Dismiss all (owner 28 Oct): the notes the owner saw, by id, at most NOTES_MAX; one that was dismissed meanwhile is
+// left alone. The number marked.
+export async function dismissMany(ids: string[], by: string, now: Date): Promise<number> {
+  if (!ids.length) return 0;
+  const rows = await db().update(aiNotes).set({ dismissedAt: now, dismissedBy: by })
+    .where(and(inArray(aiNotes.id, ids.slice(0, NOTES_MAX)), isNull(aiNotes.dismissedAt)))
+    .returning({ id: aiNotes.id });
+  return rows.length;
+}

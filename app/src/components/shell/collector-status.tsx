@@ -8,8 +8,10 @@ import { cn } from "@/lib/utils";
 const DOT = { ok: "bg-ok", warn: "bg-warn-icon", err: "bg-err", idle: "bg-idle" } as const;
 
 // demo: no collector runs in demo mode, so the footer says so and doesn't poll.
-export function CollectorStatus({ initialLastRunAt, initialNow, demo = false }: { initialLastRunAt: string | null; initialNow: number; demo?: boolean }) {
+export function CollectorStatus({ initialLastRunAt, initialNow, demo = false, initialStaleMs }: { initialLastRunAt: string | null; initialNow: number; demo?: boolean; initialStaleMs?: number }) {
   const [lastRunAt, setLastRunAt] = useState(initialLastRunAt);
+  // The CollectorStale rule's limit (lib/collector/status.ts): late and stopped follow it.
+  const [staleMs, setStaleMs] = useState(initialStaleMs);
   const [now, setNow] = useState(initialNow);
   // 1.2.3: the refresh picker's Auto refreshes the page once a run newer than its data is known.
   useEffect(() => {
@@ -25,9 +27,10 @@ export function CollectorStatus({ initialLastRunAt, initialNow, demo = false }: 
           if (!r.ok || r.redirected || !(r.headers.get("content-type") ?? "").includes("application/json")) return null;
           return r.json();
         })
-        .then((j: { lastRunAt?: string | null } | null) => {
+        .then((j: { lastRunAt?: string | null; staleMs?: number } | null) => {
           if (j && typeof j === "object" && "lastRunAt" in j) {
             setLastRunAt(j.lastRunAt ?? null);
+            if (typeof j.staleMs === "number") setStaleMs(j.staleMs);
             setNow(Date.now());
           }
         })
@@ -54,7 +57,7 @@ export function CollectorStatus({ initialLastRunAt, initialNow, demo = false }: 
     };
   }, [demo]);
 
-  const h = demo ? { state: "ok" as const, text: DEMO_COLLECTOR_TEXT } : collectorHealth(lastRunAt ? new Date(lastRunAt) : null, new Date(now));
+  const h = demo ? { state: "ok" as const, text: DEMO_COLLECTOR_TEXT } : collectorHealth(lastRunAt ? new Date(lastRunAt) : null, new Date(now), staleMs);
   return (
     <div className="flex items-center gap-2 border-t border-line px-4 py-3 text-xs text-ink-soft" aria-live="off">
       <span className={cn("size-2 shrink-0 rounded-full", DOT[h.state])} aria-hidden />

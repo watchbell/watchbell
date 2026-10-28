@@ -4,7 +4,7 @@ import { fakeDb, limitOf, payloadOf } from "@/lib/data/fake-db";
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 
-import { dismiss, listNotes, NOTES_MAX } from "./notes-view";
+import { dismiss, dismissMany, listNotes, NOTES_MAX } from "./notes-view";
 
 const NOW = new Date("2026-10-13T03:00:00.000Z");
 const APP = "123e4567-e89b-42d3-a456-426614174000";
@@ -53,5 +53,21 @@ describe("dismiss", () => {
   it("is null for a missing or already dismissed note", async () => {
     h.current = fakeDb([], [[]]);
     expect(await dismiss("n1", "user-1", NOW)).toBeNull();
+  });
+});
+
+describe("dismissMany", () => {
+  it("marks the listed live notes dismissed in one update and counts them", async () => {
+    const f = fakeDb([], [[{ id: "n1" }, { id: "n2" }]]);
+    h.current = f;
+    expect(await dismissMany(["n1", "n2", "n3"], "user-1", NOW)).toBe(2);
+    expect(f.writes).toHaveLength(1);
+    expect(payloadOf(f.writes[0].calls)).toEqual({ dismissedAt: NOW, dismissedBy: "user-1" });
+  });
+  it("writes nothing for an empty list", async () => {
+    const f = fakeDb([], []);
+    h.current = f;
+    expect(await dismissMany([], "user-1", NOW)).toBe(0);
+    expect(f.writes).toHaveLength(0);
   });
 });

@@ -158,10 +158,10 @@ export function vercelCell(apps: State[]): { state: State; sub: string; empty?: 
 }
 
 // Overview → status strip, Collector cell: "12s ago · 1.9 s · 18 checks". The icon follows the sidebar's rule.
-export function collectorCell(run: { finishedAt: Date; durationMs: number | null; checks: number } | null, now: Date): { state: State; sub: string } {
+export function collectorCell(run: { finishedAt: Date; durationMs: number | null; checks: number } | null, now: Date, staleMs?: number): { state: State; sub: string } {
   if (!run) return { state: "unknown", sub: "Hasn't run yet" };
   const took = run.durationMs === null ? "—" : `${(run.durationMs / 1000).toFixed(1)} s`;
-  return { state: collectorHealth(run.finishedAt, now).state, sub: `${ago(run.finishedAt, now)} · ${took} · ${plural(run.checks, "check")}` };
+  return { state: collectorHealth(run.finishedAt, now, staleMs).state, sub: `${ago(run.finishedAt, now)} · ${took} · ${plural(run.checks, "check")}` };
 }
 
 const ORDER: State[] = ["ok", "build", "idle", "paused", "maint", "warn", "err", "fail", "unknown", "off", "info"];

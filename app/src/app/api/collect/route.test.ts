@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ after: vi.fn(), run: vi.fn(), steps: [] as { name: string; run: ReturnType<typeof vi.fn> }[], core: [] as { name: string; run: ReturnType<typeof vi.fn> }[] }));
+const h = vi.hoisted(() => ({ after: vi.fn(), run: vi.fn(), last: vi.fn(), steps: [] as { name: string; run: ReturnType<typeof vi.fn> }[], core: [] as { name: string; run: ReturnType<typeof vi.fn> }[] }));
 vi.mock("next/server", () => ({ after: h.after }));
 vi.mock("@/lib/collector/env", () => ({ collectorEnv: () => ({ COLLECTOR_SECRET: "test-secret-not-real" }) }));
 vi.mock("@/lib/collector/auth", () => ({ bearerOk: (header: string | null) => header === "Bearer test-secret-not-real" }));
 vi.mock("@/lib/collector/run", () => ({ runCollector: h.run }));
+vi.mock("@/lib/collector/last-run", () => ({ lastMinuteRunAt: h.last }));
 vi.mock("@/lib/extensions", () => ({ extensions: { get minuteSteps() { return h.steps; } } }));
 vi.mock("@/lib/collector/core-minute-steps", () => ({ CORE_MINUTE_STEPS: h.core }));
 
@@ -15,6 +16,7 @@ const call = () => POST(new Request("https://watch.example.test/api/collect", { 
 beforeEach(() => {
   vi.resetAllMocks();
   h.run.mockResolvedValue({ skipped: false, ok: true, tasks: ["checks"], checks: 3, durationMs: 1200, errors: [] });
+  h.last.mockResolvedValue(new Date(Date.now() - 30 * 60_000));
   h.steps = [{ name: "office-meeting", run: vi.fn(async () => undefined) }, { name: "advisor-notes", run: vi.fn(async () => { throw new Error("x"); }) }];
 });
 
@@ -53,5 +55,29 @@ describe("POST /api/collect: the minute steps after the response", () => {
     expect(r.status).toBe(401);
     expect(h.run).not.toHaveBeenCalled();
     expect(h.after).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/collect: a floor between scheduled runs (Vercel Hobby CPU, 28 Oct)", () => {
+  it("answers a call within 10 minutes of the last run without running anything", async () => {
+    h.last.mockResolvedValue(new Date(Date.now() - 60_000));
+    const r = await call();
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ skipped: true, reason: "The last run was less than 10 minutes ago." });
+    expect(h.run).not.toHaveBeenCalled();
+    expect(h.after).not.toHaveBeenCalled();
+  });
+  it("runs when there was no run yet", async () => {
+    h.last.mockResolvedValue(null);
+    await call();
+    expect(h.run).toHaveBeenCalledOnce();
+  });
+  it("runs every call when WATCHBELL_COLLECT_MIN_GAP_MIN is 0, without asking for the last run", async () => {
+    vi.stubEnv("WATCHBELL_COLLECT_MIN_GAP_MIN", "0");
+    h.last.mockResolvedValue(new Date());
+    await call();
+    expect(h.run).toHaveBeenCalledOnce();
+    expect(h.last).not.toHaveBeenCalled();
+    vi.unstubAllEnvs();
   });
 });

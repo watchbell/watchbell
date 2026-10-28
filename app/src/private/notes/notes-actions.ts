@@ -6,7 +6,7 @@ import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import { LIMITS, minutesText } from "@/lib/rate-limit";
 import { limit } from "@/lib/rate-limit-db";
-import { dismiss, isUuid } from "./notes-view";
+import { dismiss, dismissMany, isUuid, NOTES_MAX } from "./notes-view";
 
 // Dismiss on an AI note (owner only, R2/R8): one row marked dismissed and an audit event (AiNoteDismissed).
 export async function dismissNote(id: string): Promise<ActionResult> {
@@ -26,5 +26,26 @@ export async function dismissNote(id: string): Promise<ActionResult> {
     }
     refresh();
     return { ok: true, message: "Note dismissed." };
+  }, { requireActionMember }, "local");
+}
+
+// Dismiss all (owner 28 Oct): every note on the card at once, by the ids it showed (a note that arrived since stays),
+// one rate-limit step and one audit event (AiNotesDismissed).
+export async function dismissAllNotes(ids: string[]): Promise<ActionResult> {
+  return runGuarded("owner", async (member): Promise<ActionResult> => {
+    if (!Array.isArray(ids) || !ids.length || ids.length > NOTES_MAX || !ids.every((id) => typeof id === "string" && isUuid(id))) {
+      return { ok: false, error: "Something in that request wasn't valid." };
+    }
+    const quota = await limit(LIMITS.monitorWrite, member.id);
+    if (!quota.allowed) return { ok: false, error: `Too many changes. Try again in ${minutesText(quota.retryAfter)}.` };
+    const n = await dismissMany([...new Set(ids)], member.userId, new Date());
+    if (!n) return { ok: false, error: "Those notes were already dismissed." };
+    try {
+      await recordAction({ kind: "ok", message: `${n} AI ${n === 1 ? "note" : "notes"} dismissed`, detail: "AiNotesDismissed", resourceId: null, actorUserId: member.userId });
+    } catch {
+      console.warn("audit event failed");
+    }
+    refresh();
+    return { ok: true, message: n === 1 ? "Note dismissed." : `${n} notes dismissed.` };
   }, { requireActionMember }, "local");
 }

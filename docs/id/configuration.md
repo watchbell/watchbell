@@ -73,6 +73,7 @@ keduanya boleh diganti kapan saja.
 | `WATCHBELL_MIGRATIONS_DIR` | Folder berisi migrasi database, hanya diperlukan kalau Anda menjalankan server dari luar `app/` (default `drizzle-selfhost`). |
 | `WATCHBELL_TIMEZONE` | Zona waktu untuk setiap waktu yang ditampilkan dan dikirim, job harian, dan ringkasan email, sebagai nama IANA seperti `Europe/Berlin`. Kalau tidak di-set, artinya `Asia/Jakarta` (WIB). Lihat [Zona waktu](#zona-waktu). |
 | `WATCHBELL_ALLOW_REMOTE_DB` | Set ke `1` untuk mengizinkan Postgres remote di `DATABASE_URL` yang biasanya ditolak Watchbell (database Supabase hosted, atau alamat yang tidak bisa diperiksanya). |
+| `WATCHBELL_COLLECT_MIN_GAP_MIN` | Jeda paling sedikit (menit) antara dua run yang dimulai scheduler luar lewat `POST /api/collect` (default `10`, `0` mematikannya). Panggilan yang datang lebih cepat dari itu setelah run terakhir langsung dijawab tanpa menjalankan apa pun, jadi jadwal yang tidak sengaja di-set tiap menit tidak menghabiskan CPU paket gratis. Refresh now dan scheduler bawaan tidak dibatasi. |
 
 Setiap pengaturan notifikasi berdiri sendiri: pengaturan yang tidak ada hanya mematikan channel-nya, dengan catatan di
 Alerts › Notifications.

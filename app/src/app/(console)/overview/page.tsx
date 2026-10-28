@@ -18,6 +18,7 @@ import { DEMO_COLLECTOR_TEXT } from "@/lib/collector/status";
 import { isCloud, isDemo } from "@/lib/mode";
 import { PoolCard } from "@/components/pool-card";
 import { health } from "@/lib/data/metrics-db";
+import { collectorStaleLimit } from "@/lib/collector/last-run";
 import { brokenAccounts, lastMinuteRun } from "@/lib/data/overview-db";
 import { dbBanners, firebaseCell, neonCell, slotCards, supabaseCell, supabaseRows } from "@/lib/view/databases";
 import { hideEvent, hideRec } from "@/lib/view/display-name";
@@ -45,10 +46,11 @@ export default async function OverviewPage() {
   const { RecSummarySlot: RecSummary, AiNotesSlot: AiNotes } = extensions;
   // Independent reads, started together (task 12 M1). This cuts latency, not database work.
   // The Advisor is a side card: if its row can't be read the card is left out instead of failing Overview (null).
-  const [apps, h, events, builds, run, broken, supa, neon, fire, slotInputs, domains, stored, book, pool] = await Promise.all([
+  const [apps, h, events, builds, run, broken, supa, neon, fire, slotInputs, domains, stored, book, pool, staleMs] = await Promise.all([
     listApps(now), health(now), listEvents(PAGE_ROWS.recentEvents, { excludeActions: true }), ongoingBuilds(now), lastMinuteRun(), brokenAccounts(),
     listDatabases("supabase_project"), listDatabases("neon_project"), listDatabases("firestore"), supabaseSlotInputs(), listDomains(),
     listRecommendations(now).catch(() => null), aliasBook(), isCloud() ? poolUsage() : Promise.resolve(null),
+    collectorStaleLimit().catch(() => undefined),
   ]);
   // Privacy: databases by alias, no emails, in every text this page shows (lib/view/display-name.ts).
   const recent = events.map((e) => hideEvent(e, book));
@@ -70,7 +72,7 @@ export default async function OverviewPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader crumbs={[{ label: "Home" }, { label: "Overview" }]} title="Overview" sub={summary ?? undefined} actions={act ? <RefreshButton /> : undefined} />
-      <StatusStrip vercel={vercelCell(appStates)} supabase={supabaseCell(supa, now)} neon={neonCell(neon, now, book)} firebase={firebaseCell(fire, now)} cloudflare={cloudflareCell(domains)} collector={isDemo() ? { state: "ok", sub: DEMO_COLLECTOR_TEXT } : collectorCell(run, now)} />
+      <StatusStrip vercel={vercelCell(appStates)} supabase={supabaseCell(supa, now)} neon={neonCell(neon, now, book)} firebase={firebaseCell(fire, now)} cloudflare={cloudflareCell(domains)} collector={isDemo() ? { state: "ok", sub: DEMO_COLLECTOR_TEXT } : collectorCell(run, now, staleMs)} />
       {cred && (
         <Banner tone="danger" title={cred.title} action={member.role === "owner" ? <Link href="/connections" className={buttonClass({ size: "sm" })}>Open connections</Link> : undefined}>
           {cred.body}

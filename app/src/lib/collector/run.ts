@@ -1,6 +1,7 @@
 import "server-only";
 import { and, eq, gte, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
+import { recordRunCpu } from "./cpu-budget-db";
 import { accounts, collectorRuns, deployments, monitors, resources, settings, snapshots, checks as checksTable } from "@/db/schema";
 import { monitorMoves, stickyPastDomains } from "@/lib/domain-move";
 import { credentialProblem, statusAfterTest } from "@/lib/accounts";
@@ -458,8 +459,15 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
   const done: TaskName[] = [];
   let checkCount = 0;
   const deadline = started.getTime() + BUDGET_MS;
-  // Step timings in the function log (16 Oct incident: prod runs hung while the same code finished locally).
-  const mark = (step: string) => console.info(`collector ${step} +${Date.now() - started.getTime()}ms`);
+  // Step timings in the function log (16 Oct incident: prod runs hung while the same code finished locally), with the CPU
+  // the process used since the start (28 Oct: Vercel Hobby's 4 h of Active CPU a month ran out and its per-step numbers
+  // need a paid plan). Process-wide, so a request served alongside the run on the same instance is counted too.
+  const cpuStart = process.cpuUsage();
+  const cpuMs = () => {
+    const used = process.cpuUsage(cpuStart);
+    return Math.round((used.user + used.system) / 1000);
+  };
+  const mark = (step: string) => console.info(`collector ${step} +${Date.now() - started.getTime()}ms cpu ${cpuMs()}ms`);
   try {
     mark("start");
     const { lastRun, afterDeploy } = await readRunSettings();
@@ -520,6 +528,8 @@ export async function runCollector(trigger: Trigger): Promise<RunSummary> {
     await db().update(collectorRuns).set({ finishedAt: new Date(), ok: errors.length === 0, errorSummary: errors.join("\n").slice(0, 2000) || null, durationMs, tasks: done, checks: checkCount })
       .where(eq(collectorRuns.id, run.id)).catch(() => undefined);
     await releaseLease(owner).catch(() => undefined);
+    // On Vercel, today's collector CPU (cpu-budget-db.ts): a warning event past half a Hobby day's share.
+    if (process.env.VERCEL) await recordRunCpu(cpuMs());
   }
   return { skipped: false, ok: errors.length === 0, tasks: done, checks: checkCount, durationMs: Date.now() - started.getTime(), errors };
 }

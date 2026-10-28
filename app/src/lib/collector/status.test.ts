@@ -21,6 +21,19 @@ describe("collectorHealth", () => {
     expect(collectorHealth(ago(299), now)).toEqual({ state: "warn", text: "Collector late · ran 4 min ago" });
     expect(collectorHealth(ago(300), now)).toEqual({ state: "err", text: "Collector stopped 5 min ago" });
   });
+
+  it("follows a longer CollectorStale limit: a 30-minute schedule with the rule at 40 minutes stays ok between runs", () => {
+    const limit = 40 * 60_000;
+    expect(collectorHealth(ago(25 * 60), now, limit)).toEqual({ state: "ok", text: "Collector ran 25 min ago" });
+    expect(collectorHealth(ago(31 * 60), now, limit)).toEqual({ state: "ok", text: "Collector ran 31 min ago" });
+    expect(collectorHealth(ago(32 * 60), now, limit)).toEqual({ state: "warn", text: "Collector late · ran 32 min ago" });
+    expect(collectorHealth(ago(40 * 60), now, limit)).toEqual({ state: "err", text: "Collector stopped 40 min ago" });
+  });
+
+  it("keeps the 5-minute rule for the default limit or a shorter one", () => {
+    expect(collectorHealth(ago(200), now, 5 * 60_000)).toEqual({ state: "warn", text: "Collector late · ran 3 min ago" });
+    expect(collectorHealth(ago(200), now, 3 * 60_000)).toEqual({ state: "warn", text: "Collector late · ran 3 min ago" });
+  });
 });
 
 describe("schedulerRun", () => {

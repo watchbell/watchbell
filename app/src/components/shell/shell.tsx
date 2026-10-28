@@ -18,7 +18,7 @@ const EMPTY_EXT: ClientExtension = { nav: [], palette: [] };
 // `ext`: the private feature's nav groups and palette entries (5c), sent by the (console) layout to owners only.
 // `collector.demo`: demo mode (WATCHBELL_MODE=demo), which also shows the demo banner above every page.
 // `sections`: the sections that are on (lib/sections.ts); the sidebar and the palette list only their pages.
-export function Shell({ user, collector, alerts, book, shot, ext = EMPTY_EXT, sections, children }: { user: { email: string; role: Role; hasPassword?: boolean }; collector: { lastRunAt: string | null; now: number; demo?: boolean }; alerts: number; book: AliasBook; shot: boolean; ext?: ClientExtension; sections?: SectionId[]; children: ReactNode }) {
+export function Shell({ user, collector, alerts, book, shot, ext = EMPTY_EXT, sections, children }: { user: { email: string; role: Role; hasPassword?: boolean }; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; book: AliasBook; shot: boolean; ext?: ClientExtension; sections?: SectionId[]; children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);

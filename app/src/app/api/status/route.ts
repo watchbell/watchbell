@@ -1,5 +1,6 @@
 import { findMember, getSessionUser } from "@/lib/auth";
-import { lastCollectorRunAt } from "@/lib/collector/last-run";
+import { collectorStaleLimit, lastCollectorRunAt } from "@/lib/collector/last-run";
+import { STALE_MS } from "@/lib/collector/staleness";
 import { demoRouteRefused } from "@/lib/demo/simulate";
 
 // For the sidebar footer, which outlives page navigations. Console members only (the proxy also requires a session).
@@ -8,6 +9,6 @@ export async function GET() {
   if (refused) return refused;
   const session = await getSessionUser();
   if (!session || !(await findMember(session.userId))) return Response.json({ error: "Unauthorized" }, { status: 401 });
-  const at = await lastCollectorRunAt();
-  return Response.json({ lastRunAt: at?.toISOString() ?? null }, { headers: { "Cache-Control": "no-store" } });
+  const [at, staleMs] = await Promise.all([lastCollectorRunAt(), collectorStaleLimit().catch(() => STALE_MS)]);
+  return Response.json({ lastRunAt: at?.toISOString() ?? null, staleMs }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -2,6 +2,21 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.2.6
+
+### Collector
+
+- Hosted on a free plan with a slower outside schedule (Vercel Hobby has 4 hours of Active CPU a month; a collector
+  started every minute used 10-15 minutes a day): the "Checks stopped" rule's limit now drives everything that judges
+  the collector. The watchdog only runs a collection itself past that limit, and the sidebar and Overview stay green
+  between two normal runs (with the rule at 40 minutes: green up to 32, late up to 40, then stopped). The default
+  5 minutes behaves as before.
+- `POST /api/collect` answers a call that comes sooner than `WATCHBELL_COLLECT_MIN_GAP_MIN` (default 10 minutes) after
+  the last run at once, without running, so a schedule set back to every minute by mistake can't use up the CPU.
+  Refresh now and the built-in scheduler are not limited.
+- On Vercel each run adds the CPU it used to the day's total, and the first time a day passes 4 minutes the Activity
+  page gets a "Collector CPU high today" warning. The collector's step lines in the function log show the CPU too.
+
 ## 1.2.5
 
 ### Demo mode
