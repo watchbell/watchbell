@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { branches, commits, readme, repoInfo, repoLanguages, runs } from "./github-browse";
+import { branches, commits, compareCommits, readme, repoInfo, repoLanguages, runs } from "./github-browse";
 
 type Seen = { url: string; method: string };
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -60,3 +60,25 @@ describe("repository browser reads", () => {
       .toMatchObject({ ok: false, kind: "transient", status: 403 });
   });
 });
+
+describe("compareCommits (1.3 What changed)", () => {
+  const c = (n: string, msg: string) => ({ sha: n.repeat(40), html_url: `https://github.com/me/site/commit/${n}`, author: { login: "me" },
+    commit: { message: msg, author: { name: "Me", email: "me@example.com", date: "2026-10-29T00:00:00Z" } } });
+
+  it("GETs base...head and answers the commits newest first with the total", async () => {
+    const f = fake(json({ total_commits: 2, commits: [c("a", "first"), c("b", "second\n\nbody")] }));
+    const r = await compareCommits("t", "me/site", "1111111", "2222222", f);
+    expect(f.seen).toEqual([{ url: "https://api.github.com/repos/me/site/compare/1111111...2222222", method: "GET" }]);
+    expect(r.ok && r.data.total).toBe(2);
+    expect(r.ok && r.data.commits.map((x) => x.title)).toEqual(["second", "first"]);
+    expect(JSON.stringify(r)).not.toContain("me@example.com");
+  });
+
+  it("refuses a SHA that isn't hex before building a URL, and passes a 404 on", async () => {
+    const f = fake(json({ message: "Not Found" }, 404));
+    expect(await compareCommits("t", "me/site", "main;rm", "2222222", f)).toMatchObject({ ok: false, kind: "format" });
+    expect(f.seen).toHaveLength(0);
+    expect(await compareCommits("t", "me/site", "1111111", "2222222", f)).toMatchObject({ ok: false, kind: "missing" });
+  });
+});
+

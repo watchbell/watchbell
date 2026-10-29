@@ -37,6 +37,7 @@ export function mergeExtensions(...parts: Part[]): Extension {
     if (p.telegramCallback) out.telegramCallback = p.telegramCallback;
     if (p.runner) out.runner = p.runner;
     if (p.RepoPreviewSlot) out.RepoPreviewSlot = p.RepoPreviewSlot;
+    if (p.explainBuild) out.explainBuild = p.explainBuild;
   }
   return out;
 }
@@ -86,12 +87,15 @@ export const t5: Part = {};
 
 // ---- T6 assist ----
 import { advisorMinuteStep } from "./assist/advisor-notes";
+import { explainBuild } from "./assist/build-explain";
 import { advisorSummaryStep } from "./assist/daily";
 import { AiNotesSlot } from "./slots/ai-notes-slot";
 import { RecSummarySlot } from "./slots/rec-summary-slot";
 import { WhyAiSlot } from "./slots/why-ai-slot";
 export const t6: Part = {
   WhyAiSlot, RecSummarySlot, AiNotesSlot,
+  // Watchbell 1.3: Explain with AI in the build-logs drawer (owner only, on demand).
+  explainBuild,
   dailySteps: [{ name: "advisor-summary", run: advisorSummaryStep }],
   // Owner 14 Oct: advisor notes by the provider at 07:00 and 19:00 WIB (replaces an agent's cron job).
   minuteSteps: [{ name: "advisor-notes", run: advisorMinuteStep }],

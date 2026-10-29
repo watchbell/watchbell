@@ -2,6 +2,26 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.3.0
+
+Three developer tools. Each one runs only when you ask for it: nothing new runs on a schedule, and nothing new is
+stored.
+
+### Applications
+
+- **Environment** card on an app's page (operators and owners): Check now compares the names of the Vercel project's
+  environment variables with `.env.example` in the linked repository and lists what is missing from Production, set
+  for Preview only, sent to the browser under a secret-looking `NEXT_PUBLIC_` name, or missing from `.env.example`.
+  Values are never read.
+
+### Deployments
+
+- **What changed** in the row menu of a ready production deployment: the commits since the previous production
+  deployment, from GitHub's compare (the newest 50), with pull request numbers linked.
+- **Explain with AI** in the build-logs drawer of a failed build (owner only, needs a provider under AI Gateway): the
+  end of the log, with secrets cut out, is sent once and comes back as what broke, the likely fix and the file. It
+  counts against the AI quota.
+
 ## 1.2.6
 
 ### Collector

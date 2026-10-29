@@ -23,6 +23,8 @@ const h = vi.hoisted(() => ({
   currentDeploymentId: vi.fn(),
   deploymentOfApp: vi.fn(),
   buildLogs: vi.fn(),
+  deploymentState: vi.fn(),
+  ext: {} as { explainBuild?: ReturnType<typeof vi.fn> },
 }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("@/lib/data/provider-action-db", () => ({ loadTarget: h.loadTarget, targetQuota: h.targetQuota, finish: h.finish }));
@@ -32,11 +34,12 @@ vi.mock("@/lib/providers/vercel", () => ({
   promotePreview: h.promotePreview,
 }));
 
-vi.mock("@/lib/data/deployments-db", () => ({ currentDeploymentId: h.currentDeploymentId, deploymentOfApp: h.deploymentOfApp }));
+vi.mock("@/lib/data/deployments-db", () => ({ currentDeploymentId: h.currentDeploymentId, deploymentOfApp: h.deploymentOfApp, deploymentState: h.deploymentState }));
+vi.mock("@/lib/extensions", () => ({ extensions: h.ext }));
 vi.mock("@/lib/providers/vercel-build-logs", () => ({ buildLogs: h.buildLogs }));
 
-import { DEMO_BUILD_LOG } from "@/lib/view/build-logs";
-import { buildLogsAction, cancelAction, promoteAction, promotePreviewAction, redeployAction, redeployCurrentAction, rollbackAction } from "./vercel-actions";
+import { DEMO_BUILD_LOG, DEMO_BUILD_EXPLAIN } from "@/lib/view/build-logs";
+import { buildLogsAction, cancelAction, explainBuildAction, promoteAction, promotePreviewAction, redeployAction, redeployCurrentAction, rollbackAction } from "./vercel-actions";
 
 const at = (hh: number) => new Date(Date.UTC(2026, 9, 13, hh));
 const dep = (id: string, hh: number, extra: Record<string, unknown> = {}) => ({
@@ -253,6 +256,67 @@ describe("buildLogsAction", () => {
       expect(await buildLogsAction(APP, BUILD)).toEqual({ ok: true, data: DEMO_BUILD_LOG });
       expect(h.loadTarget).not.toHaveBeenCalled();
       expect(h.buildLogs).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});
+
+// Watchbell 1.3: Explain with AI, owner only, a failed build only, through the AI extension's explainBuild slot.
+describe("explainBuildAction", () => {
+  const owner = { ...member, role: "owner" as const };
+  const log = { lines: [{ at: 1, kind: "stderr", text: "Type error: nope" }], truncated: false };
+  beforeEach(() => {
+    h.requireActionMember.mockResolvedValue(owner);
+    h.deploymentState.mockResolvedValue("error");
+    h.buildLogs.mockResolvedValue({ ok: true, data: log });
+    h.ext.explainBuild = vi.fn(async () => ({ ok: true, text: "The type is wrong.", model: "groq/llama" }));
+  });
+
+  it("reads the failed build's log and hands it to the slot with the app's name and the member", async () => {
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: true, data: { text: "The type is wrong.", model: "groq/llama" } });
+    expect(h.requireActionMember).toHaveBeenCalledWith("owner");
+    expect(h.deploymentState).toHaveBeenCalledWith(APP, BUILD);
+    expect(h.buildLogs).toHaveBeenCalledWith("tok_secret", "team_a", BUILD);
+    expect(h.ext.explainBuild).toHaveBeenCalledWith({ app: "portfolio-site", lines: log.lines, memberId: owner.id });
+  });
+
+  it("an Operator is refused before any read", async () => {
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "You don't have permission to do that." });
+    expect(h.buildLogs).not.toHaveBeenCalled();
+  });
+
+  it("only a failed build of this app, with valid ids", async () => {
+    expect(await explainBuildAction("nope", BUILD)).toEqual({ ok: false, error: INVALID });
+    h.deploymentState.mockResolvedValue(null);
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: INVALID });
+    h.deploymentState.mockResolvedValue("ready");
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "Only a failed build can be explained." });
+    expect(h.buildLogs).not.toHaveBeenCalled();
+    expect(h.ext.explainBuild).not.toHaveBeenCalled();
+  });
+
+  it("without the AI extension: says the gateway is needed", async () => {
+    delete h.ext.explainBuild;
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "Explain with AI needs the AI gateway." });
+    expect(h.buildLogs).not.toHaveBeenCalled();
+  });
+
+  it("a failed log read or a slot refusal is passed on as one sentence", async () => {
+    h.buildLogs.mockResolvedValue({ ok: false, kind: "auth", status: 403, error: "Vercel rejected this credential (403)." });
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "Couldn't read the build log: Vercel rejected this credential (403)." });
+    h.buildLogs.mockResolvedValue({ ok: true, data: log });
+    h.ext.explainBuild!.mockResolvedValue({ ok: false, error: "There is too little in the build log to explain." });
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "There is too little in the build log to explain." });
+  });
+
+  it("demo mode answers the canned explanation and calls nothing", async () => {
+    vi.stubEnv("WATCHBELL_MODE", "demo");
+    try {
+      expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: true, data: DEMO_BUILD_EXPLAIN });
+      expect(h.buildLogs).not.toHaveBeenCalled();
+      expect(h.ext.explainBuild).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
     }

@@ -3,6 +3,7 @@ import { registry } from "@ext/registry";
 import type { NavItem } from "@/lib/nav";
 import type { SectionId } from "@/lib/sections";
 import type { CallbackHandler } from "@/lib/notify/telegram-updates";
+import type { BuildLine } from "@/lib/view/build-logs";
 
 // R1: the ONE point where the core reaches the private feature. "@ext/registry" resolves to src/private/registry.ts
 // when it exists, else to src/lib/extensions-none.ts (tsconfig paths, next.config.ts turbopack.resolveAlias,
@@ -39,6 +40,9 @@ export type Extension = {
   runner?: RunnerExtension;
   // The runner's preview of a repository (Run / Stop, status, logs), under Repository on its page, owner only.
   RepoPreviewSlot?: ComponentType<{ repoId: string }>;
+  // Watchbell 1.3: a failed build's log explained by the owner's AI provider (what broke, the likely fix, the file).
+  // Without it the build-logs drawer has no Explain with AI button.
+  explainBuild?: (input: { app: string; lines: BuildLine[]; memberId: string }) => Promise<{ ok: true; text: string; model: string } | { ok: false; error: string }>;
 };
 
 // An update PR's lockfile job: the PR branch at its head commit and the packages it raises.

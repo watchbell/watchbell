@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../vercel-actions", () => ({
   cancelAction: vi.fn(), promoteAction: vi.fn(), promotePreviewAction: vi.fn(), redeployAction: vi.fn(), rollbackAction: vi.fn(), buildLogsAction: vi.fn(),
+  releaseNotesAction: vi.fn(),
 }));
 
 import { DeployRowActions, rowLayout, visitLinks } from "./deploy-row-actions";
@@ -32,6 +33,18 @@ describe("rowLayout", () => {
 
   it("no build log offered: as before", () => {
     expect(rowLayout({ actions: [], logs: null, visit: false })).toEqual({ buttons: [], menu: [] });
+  });
+
+  // Watchbell 1.3: a ready production deployment with a commit offers What changed in the menu, next to the build log.
+  it("ready production deployment with a commit: What changed sits in the menu after View build logs", () => {
+    const r = rowLayout({ actions: ["Redeploy"], logs: "menu", visit: true, changes: true });
+    expect(labels(r.buttons)).toEqual(["Visit", "Redeploy"]);
+    expect(r.menu).toEqual([{ label: "View build logs", kind: "logs" }, { label: "What changed", kind: "changes" }]);
+  });
+
+  it("a preview deployment (changes not offered) has no What changed", () => {
+    const r = rowLayout({ actions: ["Promote to production"], logs: "menu", visit: true, changes: false });
+    expect(labels([...r.buttons, ...r.menu])).not.toContain("What changed");
   });
 });
 

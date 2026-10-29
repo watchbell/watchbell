@@ -2,15 +2,18 @@
 
 import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
-import { currentDeploymentId, deploymentOfApp } from "@/lib/data/deployments-db";
+import { currentDeploymentId, deploymentOfApp, deploymentState } from "@/lib/data/deployments-db";
 import { finish, loadTarget } from "@/lib/data/provider-action-db";
+import { releaseNotesFor } from "@/lib/data/release-notes-db";
 import { DPL, GONE, GONE_DEPLOYMENT, LIVE, live, NOT_PREVIEW, NOT_STAGED, prepare, PREVIEW_ROLLED_BACK, redeployAs, ref, refuse, rollbackAs, RUNNING, write } from "@/lib/data/vercel-action";
+import { extensions } from "@/lib/extensions";
 import { isUuid } from "@/lib/ids";
 import { INVALID } from "@/lib/provider-actions";
 import { cancelDeployment, getDeployment, promote, promotePreview, runningProductionBuild } from "@/lib/providers/vercel";
 import { buildLogs } from "@/lib/providers/vercel-build-logs";
-import { type BuildLog, DEMO_BUILD_LOG } from "@/lib/view/build-logs";
+import { type BuildLog, DEMO_BUILD_EXPLAIN, DEMO_BUILD_LOG } from "@/lib/view/build-logs";
 import { deployRole } from "@/lib/view/deploy-actions";
+import { DEMO_RELEASE_NOTES, type ReleaseNotes } from "@/lib/view/release-notes";
 
 // Stage 6 (spec §12, plan A1–A6): the console's Vercel writes. Each one is a public endpoint, so each re-checks the role
 // (Operator+), the ids, the member quota and the per-target cooldown, then reads the live state at Vercel and only writes
@@ -51,6 +54,37 @@ export async function buildLogsAction(appId: string, deploymentId: string): Prom
     const r = await buildLogs(t.token, teamId, deploymentId);
     return r.ok ? { ok: true, data: r.data } : { ok: false, error: `Couldn't read the build log: ${r.error}` };
   }, deps, async () => ({ ok: true, data: DEMO_BUILD_LOG }));
+}
+
+// Watchbell 1.3 Explain with AI: a failed build's log, read now, handed to the AI extension's explainBuild (which cuts
+// secrets out, checks the shared AI quota and asks the owner's provider once). Owner only, like Ask AI. Nothing is stored.
+// Demo: a canned explanation, no provider call.
+export async function explainBuildAction(appId: string, deploymentId: string): Promise<ActionResult<{ text: string; model: string }>> {
+  return runGuarded<{ text: string; model: string }>("owner", async (member) => {
+    if (!isUuid(appId) || typeof deploymentId !== "string" || !DPL.test(deploymentId)) return { ok: false, error: INVALID };
+    const explain = extensions.explainBuild;
+    if (!explain) return { ok: false, error: "Explain with AI needs the AI gateway." };
+    const state = await deploymentState(appId, deploymentId);
+    if (!state) return { ok: false, error: INVALID };
+    if (state !== "error") return { ok: false, error: "Only a failed build can be explained." };
+    const t = await loadTarget(appId, "app");
+    const teamId = t?.resource.meta.teamId;
+    if (!t || typeof teamId !== "string" || !teamId) return { ok: false, error: GONE };
+    const log = await buildLogs(t.token, teamId, deploymentId);
+    if (!log.ok) return { ok: false, error: `Couldn't read the build log: ${log.error}` };
+    const r = await explain({ app: t.resource.name, lines: log.data.lines, memberId: member.id });
+    return r.ok ? { ok: true, data: { text: r.text, model: r.model } } : { ok: false, error: r.error };
+  }, deps, async () => ({ ok: true, data: DEMO_BUILD_EXPLAIN }));
+}
+
+// Watchbell 1.3 What changed: the commits between this production deployment and the one before it, from GitHub's
+// compare. Operator+, on demand only; a read, so no quota and no audit. Demo: made-up commits, no provider call.
+export async function releaseNotesAction(appId: string, deploymentId: string): Promise<ActionResult<ReleaseNotes>> {
+  return runGuarded<ReleaseNotes>("operator", async () => {
+    if (!isUuid(appId) || typeof deploymentId !== "string" || !DPL.test(deploymentId)) return { ok: false, error: INVALID };
+    const r = await releaseNotesFor(appId, deploymentId);
+    return r.ok ? { ok: true, data: r.data } : { ok: false, error: r.error };
+  }, deps, async () => ({ ok: true, data: DEMO_RELEASE_NOTES }));
 }
 
 // Roll back to the previous production deployment, the only one Hobby allows (guards in rollbackAs).

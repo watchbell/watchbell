@@ -55,6 +55,7 @@ import { DEPLOY_HEAD, deploymentRows } from "../../deployments/deployment-rows";
 import { LogViewer } from "../../logs/log-viewer";
 import { AppActions, type DeployRef, PromoteStaged } from "./app-actions";
 import { DependenciesCard } from "./deps-card";
+import { EnvCard } from "./env-card";
 import { LinkDialog } from "./link-dialog";
 import { ConfirmRepo, RefreshActionsButton, RepoDialog } from "./repo-dialog";
 import { SecurityCheckButton } from "./security-check-button";
@@ -216,6 +217,11 @@ export default async function AppPage({ params, searchParams }: { params: Promis
               <DependenciesCard app={{ id: app.id, name: app.name }} view={depsView} canAct={act && !app.gone} owner={member.role === "owner"} now={now} devopsOff={offSections.has("devops")} />
             </div>
           )}
+          {act && !app.gone && (
+            <div className="mt-4">
+              <EnvCard appId={app.id} />
+            </div>
+          )}
           {repoView && (repoView.connected || repoView.link) && (
             <div className="mt-4">
               <RepositoryCard app={{ id: app.id, name: app.name }} view={repoView} suggestion={repoView.link ? null : suggestionFor(app.name, repoView)} owner={member.role === "owner"} canAct={act} now={now} />
@@ -272,7 +278,7 @@ export default async function AppPage({ params, searchParams }: { params: Promis
         <TabsContent value="deployments" keepMounted>
           <Card flush>
             {/* listDeployments has no 30-day window, so an empty list means no deployment at all, which the wording covers. */}
-            {deploys.length === 0 ? <NoDeployments /> : <PlainTable head={DEPLOY_HEAD} rows={deploymentRows(deploys, { canAct: act, now })} />}
+            {deploys.length === 0 ? <NoDeployments /> : <PlainTable head={DEPLOY_HEAD} rows={deploymentRows(deploys, { canAct: act, explain: member.role === "owner" && !!extensions.explainBuild, now })} />}
           </Card>
         </TabsContent>
 

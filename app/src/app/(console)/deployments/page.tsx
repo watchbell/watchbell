@@ -4,8 +4,12 @@ import { ListFilter } from "@/components/list-filter";
 import { AutoRefresh } from "@/components/live";
 import { requirePageMember } from "@/lib/auth";
 import { listDeployments } from "@/lib/data/deployments-db";
+import { extensions } from "@/lib/extensions";
 import { canAct, DEP_STATE_OPTIONS } from "@/lib/view/labels";
 import { DEPLOY_HEAD, deploymentRows } from "./deployment-rows";
+
+// 1.3: Explain with AI (a server action of this page) waits on the AI provider; same budget as the app page.
+export const maxDuration = 60;
 
 export default async function DeploymentsPage() {
   const member = await requirePageMember();
@@ -22,7 +26,7 @@ export default async function DeploymentsPage() {
       <Card flush>
         {list.length === 0
           ? <NoDeployments />
-          : <ListFilter placeholder="Filter by project or commit" states={DEP_STATE_OPTIONS} head={DEPLOY_HEAD} rows={deploymentRows(list, { canAct: canAct(member.role), now })} />}
+          : <ListFilter placeholder="Filter by project or commit" states={DEP_STATE_OPTIONS} head={DEPLOY_HEAD} rows={deploymentRows(list, { canAct: canAct(member.role), explain: member.role === "owner" && !!extensions.explainBuild, now })} />}
       </Card>
     </>
   );

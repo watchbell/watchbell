@@ -33,7 +33,8 @@ const MAX_OPEN = 2_000;
 
 type Token = { token: string; accountId: string } | { error: string };
 
-async function readToken(): Promise<Token> {
+// Exported for 1.3's Env check, which reads .env.example with the same read-only token.
+export async function githubReadToken(): Promise<Token> {
   const [a] = await db().select().from(accounts).where(eq(accounts.provider, "github")).orderBy(asc(accounts.createdAt)).limit(1);
   if (!a) return { error: "GitHub isn't connected." };
   const token = openOrNull({ ciphertext: a.credentialCiphertext, iv: a.credentialIv }, serverEnv().OPS_ENCRYPTION_KEY);
@@ -291,7 +292,7 @@ export function pickRepos<R extends { id: string }>(repos: R[], pick: RepoPick):
 // The daily step, the collector's `security` task (and their tests): repositories in order until the deadline; none
 // starts with < MIN_REPO_MS left.
 export async function runDepsScan(deadline: number, opts: FetchOpts & RepoPick = {}): Promise<DepsRun | { error: string }> {
-  const t = await readToken();
+  const t = await githubReadToken();
   if ("error" in t) return { error: t.error };
   const { first, only, skip, ...fetchOpts } = opts;
   const repos = pickRepos(await reposToScan(), { first, only, skip });
@@ -410,7 +411,7 @@ export async function scanAppNow(appId: string, opts: FetchOpts = {}): Promise<{
     .where(eq(appRepos.appId, appId)).limit(1);
   if (!row) return { ok: false, error: "Link a repository first." };
   if (row.goneAt) return { ok: false, error: "That repository is no longer shared with the GitHub token." };
-  const t = await readToken();
+  const t = await githubReadToken();
   if ("error" in t) return { ok: false, error: t.error };
   // The clicked app's own folder (review T1), even when another app of the same repository decides the daily scan's.
   const d = dirOf(row.meta as Record<string, unknown> | null);

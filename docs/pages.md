@@ -71,6 +71,11 @@ says "no update for N days, may be stale".
   DevOps is off, no lockfile or package.json, or the scan failed). Advisories in development tools only (packages
   that never reach production, such as a migration tool) are counted on their own **Development tools** row, marked
   "local development only, no production impact", and never raise an alert.
+- The Environment card (operators and owners), under Dependencies. **Check now** reads the names of the project's
+  environment variables from Vercel and compares them with `.env.example` in the linked repository (in the Root
+  Directory, on the default branch). It lists a name that `.env.example` has but Production doesn't, a name set for
+  Preview or Development only, a `NEXT_PUBLIC_` name that looks secret (it ends up in the browser), and a Production
+  name missing from `.env.example`. Only names are read, never values; nothing runs on a schedule and nothing is stored.
 - Metrics, Deployments and Logs tabs for that app.
 - Actions for operators and owners: redeploy, roll back, check now. The row menu of the Applications list has Redeploy
   (the same confirm) and View logs (the app's Logs tab) too.
@@ -81,7 +86,14 @@ roll back to the previous production deployment. **Current** marks the deploymen
 newer production build that is still building or failed is shown there instead. Its time is when that build was made,
 not when it was promoted. **View build logs** (operators and owners: a button on a building or
 failed deployment, in the row menu of a ready one) opens the newest build's log in a side drawer, read from Vercel when
-you open it (the last 2,000 lines, not stored), with error lines highlighted and a "Jump to first error" link.
+you open it (the last 2,000 lines, not stored), with error lines highlighted and a "Jump to first error" link. On a
+failed build the owner also gets **Explain with AI**: the end of the log (at most 120 lines, error lines first, secrets
+cut out) goes to the AI provider connected under AI Gateway, and the answer says what broke, the likely fix and the
+file. It counts against the AI quota (20 calls per 10 minutes), runs only when you press it, and isn't stored.
+**What changed** (operators and owners, in the row menu of a ready production deployment built from a commit) lists
+the commits between that deployment and the production deployment before it, read from GitHub when you open it (the
+newest 50, with the pull request number linked when the commit title has one). It needs the app's repository linked
+and GitHub connected.
 
 **Domains.** Every domain of a watched app: DNS from Cloudflare, configuration from Vercel, registration expiry from
 RDAP, and certificate expiry from Watchbell's own TLS check. Warns when a domain is proxied through Cloudflare in front

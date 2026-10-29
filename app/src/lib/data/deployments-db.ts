@@ -49,6 +49,13 @@ export async function deploymentOfApp(appId: string, externalId: string): Promis
   return !!row;
 }
 
+// Watchbell 1.3 Explain with AI: the stored state of one deployment of this app ("ready", "error"…), null when it isn't one.
+export async function deploymentState(appId: string, externalId: string): Promise<string | null> {
+  const [row] = await db().select({ state: deployments.state }).from(deployments)
+    .where(and(eq(deployments.resourceId, appId), eq(deployments.externalId, externalId))).limit(1);
+  return row?.state ?? null;
+}
+
 // Overview → Activity → Ongoing. A build older than an hour that still says "building" was never updated, as in the
 // collector's app state rule, so it isn't shown as ongoing.
 export async function ongoingBuilds(now: Date): Promise<DeploymentRow[]> {

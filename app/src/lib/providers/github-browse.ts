@@ -71,18 +71,30 @@ export async function commits(token: string, fullName: string, ref: string, perP
   if (!isFullName(fullName) || !isGitRef(ref)) return bad;
   const r = await gh(`/repos/${repoPath(fullName)}/commits?sha=${encodeURIComponent(ref)}&per_page=${perPage}`, token, opts);
   if (!r.ok) return r;
-  const p = z.array(z.object({
-    sha: z.string(), html_url: z.string().nullish(), author: z.object({ login: z.string() }).nullish(),
-    commit: z.object({ message: z.string(), author: z.object({ name: z.string().nullish(), date: z.string().nullish() }).nullish() }),
-  })).safeParse(r.data);
+  const p = z.array(commitSchema).safeParse(r.data);
   if (!p.success) return fmt("the commits");
-  return {
-    ok: true,
-    data: p.data.map((c) => ({
-      sha: c.sha, title: c.commit.message.split("\n")[0].slice(0, 200), author: (c.author?.login ?? c.commit.author?.name ?? null)?.slice(0, 80) ?? null,
-      at: c.commit.author?.date ?? null, url: ghUrl(c.html_url),
-    })),
-  };
+  return { ok: true, data: p.data.map(toCommit) };
+}
+
+const commitSchema = z.object({
+  sha: z.string(), html_url: z.string().nullish(), author: z.object({ login: z.string() }).nullish(),
+  commit: z.object({ message: z.string(), author: z.object({ name: z.string().nullish(), date: z.string().nullish() }).nullish() }),
+});
+const toCommit = (c: z.infer<typeof commitSchema>): Commit => ({
+  sha: c.sha, title: c.commit.message.split("\n")[0].slice(0, 200), author: (c.author?.login ?? c.commit.author?.name ?? null)?.slice(0, 80) ?? null,
+  at: c.commit.author?.date ?? null, url: ghUrl(c.html_url),
+});
+const isSha = (v: string) => /^[0-9a-f]{7,40}$/.test(v);
+
+// Watchbell 1.3 What changed: the commits from base (excluded) to head, newest first, and GitHub's total (it lists at
+// most 250). Same fields as commits(); never an email.
+export async function compareCommits(token: string, fullName: string, base: string, head: string, opts: FetchOpts = {}): Promise<Result<{ commits: Commit[]; total: number }>> {
+  if (!isFullName(fullName) || !isSha(base) || !isSha(head)) return bad;
+  const r = await gh(`/repos/${repoPath(fullName)}/compare/${base}...${head}`, token, opts);
+  if (!r.ok) return r;
+  const p = z.object({ total_commits: z.number(), commits: z.array(commitSchema) }).safeParse(r.data);
+  if (!p.success) return fmt("the comparison");
+  return { ok: true, data: { commits: p.data.commits.map(toCommit).reverse(), total: p.data.total_commits } };
 }
 
 export type Branch = { name: string; sha: string; protected: boolean };

@@ -42,3 +42,11 @@ export const DEMO_BUILD_LOG: BuildLog = {
     { at: null, kind: "stderr", text: 'Error: Command "npm run build" exited with 1' },
   ],
 };
+
+// Demo mode's Explain with AI (1.3): a made-up answer to DEMO_BUILD_LOG; no provider is called.
+export const DEMO_BUILD_EXPLAIN = {
+  text: "The checkout page reads cart.total, but the Cart type has no total field.\n"
+    + "Fix: add total to Cart in types/cart.ts, or compute it from the items where the page needs it.\n"
+    + "File: app/checkout/page.tsx, line 12.",
+  model: "demo",
+};

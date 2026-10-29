@@ -77,6 +77,12 @@ satunya untuk melihat:
   gagal). Advisory yang hanya ada di alat development (paket yang tidak pernah ikut ke production, misalnya alat
   migrasi) dihitung terpisah di baris **Development tools**, ditandai "local development only, no production impact",
   dan tidak pernah memunculkan alert.
+- Kartu Environment (operator dan owner), di bawah Dependencies. **Check now** membaca nama-nama environment variable
+  project dari Vercel lalu membandingkannya dengan `.env.example` di repository yang ditautkan (di Root Directory, pada
+  branch default). Kartunya mencantumkan nama yang ada di `.env.example` tapi tidak diset untuk Production, nama yang
+  hanya diset untuk Preview atau Development, nama `NEXT_PUBLIC_` yang terlihat rahasia (nilainya ikut ke browser), dan
+  nama Production yang tidak ada di `.env.example`. Yang dibaca hanya nama, tidak pernah nilainya; tidak ada yang
+  berjalan terjadwal dan tidak ada yang disimpan.
 - Tab Metrics, Deployments, dan Logs untuk aplikasi itu.
 - Aksi untuk operator dan owner: redeploy, roll back, check now. Menu baris di daftar Applications juga punya Redeploy
   (dengan konfirmasi yang sama) dan View logs (tab Logs aplikasi itu).
@@ -88,7 +94,14 @@ back ke deployment yang lebih lama; build production yang lebih baru dan masih b
 sebagai gantinya. Waktunya adalah saat build itu dibuat, bukan saat di-promote. **View build logs** (operator dan owner: tombol pada deployment
 yang sedang building atau gagal, di menu baris untuk deployment yang ready) membuka log build terbaru di drawer samping,
 dibaca dari Vercel saat Anda membukanya (2.000 baris terakhir, tidak disimpan), dengan baris error disorot dan link
-"Jump to first error".
+"Jump to first error". Pada build yang gagal, owner juga mendapat **Explain with AI**: bagian akhir log (paling banyak
+120 baris, baris error didahulukan, rahasia dibuang) dikirim ke AI provider yang terhubung di AI Gateway, dan jawabannya
+menyebut apa yang rusak, kemungkinan perbaikannya, dan file-nya. Ini dihitung ke kuota AI (20 panggilan per 10 menit),
+hanya berjalan saat tombolnya ditekan, dan tidak disimpan. **What changed** (operator dan owner, di menu baris
+deployment production yang ready dan dibangun dari sebuah commit) menampilkan commit di antara deployment itu dan
+deployment production sebelumnya, dibaca dari GitHub saat Anda membukanya (50 terbaru, dengan nomor pull request yang
+ditautkan kalau judul commit menyebutnya). Fitur ini butuh repository aplikasi yang sudah ditautkan dan GitHub yang
+terhubung.
 
 **Domains.** Setiap domain dari aplikasi yang dipantau: DNS dari Cloudflare, konfigurasi dari Vercel, tanggal
 kedaluwarsa registrasi dari RDAP, dan tanggal kedaluwarsa sertifikat dari pengecekan TLS milik Watchbell sendiri.

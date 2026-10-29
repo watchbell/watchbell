@@ -5,9 +5,7 @@ import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
 import { ASSIST_COPY } from "@/lib/copy/edition";
 import { recordAction } from "@/lib/data/audit-db";
-import { minutesText } from "@/lib/rate-limit";
-import { limit } from "@/lib/rate-limit-db";
-import { AI_LIMIT } from "./limits";
+import { overQuota, safeError } from "./limits";
 import { ports } from "./ports";
 import { antigravityQuestion, whyPrompt } from "./prompts";
 import { checkQuestion } from "./question-input";
@@ -22,16 +20,6 @@ import { refreshSummary } from "./summary";
 const INVALID = { ok: false, error: "Something in that request wasn't valid." } as const;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 type Answer = { text: string; model: string; ms: number };
-
-async function overQuota(memberId: string): Promise<string | null> {
-  const q = await limit(AI_LIMIT, memberId);
-  return q.allowed ? null : `Too many AI requests. Try again in ${minutesText(q.retryAfter)}.`;
-}
-
-// The gateway's own errors carry curated messages (no keys, no upstream bodies). Anything else is generic.
-function safeError(e: unknown): string {
-  return e instanceof Error && e.name === "GatewayError" ? e.message.slice(0, 300) : "The AI provider couldn't answer. Try again.";
-}
 
 export async function askWhy(appId: string): Promise<ActionResult<Answer>> {
   return runGuarded("owner", async (member): Promise<ActionResult<Answer>> => {

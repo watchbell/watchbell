@@ -12,6 +12,7 @@ import { actionsFor, rowRoles } from "@/lib/view/deploy-actions";
 import { deploymentStatus } from "@/lib/view/labels";
 import { MaskedText } from "@/components/alias";
 import { outboundLinks } from "@/lib/demo/links";
+import { offersChanges } from "@/lib/view/release-notes";
 import { DeployRowActions } from "./deploy-row-actions";
 
 export const DEPLOY_HEAD: ReactNode[] = [
@@ -24,7 +25,8 @@ export const DEPLOY_HEAD: ReactNode[] = [
 
 // Stage 6: each row's Vercel actions come from its role among its app's rows (current, previous, staged, building…),
 // as the mockup's depRow() lists them. Viewers get no action controls (so no build logs either: Operator+, Task 4).
-export function deploymentRows(list: DeploymentRow[], o: { canAct: boolean; now: Date }): ListRow[] {
+// `explain` (1.3): the member is the owner and the AI extension is there, so a failed build's log offers Explain with AI.
+export function deploymentRows(list: DeploymentRow[], o: { canAct: boolean; explain?: boolean; now: Date }): ListRow[] {
   const roles = rowRoles(list);
   // A9: apps with a staged deployment are rolled back, so their current row offers Promote's way out, not Redeploy.
   const rolledBack = new Set(list.filter((d) => roles.get(d.externalId) === "staged").map((d) => d.appId));
@@ -53,6 +55,8 @@ export function deploymentRows(list: DeploymentRow[], o: { canAct: boolean; now:
                 d={{ appId: d.appId, appName: d.appName, externalId: d.externalId, sha: d.commitSha, url: d.url, visit: outboundLinks(), primaryDomain: d.primaryDomain }}
                 actions={actionsFor(role, rolledBack.has(d.appId))}
                 logs={role === "building" || role === "failed" ? "button" : d.state === "ready" ? "menu" : null}
+                changes={offersChanges(d)}
+                explain={!!o.explain && d.state === "error"}
               />
             )}
           </td>
