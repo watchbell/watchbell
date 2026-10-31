@@ -6,9 +6,9 @@ import type { EnvName } from "@/lib/providers/vercel-env";
 export type EnvFindingKind = "missing-production" | "preview-only" | "public-secret" | "not-in-example";
 export type EnvFinding = { kind: EnvFindingKind; key: string };
 // The result the Environment card shows. example: whether the repository's .env.example was compared ("no-repo": no
-// repository linked; "unreadable": GitHub couldn't give it).
+// repository linked; "no-github": no GitHub token to read it with; "unreadable": GitHub couldn't give it).
 export type EnvCheck = {
-  findings: EnvFinding[]; names: number; example: "found" | "none" | "no-repo" | "unreadable"; examplePath: string | null; checkedAt: string;
+  findings: EnvFinding[]; names: number; example: "found" | "none" | "no-repo" | "no-github" | "unreadable"; examplePath: string | null; checkedAt: string;
 };
 
 const ORDER: readonly EnvFindingKind[] = ["missing-production", "preview-only", "public-secret", "not-in-example"];

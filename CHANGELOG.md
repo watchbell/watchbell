@@ -2,6 +2,16 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.3.1
+
+### Fixes
+
+- **Environment** card: without GitHub connected it now says so ("GitHub isn't connected, or its token can't be
+  read") instead of a bare "couldn't be read".
+- **Explain with AI**: a second press on the same build while the first is still answering (or after reopening the
+  drawer) is refused, so the AI quota isn't spent twice.
+- **What changed** waits up to 10 seconds for GitHub's compare instead of 5, so a long comparison doesn't fail.
+
 ## 1.3.0
 
 Three developer tools. Each one runs only when you ask for it: nothing new runs on a schedule, and nothing new is

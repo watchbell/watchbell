@@ -59,6 +59,10 @@ export async function buildLogsAction(appId: string, deploymentId: string): Prom
 // Watchbell 1.3 Explain with AI: a failed build's log, read now, handed to the AI extension's explainBuild (which cuts
 // secrets out, checks the shared AI quota and asks the owner's provider once). Owner only, like Ask AI. Nothing is stored.
 // Demo: a canned explanation, no provider call.
+// Builds being explained right now (member + deployment): a second click, or the drawer reopened mid-request, would
+// spend the AI quota twice. Per server instance, which is where a quick repeat lands.
+const explaining = new Set<string>();
+
 export async function explainBuildAction(appId: string, deploymentId: string): Promise<ActionResult<{ text: string; model: string }>> {
   return runGuarded<{ text: string; model: string }>("owner", async (member) => {
     if (!isUuid(appId) || typeof deploymentId !== "string" || !DPL.test(deploymentId)) return { ok: false, error: INVALID };
@@ -72,8 +76,15 @@ export async function explainBuildAction(appId: string, deploymentId: string): P
     if (!t || typeof teamId !== "string" || !teamId) return { ok: false, error: GONE };
     const log = await buildLogs(t.token, teamId, deploymentId);
     if (!log.ok) return { ok: false, error: `Couldn't read the build log: ${log.error}` };
-    const r = await explain({ app: t.resource.name, lines: log.data.lines, memberId: member.id });
-    return r.ok ? { ok: true, data: { text: r.text, model: r.model } } : { ok: false, error: r.error };
+    const key = `${member.id}:${deploymentId}`;
+    if (explaining.has(key)) return { ok: false, error: "That build is already being explained. Try again in a moment." };
+    explaining.add(key);
+    try {
+      const r = await explain({ app: t.resource.name, lines: log.data.lines, memberId: member.id });
+      return r.ok ? { ok: true, data: { text: r.text, model: r.model } } : { ok: false, error: r.error };
+    } finally {
+      explaining.delete(key);
+    }
   }, deps, async () => ({ ok: true, data: DEMO_BUILD_EXPLAIN }));
 }
 

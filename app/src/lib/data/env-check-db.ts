@@ -57,7 +57,7 @@ async function readExample(appId: string, rootDir: string | null, rootDirUnusabl
   if (rootDirUnusable) return { example: "unreadable", path: `${rootDirUnusable}/.env.example`, keys: null };
   const path = rootDir ? `${rootDir}/.env.example` : ".env.example";
   const token = await deps.githubToken();
-  if (!token) return { example: "unreadable", path, keys: null };
+  if (!token) return { example: "no-github", path, keys: null };
   const r = await deps.file(token, repo.fullName, path, repo.branch || "HEAD");
   // GitHub's 404 comes back as a "missing" failure: no .env.example. data null: too large or not text.
   if (!r.ok) return { example: r.kind === "missing" ? "none" : "unreadable", path, keys: null };

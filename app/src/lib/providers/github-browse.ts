@@ -87,10 +87,10 @@ const toCommit = (c: z.infer<typeof commitSchema>): Commit => ({
 const isSha = (v: string) => /^[0-9a-f]{7,40}$/.test(v);
 
 // Watchbell 1.3 What changed: the commits from base (excluded) to head, newest first, and GitHub's total (it lists at
-// most 250). Same fields as commits(); never an email.
+// most 250). Same fields as commits(); never an email. Up to 10 s, like the env read: a long comparison can be slow.
 export async function compareCommits(token: string, fullName: string, base: string, head: string, opts: FetchOpts = {}): Promise<Result<{ commits: Commit[]; total: number }>> {
   if (!isFullName(fullName) || !isSha(base) || !isSha(head)) return bad;
-  const r = await gh(`/repos/${repoPath(fullName)}/compare/${base}...${head}`, token, opts);
+  const r = await gh(`/repos/${repoPath(fullName)}/compare/${base}...${head}`, token, { timeoutMs: 10_000, ...opts });
   if (!r.ok) return r;
   const p = z.object({ total_commits: z.number(), commits: z.array(commitSchema) }).safeParse(r.data);
   if (!p.success) return fmt("the comparison");

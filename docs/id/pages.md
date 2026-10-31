@@ -82,7 +82,8 @@ satunya untuk melihat:
   branch default). Kartunya mencantumkan nama yang ada di `.env.example` tapi tidak diset untuk Production, nama yang
   hanya diset untuk Preview atau Development, nama `NEXT_PUBLIC_` yang terlihat rahasia (nilainya ikut ke browser), dan
   nama Production yang tidak ada di `.env.example`. Yang dibaca hanya nama, tidak pernah nilainya; tidak ada yang
-  berjalan terjadwal dan tidak ada yang disimpan.
+  berjalan terjadwal dan tidak ada yang disimpan. Kalau GitHub belum terhubung, kartunya menyebut itu dan hanya memeriksa
+  pengaturan Vercel.
 - Tab Metrics, Deployments, dan Logs untuk aplikasi itu.
 - Aksi untuk operator dan owner: redeploy, roll back, check now. Menu baris di daftar Applications juga punya Redeploy
   (dengan konfirmasi yang sama) dan View logs (tab Logs aplikasi itu).
@@ -97,7 +98,8 @@ dibaca dari Vercel saat Anda membukanya (2.000 baris terakhir, tidak disimpan), 
 "Jump to first error". Pada build yang gagal, owner juga mendapat **Explain with AI**: bagian akhir log (paling banyak
 120 baris, baris error didahulukan, rahasia dibuang) dikirim ke AI provider yang terhubung di AI Gateway, dan jawabannya
 menyebut apa yang rusak, kemungkinan perbaikannya, dan file-nya. Ini dihitung ke kuota AI (20 panggilan per 10 menit),
-hanya berjalan saat tombolnya ditekan, dan tidak disimpan. **What changed** (operator dan owner, di menu baris
+hanya berjalan saat tombolnya ditekan, dan tidak disimpan; menekannya lagi selagi jawabannya belum datang ditolak, jadi
+satu build tidak dihitung dua kali. **What changed** (operator dan owner, di menu baris
 deployment production yang ready dan dibangun dari sebuah commit) menampilkan commit di antara deployment itu dan
 deployment production sebelumnya, dibaca dari GitHub saat Anda membukanya (50 terbaru, dengan nomor pull request yang
 ditautkan kalau judul commit menyebutnya). Fitur ini butuh repository aplikasi yang sudah ditautkan dan GitHub yang

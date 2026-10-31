@@ -76,6 +76,7 @@ says "no update for N days, may be stale".
   Directory, on the default branch). It lists a name that `.env.example` has but Production doesn't, a name set for
   Preview or Development only, a `NEXT_PUBLIC_` name that looks secret (it ends up in the browser), and a Production
   name missing from `.env.example`. Only names are read, never values; nothing runs on a schedule and nothing is stored.
+  Without GitHub connected it says so and checks Vercel's settings only.
 - Metrics, Deployments and Logs tabs for that app.
 - Actions for operators and owners: redeploy, roll back, check now. The row menu of the Applications list has Redeploy
   (the same confirm) and View logs (the app's Logs tab) too.
@@ -89,7 +90,8 @@ failed deployment, in the row menu of a ready one) opens the newest build's log 
 you open it (the last 2,000 lines, not stored), with error lines highlighted and a "Jump to first error" link. On a
 failed build the owner also gets **Explain with AI**: the end of the log (at most 120 lines, error lines first, secrets
 cut out) goes to the AI provider connected under AI Gateway, and the answer says what broke, the likely fix and the
-file. It counts against the AI quota (20 calls per 10 minutes), runs only when you press it, and isn't stored.
+file. It counts against the AI quota (20 calls per 10 minutes), runs only when you press it, and isn't stored; pressing
+it again while it's still answering is refused, so one build isn't charged twice.
 **What changed** (operators and owners, in the row menu of a ready production deployment built from a commit) lists
 the commits between that deployment and the production deployment before it, read from GitHub when you open it (the
 newest 50, with the pull request number linked when the commit title has one). It needs the app's repository linked

@@ -311,6 +311,24 @@ describe("explainBuildAction", () => {
     expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "There is too little in the build log to explain." });
   });
 
+  it("refuses a second explain of the same build while the first still runs, so the AI quota isn't spent twice", async () => {
+    let answer!: (v: unknown) => void;
+    h.ext.explainBuild!.mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+    const first = explainBuildAction(APP, BUILD);
+    await vi.waitFor(() => expect(h.ext.explainBuild).toHaveBeenCalledTimes(1));
+    expect(await explainBuildAction(APP, BUILD)).toEqual({ ok: false, error: "That build is already being explained. Try again in a moment." });
+    answer({ ok: true, text: "The type is wrong.", model: "groq/llama" });
+    expect(await first).toMatchObject({ ok: true });
+    expect(await explainBuildAction(APP, BUILD)).toMatchObject({ ok: true });
+    expect(h.ext.explainBuild).toHaveBeenCalledTimes(2);
+  });
+
+  it("frees the build again when the slot throws", async () => {
+    h.ext.explainBuild!.mockRejectedValueOnce(new Error("boom"));
+    expect(await explainBuildAction(APP, BUILD)).toMatchObject({ ok: false });
+    expect(await explainBuildAction(APP, BUILD)).toMatchObject({ ok: true });
+  });
+
   it("demo mode answers the canned explanation and calls nothing", async () => {
     vi.stubEnv("WATCHBELL_MODE", "demo");
     try {

@@ -25,8 +25,11 @@ export const envFindingText = (f: EnvFinding): string => TEXT[f.kind](f.key);
 const EXAMPLE_NOTE: Record<Exclude<EnvCheck["example"], "found">, string> = {
   none: "No .env.example in the repository, so only Vercel's own settings were checked.",
   "no-repo": "Link a repository to compare with its .env.example.",
+  "no-github": "GitHub isn't connected, or its token can't be read, so .env.example wasn't compared.",
   unreadable: "The repository's .env.example couldn't be read.",
 };
+
+export const envExampleNote = (example: Exclude<EnvCheck["example"], "found">): string => EXAMPLE_NOTE[example];
 
 export function EnvCard({ appId }: { appId: string }) {
   const [check, setCheck] = useState<EnvCheck | null>(null);
@@ -52,7 +55,7 @@ export function EnvCard({ appId }: { appId: string }) {
               <dt>Variables on Vercel</dt>
               <dd>{check.names}</dd>
               <dt>Compared with</dt>
-              <dd>{check.example === "found" ? <span className="font-mono text-[12.5px]">{check.examplePath}</span> : <span className="text-ink-soft">{EXAMPLE_NOTE[check.example]}</span>}</dd>
+              <dd>{check.example === "found" ? <span className="font-mono text-[12.5px]">{check.examplePath}</span> : <span className="text-ink-soft">{envExampleNote(check.example)}</span>}</dd>
               <dt>Checked</dt>
               <dd>{ago(new Date(check.checkedAt), new Date())}</dd>
             </dl>

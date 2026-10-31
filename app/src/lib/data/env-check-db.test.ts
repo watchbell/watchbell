@@ -63,8 +63,14 @@ describe("checkAppEnv", () => {
     expect(binary.ok && binary.data.example).toBe("unreadable");
     const failed = await checkAppEnv(APP, deps({ file: async () => ({ ok: false, kind: "transient", error: "timeout" }) }));
     expect(failed.ok && failed.data.example).toBe("unreadable");
-    const noToken = await checkAppEnv(APP, deps({ githubToken: async () => null }));
-    expect(noToken.ok && noToken.data.example).toBe("unreadable");
+  });
+
+  it("says GitHub isn't connected when there's no token to read .env.example with", async () => {
+    const d = deps({ githubToken: async () => null });
+    const r = await checkAppEnv(APP, d);
+    expect(r.ok && r.data.example).toBe("no-github");
+    expect(r.ok && r.data.examplePath).toBe(".env.example");
+    expect(d.reads).toEqual([]);
   });
 
   it("fails with Vercel's reason when the names can't be read, and for an app it doesn't know", async () => {

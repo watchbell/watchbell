@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { branches, commits, compareCommits, readme, repoInfo, repoLanguages, runs } from "./github-browse";
 
 type Seen = { url: string; method: string };
@@ -79,6 +79,16 @@ describe("compareCommits (1.3 What changed)", () => {
     expect(await compareCommits("t", "me/site", "main;rm", "2222222", f)).toMatchObject({ ok: false, kind: "format" });
     expect(f.seen).toHaveLength(0);
     expect(await compareCommits("t", "me/site", "1111111", "2222222", f)).toMatchObject({ ok: false, kind: "missing" });
+  });
+
+  it("waits up to 10 seconds for GitHub, like the env read (a long comparison can take a while)", async () => {
+    const spy = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await compareCommits("t", "me/site", "1111111", "2222222", fake(json({ total_commits: 0, commits: [] })));
+      expect(spy).toHaveBeenCalledWith(10_000);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
