@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { NextConfig } from "next";
 
@@ -38,8 +38,16 @@ const officeFrame = existsSync(`./public${OFFICE_FRAME_PATH}`) ? [{ source: OFFI
 const standalone = process.env.WATCHBELL_STANDALONE === "1";
 const appRoot = path.resolve(/*turbopackIgnore: true*/ ".");
 
+// Owner 13 Nov: the console names the Watchbell it runs. Without the CLI (the cloud edition on Vercel) that is the newest
+// "## x.y.z" of the CHANGELOG: public-edition/CHANGELOG.md in this repository, CHANGELOG.md at the root of a public
+// export. Same pattern as changelogVersion() in src/lib/self-update.ts (kept literal: plain Node loads this file in the
+// export tests); src/lib/build-version.test.ts checks they agree. The CLI's WATCHBELL_VERSION still wins at runtime.
+const changelog = ["../public-edition/CHANGELOG.md", "../CHANGELOG.md"].find((p) => existsSync(p));
+const buildVersion = changelog ? (/^## (\d{1,4}\.\d{1,4}\.\d{1,6})\s*$/m.exec(readFileSync(changelog, "utf8"))?.[1] ?? "") : "";
+
 const nextConfig: NextConfig = {
   poweredByHeader: false, // 1.2.1: no X-Powered-By: Next.js
+  env: { WATCHBELL_BUILD_VERSION: buildVersion },
   // PGlite finds its .wasm and .data files with new URL("./x", import.meta.url). Bundled, Turbopack swaps that for a
   // URL-like object without a protocol, which fs.readFile refuses on Vercel ("Received an instance of URL"; the demo
   // failed every sign-in with it). Loaded by Node from node_modules it gets a real file: URL, and output tracing keeps

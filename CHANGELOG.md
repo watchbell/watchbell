@@ -2,6 +2,13 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.6.1
+
+- The sidebar names the Watchbell you run, under the collector status, linked to that version's notes here.
+- A Watchbell deployed from source (the cloud edition on Vercel) knows its version too: it takes the newest heading of
+  this file at build time, and its owner sees "Updated to Watchbell x.y.z" once after each new version. It never says
+  a newer version is out, since it is built from the newest code.
+
 ## 1.6.0
 
 Everything that was planned as 1.4 and 1.5 ships here too. Nothing new runs in the cloud edition on a schedule; the

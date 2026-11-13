@@ -58,7 +58,11 @@ describe("readUpdateNotice / markVersionSeen", () => {
     expect(await readUpdateNotice(SELF)).toEqual({ kind: "update", running: "1.2.3", latest: "1.2.4" });
     state.rows = [{ key: "watchbell.latest", value: { version: "1.2.3", checkedAt: "x" } }, { key: "watchbell.seenVersion", value: { version: "1.2.2" } }];
     expect(await readUpdateNotice(SELF)).toEqual({ kind: "updated", version: "1.2.3" });
-    expect(await readUpdateNotice({ WATCHBELL_VERSION: "1.2.3" })).toBeNull(); // cloud
+    // Owner 13 Nov: the cloud edition says What's new once per version too (never "a newer version is out").
+    expect(await readUpdateNotice({ WATCHBELL_VERSION: "1.2.3" })).toEqual({ kind: "updated", version: "1.2.3" });
+    state.rows = [{ key: "watchbell.seenVersion", value: { version: "1.2.3" } }];
+    expect(await readUpdateNotice({ WATCHBELL_VERSION: "1.2.3" })).toBeNull();
+    expect(await readUpdateNotice({ WATCHBELL_MODE: "demo", WATCHBELL_VERSION: "1.2.4" })).toBeNull();
   });
 
   it("Got it records the running version as seen", async () => {

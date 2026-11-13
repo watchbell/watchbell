@@ -1,5 +1,6 @@
 "use client";
 
+import { type ConsoleVersion, VersionLabel } from "./version-label";
 import { BellMark } from "@/components/brand/bell-mark";
 import { IconChevronRight } from "@tabler/icons-react";
 import Link from "next/link";
@@ -16,8 +17,8 @@ import { NAV_ICONS } from "./nav-icons";
 // Watchbell 1.2: one collapsible group per section that is on (`sections`, from the (console) layout; every section
 // when it is missing), each page listed once; a sub-heading (DevOps › Automation) above the items that carry one.
 export function Sidebar({
-  role, ext, sections, selfhost = false, collector, alerts, mobileOpen, onNavigate, navRef,
-}: { role: Role; ext: ClientExtension; sections?: SectionId[]; selfhost?: boolean; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; mobileOpen: boolean; onNavigate: () => void; navRef?: Ref<HTMLElement> }) {
+  role, ext, sections, selfhost = false, version = null, collector, alerts, mobileOpen, onNavigate, navRef,
+}: { role: Role; ext: ClientExtension; sections?: SectionId[]; selfhost?: boolean; version?: ConsoleVersion | null; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; mobileOpen: boolean; onNavigate: () => void; navRef?: Ref<HTMLElement> }) {
   // The search too, for the one item whose href has a query (Status page: /settings?tab=status-page). The console is
   // rendered per request (its layout reads cookies), so this never forces a client-side bailout of a prerender.
   const active = activeKey(usePathname(), ext, useSearchParams());
@@ -89,6 +90,7 @@ export function Sidebar({
         })}
       </div>
       <CollectorStatus initialLastRunAt={collector.lastRunAt} initialNow={collector.now} demo={collector.demo} initialStaleMs={collector.staleMs} />
+      <VersionLabel version={version} />
     </nav>
   );
 }

@@ -10,9 +10,19 @@ export const REGISTRY_LATEST_URL = "https://registry.npmjs.org/watchbell/latest"
 const SEMVER = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 export const isVersion = (v: unknown): v is string => typeof v === "string" && SEMVER.test(v);
 
-export function runningVersion(env: Record<string, string | undefined> = process.env): string | null {
+// Owner 13 Nov: without the CLI (the cloud edition on Vercel) the build's version stands in: next.config.ts takes the
+// newest heading of the CHANGELOG and Next writes it in at build time (the default below must stay the literal
+// process.env.WATCHBELL_BUILD_VERSION for that).
+export function runningVersion(env: Record<string, string | undefined> = process.env, build: string | undefined = process.env.WATCHBELL_BUILD_VERSION): string | null {
   const v = env.WATCHBELL_VERSION?.trim();
-  return isVersion(v) ? v : null;
+  if (isVersion(v)) return v;
+  const b = build?.trim();
+  return isVersion(b) ? b : null;
+}
+
+// The newest "## x.y.z" heading of a CHANGELOG (an "## Unreleased" heading above it is skipped).
+export function changelogVersion(text: string): string | null {
+  return /^## (\d{1,4}\.\d{1,4}\.\d{1,6})\s*$/m.exec(text)?.[1] ?? null;
 }
 
 export function compareVersions(a: string, b: string): number {
@@ -34,8 +44,11 @@ export type UpdateNotice = { kind: "update"; running: string; latest: string } |
 
 // What the owner's console shows: a newer version first; else, once after an update, What's new. The first install
 // shows nothing (the task records it as seen).
-export function updateNotice(i: { running: string | null; latest: Latest | null; seen: string | null }): UpdateNotice {
+// The cloud edition (owner 13 Nov) is deployed from source, so it is never behind npm: only What's new, once per new
+// version, from the first one it runs.
+export function updateNotice(i: { running: string | null; latest: Latest | null; seen: string | null; cloud?: boolean }): UpdateNotice {
   if (!i.running) return null;
+  if (i.cloud) return !i.seen || compareVersions(i.running, i.seen) > 0 ? { kind: "updated", version: i.running } : null;
   if (i.latest && compareVersions(i.latest.version, i.running) > 0) return { kind: "update", running: i.running, latest: i.latest.version };
   if (i.seen && compareVersions(i.running, i.seen) > 0) return { kind: "updated", version: i.running };
   return null;
@@ -43,6 +56,10 @@ export function updateNotice(i: { running: string | null; latest: Latest | null;
 
 // The CHANGELOG section of a version on GitHub ("## 1.2.3" → #123).
 export const whatsNewUrl = (version: string) => `https://github.com/watchbell/watchbell/blob/main/CHANGELOG.md#${version.replace(/\./g, "")}`;
+
+// The sidebar's version label (owner 13 Nov): the version and, where links go out, its CHANGELOG section.
+export const consoleVersion = (version: string | null, linksOut: boolean): { text: string; href: string | null } | null =>
+  version ? { text: version, href: linksOut ? whatsNewUrl(version) : null } : null;
 
 // npm's answer for the latest version, or why not. Never throws.
 export async function fetchLatestVersion(opts: { fetch?: typeof fetch; timeoutMs?: number } = {}): Promise<{ ok: true; version: string } | { ok: false; error: string }> {

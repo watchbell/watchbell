@@ -6,6 +6,8 @@ import { extensions } from "@/lib/extensions";
 import { collectorStaleLimit } from "@/lib/collector/last-run";
 import { lastCollectorRunAt } from "@/lib/collector/run";
 import { readUpdateNotice } from "@/lib/collector/self-update";
+import { outboundLinks } from "@/lib/demo/links";
+import { consoleVersion, runningVersion } from "@/lib/self-update";
 import { UpdateBanner } from "./update-banner";
 import { openAlertCount } from "@/lib/data/alerts-db";
 import { aliasBook } from "@/lib/data/cached";
@@ -39,7 +41,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <>
       <TimeZoneSync zone={timeZone()} />
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"}><UpdateBanner notice={notice} />{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

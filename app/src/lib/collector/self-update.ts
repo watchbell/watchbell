@@ -24,12 +24,15 @@ export async function taskSelfUpdate(now: Date, deadline: number, errors: string
   await db().insert(settings).values({ key: SEEN_KEY, value: { version: running } }).onConflictDoNothing({ target: settings.key });
 }
 
-// The owner's console banner (layout): null in the cloud edition, without a version, or with nothing to say.
+// The owner's console banner (layout): null in the demo, without a version, or with nothing to say. The cloud edition
+// (owner 13 Nov) says What's new once per version it is deployed with; it never checks npm.
 export async function readUpdateNotice(env: Record<string, string | undefined> = process.env): Promise<UpdateNotice> {
   const running = runningVersion(env);
-  if (!running || mode(env) !== "selfhost") return null;
+  const m = mode(env);
+  if (!running || m === "demo") return null;
   const rows = await db().select({ key: settings.key, value: settings.value }).from(settings).where(inArray(settings.key, [LATEST_KEY, SEEN_KEY])).limit(2);
   const value = (k: string) => rows.find((r) => r.key === k)?.value;
+  if (m === "cloud") return updateNotice({ running, latest: null, seen: parseSeen(value(SEEN_KEY)), cloud: true });
   return updateNotice({ running, latest: nodeCheckOff(env).off ? null : parseLatest(value(LATEST_KEY)), seen: parseSeen(value(SEEN_KEY)) });
 }
 
