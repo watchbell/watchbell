@@ -21,7 +21,7 @@ export function UserMenu({ email, role, hasPassword = false }: { email: string; 
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Account menu"
-        className="ml-1 grid size-[30px] place-items-center rounded-full border border-line bg-sunken font-mono text-[11px] font-medium uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+        className="ml-1 grid size-[30px] shrink-0 place-items-center rounded-full border border-line bg-sunken font-mono text-[11px] font-medium uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
       >
         {masked ? "··" : email.slice(0, 2)}
       </DropdownMenuTrigger>

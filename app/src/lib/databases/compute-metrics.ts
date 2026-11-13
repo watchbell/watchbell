@@ -6,6 +6,9 @@
 //   RAM         1 − node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes
 //   disk        1 − node_filesystem_avail_bytes / node_filesystem_size_bytes (the database volume /data, else /)
 //   connections pg_stat_database_num_backends (summed over databases) vs pg_settings_max_connections
+//   memory      (owner 13 Nov, as Supabase's Observability › Database charts it) used = total − free − cache + buffers,
+//               cache + buffers = Cached + Buffers + SReclaimable, swap = SwapTotal − SwapFree, commitment =
+//               Committed_AS of CommitLimit (it can pass 100 %: Linux overcommits)
 // Pure: parsing, the CPU delta, the hourly rollup, the ComputeHigh limits and the 5-minute throttle.
 
 export type PromSample = { name: string; labels: Record<string, string>; value: number };
@@ -67,9 +70,14 @@ export function parsePrometheus(text: string): PromSample[] {
 }
 
 // The raw numbers of one scrape. cpu: summed counters over every CPU (seconds); null where a metric is missing.
+export type MemRaw = {
+  free: number | null; buffers: number | null; cached: number | null; sReclaimable: number | null;
+  swapTotal: number | null; swapFree: number | null; committed: number | null; commitLimit: number | null;
+};
 export type RawSample = {
   cpu: { busy: number; total: number } | null; memTotal: number | null; memAvailable: number | null;
   diskSize: number | null; diskAvail: number | null; backends: number | null; maxConnections: number | null;
+  memory?: MemRaw;
 };
 
 const finite = (n: number) => Number.isFinite(n);
@@ -97,12 +105,18 @@ export function extractSample(samples: PromSample[], ref?: string): RawSample {
     diskSize: fs("node_filesystem_size_bytes"), diskAvail: fs("node_filesystem_avail_bytes"),
     backends: sum(of("pg_stat_database_num_backends")),
     maxConnections: MAX_CONN_NAMES.map(first).find((v) => v !== null) ?? null,
+    memory: {
+      free: first("node_memory_MemFree_bytes"), buffers: first("node_memory_Buffers_bytes"), cached: first("node_memory_Cached_bytes"),
+      sReclaimable: first("node_memory_SReclaimable_bytes"), swapTotal: first("node_memory_SwapTotal_bytes"),
+      swapFree: first("node_memory_SwapFree_bytes"), committed: first("node_memory_Committed_AS_bytes"), commitLimit: first("node_memory_CommitLimit_bytes"),
+    },
   };
 }
 
 export type CpuMark = { at: string; busy: number; total: number };
-// A delta over a longer gap than this is an average of hours, not "now": no CPU value then.
-export const CPU_MAX_GAP_MS = 30 * 60_000;
+// A delta over a longer gap than this is an average of hours, not "now": no CPU value then. 45 min (13 Nov): the cloud
+// collector runs every 30 minutes, so its scrapes are ~30 min apart, a few seconds either way.
+export const CPU_MAX_GAP_MS = 45 * 60_000;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const clampPct = (n: number) => Math.min(100, Math.max(0, n));
@@ -119,7 +133,30 @@ export function cpuPct(prev: CpuMark | null | undefined, cur: CpuMark | null): n
   return round1(clampPct((dBusy / dTotal) * 100));
 }
 
-export type ComputeValues = { cpuPct: number | null; memPct: number | null; diskPct: number | null; connUsed: number | null; connMax: number | null };
+// Bytes. swapB null when the server reports no swap numbers.
+export type MemBreakdown = { totalB: number; usedB: number; cacheB: number; swapB: number | null };
+export type Commitment = { usedB: number; limitB: number; pct: number };
+// mem and commit: absent on values stored before 13 Nov.
+export type ComputeValues = {
+  cpuPct: number | null; memPct: number | null; diskPct: number | null; connUsed: number | null; connMax: number | null;
+  mem?: MemBreakdown | null; commit?: Commitment | null;
+};
+
+function memBreakdown(raw: RawSample): MemBreakdown | null {
+  const m = raw.memory;
+  if (!m || raw.memTotal === null || !(raw.memTotal > 0) || m.free === null || m.buffers === null || m.cached === null) return null;
+  const cacheB = m.buffers + m.cached + (m.sReclaimable ?? 0);
+  return {
+    totalB: raw.memTotal, usedB: Math.max(0, raw.memTotal - m.free - cacheB), cacheB,
+    swapB: m.swapTotal !== null && m.swapFree !== null ? Math.max(0, m.swapTotal - m.swapFree) : null,
+  };
+}
+
+function commitment(raw: RawSample): Commitment | null {
+  const m = raw.memory;
+  if (!m || m.committed === null || m.commitLimit === null || !(m.commitLimit > 0)) return null;
+  return { usedB: m.committed, limitB: m.commitLimit, pct: Math.round((m.committed / m.commitLimit) * 1000) / 10 };
+}
 
 const share = (used: number | null, total: number | null) => (used !== null && total !== null && total > 0 ? round1(clampPct((used / total) * 100)) : null);
 
@@ -131,6 +168,7 @@ export function computeValues(raw: RawSample, prev: CpuMark | null | undefined, 
     diskPct: raw.diskSize !== null && raw.diskAvail !== null ? share(raw.diskSize - raw.diskAvail, raw.diskSize) : null,
     connUsed: raw.backends === null ? null : Math.round(raw.backends),
     connMax: raw.maxConnections === null ? null : Math.round(raw.maxConnections),
+    mem: memBreakdown(raw), commit: commitment(raw),
   };
 }
 
@@ -155,6 +193,8 @@ export function nextLatest(before: MetricsLatest | null, raw: RawSample, now: Da
 export type HourRow = {
   samples: number; cpuSamples: number; cpuAvg: number | null; cpuMax: number | null; memAvg: number | null; memMax: number | null;
   diskPct: number | null; connUsed: number | null; connMax: number | null;
+  // Owner 13 Nov: hourly averages of the memory breakdown (bytes) and the commitment (%, with its peak); absent before.
+  memTotalB?: number | null; memUsedB?: number | null; memCacheB?: number | null; swapB?: number | null; commitPct?: number | null; commitMax?: number | null;
 };
 
 export const hourStart = (d: Date): Date => new Date(Math.floor(d.getTime() / 3_600_000) * 3_600_000);
@@ -166,6 +206,10 @@ const max = (a: number | null, v: number | null) => (v === null ? a : a === null
 export function mergeHour(row: HourRow | null, v: ComputeValues): HourRow {
   const r: HourRow = row ?? { samples: 0, cpuSamples: 0, cpuAvg: null, cpuMax: null, memAvg: null, memMax: null, diskPct: null, connUsed: null, connMax: null };
   const memN = r.memAvg === null ? 0 : r.samples;
+  // The detail columns came later: an hour started before them counts from its first sample that has them.
+  const n = (prev: number | null | undefined) => (prev === null || prev === undefined ? 0 : r.samples);
+  const m = v.mem ?? null;
+  const c = v.commit ?? null;
   return {
     samples: r.samples + 1,
     cpuSamples: r.cpuSamples + (v.cpuPct === null ? 0 : 1),
@@ -173,6 +217,11 @@ export function mergeHour(row: HourRow | null, v: ComputeValues): HourRow {
     memAvg: avg(r.memAvg, memN, v.memPct), memMax: max(r.memMax, v.memPct),
     diskPct: v.diskPct ?? r.diskPct,
     connUsed: max(r.connUsed, v.connUsed), connMax: v.connMax ?? r.connMax,
+    memTotalB: m?.totalB ?? r.memTotalB ?? null,
+    memUsedB: avg(r.memUsedB ?? null, n(r.memUsedB), m?.usedB ?? null),
+    memCacheB: avg(r.memCacheB ?? null, n(r.memCacheB), m?.cacheB ?? null),
+    swapB: avg(r.swapB ?? null, n(r.swapB), m?.swapB ?? null),
+    commitPct: avg(r.commitPct ?? null, n(r.commitPct), c?.pct ?? null), commitMax: max(r.commitMax ?? null, c?.pct ?? null),
   };
 }
 
@@ -199,8 +248,9 @@ export const computeLimits = (t: number | null): ComputeLimits => {
 };
 
 export const SUSTAIN_MS = 15 * 60_000;
-// Latest values older than this say nothing about now (the scrape runs every 5 minutes).
-export const FRESH_MS = 20 * 60_000;
+// Latest values older than this say nothing about now: a scrape runs with each collector run, every 5 minutes self-hosted
+// and every 30 minutes in the cloud (13 Nov: 20 min marked half the cloud's scrapes "not updating").
+export const FRESH_MS = 45 * 60_000;
 
 export type ComputeFact = { id: string; name: string; latest: MetricsLatest | null };
 

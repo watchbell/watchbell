@@ -1,4 +1,4 @@
-import { index, integer, jsonb, primaryKey, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { doublePrecision, index, integer, jsonb, primaryKey, real, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import type { MetricsLatest } from "@/lib/databases/compute-metrics";
 import { ops, resources } from "./schema";
 
@@ -35,4 +35,12 @@ export const supabaseMetrics = ops.table("supabase_metrics", {
   diskPct: real("disk_pct"),
   connUsed: integer("conn_used"),
   connMax: integer("conn_max"),
+  // Owner 13 Nov: the memory breakdown (bytes, hourly averages; total = the newest) and the commitment (%), as Supabase's
+  // Observability › Database charts them. Null for hours scraped before.
+  memTotalB: doublePrecision("mem_total_b"),
+  memUsedB: doublePrecision("mem_used_b"),
+  memCacheB: doublePrecision("mem_cache_b"),
+  swapB: doublePrecision("swap_b"),
+  commitPct: real("commit_pct"),
+  commitMax: real("commit_max"),
 }, (t) => [primaryKey({ columns: [t.resourceId, t.hour] }), index("supabase_metrics_hour_idx").on(t.hour)]);

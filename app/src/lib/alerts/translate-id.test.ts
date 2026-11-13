@@ -79,6 +79,8 @@ const FIXTURES: Facts[] = [
       ] },
       { appId: "a2", version: "15.0.0", status: "vulnerable", findings: [{ id: "GHSA-gggg-hhhh-iiii", cve: null, summary: "z", severity: "MODERATE", fixed: null }] },
     ],
+    ci: [{ appId: "a1", repo: "me/app-a", branch: "main", run: { status: "completed", conclusion: "failure", name: "CI", branch: "main", sha: null, url: null, at: null, runNumber: 42 } }],
+    os: { system: "Ubuntu 22.04.5 LTS", updates: [{ source: "gst-plugins-base1.0", score: 9.8, cves: ["CVE-2026-111183"] }, { source: "gst-plugins-good1.0", score: 9.8, cves: ["CVE-2026-111183", "CVE-2026-46471"] }], kernelWaiting: { installed: "5.15.0-203.213", running: "5.15.0-202.212" } },
   }),
   facts({
     lastMinuteRunAt: null, apps: [{ id: "a3", name: "app-c", latestProduction: null }],
@@ -160,5 +162,25 @@ describe("translateAlertText", () => {
     for (const [rule, text] of [["MonitorDown", "Something new happened."], ["NoSuchRule", "web returned HTTP 502 on 3 consecutive checks."], ["Test", "Hello."], ["HighLatency", ""], ["toString", "x"], ["__proto__", "x"]]) {
       expect(translateAlertText(rule, text)).toBe(text);
     }
+  });
+});
+
+// Watchbell 1.4
+describe("translateAlertText: OsSecurityUpdate", () => {
+  it("speaks the owner's Indonesian", () => {
+    expect(translateAlertText("OsSecurityUpdate", "On Ubuntu 22.04.5 LTS: gst-plugins-base1.0 fixes CVE-2026-111183 (9.8); gst-plugins-good1.0 fixes CVE-2026-111183 (9.8) and 1 more; kernel 5.15.0-203.213 waits for a reboot."))
+      .toBe("Di Ubuntu 22.04.5 LTS: gst-plugins-base1.0 nambal CVE-2026-111183 (9.8); gst-plugins-good1.0 nambal CVE-2026-111183 (9.8) dan 1 lagi; kernel 5.15.0-203.213 nunggu reboot.");
+    expect(translateAlertText("OsSecurityUpdate", "On Ubuntu 22.04.5 LTS: a fixes CVE-1 (7.5); 2 more packages."))
+      .toBe("Di Ubuntu 22.04.5 LTS: a nambal CVE-1 (7.5); 2 paket lagi.");
+    expect(translateAlertText("OsSecurityUpdate", "On Ubuntu 22.04.5 LTS, no waiting security update fixes a CVE scored 7.0 or more, and the newest kernel runs."))
+      .toBe("Di Ubuntu 22.04.5 LTS nggak ada update security yang nunggu buat CVE skor 7.0 ke atas, dan kernel terbaru udah jalan.");
+  });
+});
+
+describe("translateAlertText: CiFailing", () => {
+  it("speaks the owner's Indonesian", () => {
+    expect(translateAlertText("CiFailing", "The latest CI run on main failed (run #42).")).toBe("Run CI terbaru di main gagal (run #42).");
+    expect(translateAlertText("CiFailing", "The latest CI run on main passed.")).toBe("Run CI terbaru di main lolos.");
+    expect(translateAlertText("CiFailing", "The latest Build and test run on the default branch failed.")).toBe("Run Build and test terbaru di branch default gagal.");
   });
 });

@@ -112,6 +112,21 @@ describe("runBackup", () => {
     expect(h.rows.get("2026-10")).toMatchObject({ status: "ok", sheetFileId: "sheetA", attempts: 2 });
   });
 
+  it("makes a new spreadsheet and CSV when the stored ones belong to another connection (403), as on 1 Nov 2026", async () => {
+    h.folder = "fold1";
+    h.rows.set("2026-10", { month: "2026-10", status: "error", attempts: 3, trashedAt: null, sheetFileId: "oldSheet", csvFileId: "oldCsv" });
+    const denied = () => json({ error: { code: 403, status: "PERMISSION_DENIED" } }, 403);
+    let tabsCalls = 0;
+    const g = google({
+      tabs: () => (++tabsCalls === 1 ? denied() : json({ sheets: [{ properties: { sheetId: 0, title: "Sheet1" } }] })),
+      upload: () => (g.calls.at(-1)!.url.includes("/oldCsv") ? denied() : json({ id: "csvNew", size: "321" })),
+    });
+    const r = await runBackup({ month: "2026-10", partial: false, now: NOV_1, deadline: later(), fetch: g.fetch });
+    expect(r.ok).toBe(true);
+    expect(h.rows.get("2026-10")).toMatchObject({ status: "ok", sheetFileId: "sheet1", csvFileId: "csvNew", driveFolderId: "fold1", error: null });
+    expect(g.calls.filter((c) => c.url.includes("/upload/")).map((c) => c.method)).toEqual(["PATCH", "POST"]);
+  });
+
   it("a stored folder always wins: no search, no new folder, nothing renamed (the owner's Watchpost backups folder)", async () => {
     h.folder = "ownersFolder";
     h.folderName = null; // stored before folder names were recorded

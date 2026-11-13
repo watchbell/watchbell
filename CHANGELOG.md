@@ -2,6 +2,60 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.6.0
+
+Everything that was planned as 1.4 and 1.5 ships here too. Nothing new runs in the cloud edition on a schedule; the
+self-hosted edition adds a daily OS scan of its own machine.
+
+### Pull requests and CI
+
+- **Pre-deploy check** on pull requests: a reusable GitHub Actions workflow an app repository calls on every pull
+  request. It comments once (edited on each push) with the packages the pull request adds that have known advisories
+  (OSV.dev), possible secrets in its commits (gitleaks), the Next.js version, and env names to set on Vercel before
+  merging. Warning only: it never blocks a merge. See [docs/precheck.md](docs/precheck.md).
+- **Pull requests** card on the app page: "Check open pull requests" reads each open pull request's pre-deploy check
+  comment. Nothing is stored and nothing runs on a schedule.
+- **CiFailing** alert rule: the latest GitHub Actions run on the default branch failed (read in the daily GitHub sync;
+  needs Actions: Read on the read token). Resolves on the next passing run.
+
+### Build and run
+
+- **Build files** card on the app page: Generate writes a Dockerfile, .dockerignore, docker-compose.yml, a GitHub
+  Actions CI workflow and a Kubernetes manifest from the app's settings (Next.js, Vite, Create React App or Node; env
+  names only, never values). The owner can open them as a pull request; files the repository already has are never
+  overwritten. Adding the CI workflow needs Workflows: Read and write on the PR-write token.
+- **DevOps › Containers** (self-hosted only, off until `WATCHBELL_DOCKER=on`): the Docker containers on the machine,
+  their logs tail (secrets masked) and one CPU and memory reading, with start, stop and restart for the owner. See
+  [docs/containers.md](docs/containers.md).
+
+### Hosting
+
+- **Hosting › Deploy an app**: pick a language and see where it can run, free hosts first, each with its catch in one
+  line and a checked date; pick a repository and open the host's own new-project page. A new Vercel project is
+  watched once ticked under Sync; any other host through Uptime. Watchbell deploys nothing itself. See
+  [docs/pages.md](docs/pages.md#hosting).
+
+### Database
+
+- Supabase **Compute** shows **Memory** (used, cache + buffers and swap against total RAM, 24 hourly stacks) and
+  **Memory commitment** with a Warning from 85 %, as Supabase's Observability › Database does. Needs no new key.
+  See [docs/pages.md](docs/pages.md#database).
+- **Compute** no longer says "not updating" or shows CPU "–" between two scrapes of the cloud collector (every 30
+  minutes).
+
+### Security
+
+- **DevOps › Security › OS vulnerabilities** (self-hosted, Ubuntu for now): the kernel and a pending reboot, security
+  updates waiting with the CVEs they fix (CVSS score, Ubuntu priority, links to Ubuntu, the USN and NVD) and a command
+  to copy, other updates, and OSV.dev's no-fix-yet counts. Read-only; the daily job scans and the owner can Scan now.
+  New alert **OsSecurityUpdate**. See [docs/os-vulnerabilities.md](docs/os-vulnerabilities.md).
+- The Next.js **Security** card shows each advisory's CVSS score, and the CVE links to NVD.
+
+### Menu
+
+- Sub-headings in Hosting (Apps, Network, Watch), Database (Providers, Tools) and DevOps (Code, Servers, Security).
+- A self-hosted console always has DevOps, since Containers and OS vulnerabilities need no GitHub.
+
 ## 1.3.1
 
 ### Fixes

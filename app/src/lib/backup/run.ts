@@ -86,12 +86,13 @@ export async function runBackup(p: { month: string; partial: boolean; now: Date;
 
     const input = await store.readBackupInput(month, partial, now);
 
-    // The spreadsheet: made once, then its tabs and values are (re)written. A sheet the owner deleted is made again.
+    // The spreadsheet: made once, then its tabs and values are (re)written. A sheet the owner deleted, or one this
+    // connection may no longer open (Drive reconnected under another account or client, 1 Nov 2026), is made again.
     inTime();
     if (!row.sheetFileId) await save({ sheetFileId: must(await drive.createSpreadsheetFile(at, sheetTitle(month), folderId, opts)), driveFolderId: folderId });
     inTime();
     let tabs = await drive.ensureTabs(at, row.sheetFileId!, TABS, opts);
-    if (!tabs.ok && tabs.kind === "missing") {
+    if (!tabs.ok && (tabs.kind === "missing" || tabs.kind === "denied")) {
       await save({ sheetFileId: must(await drive.createSpreadsheetFile(at, sheetTitle(month), folderId, opts)), driveFolderId: folderId });
       inTime();
       tabs = await drive.ensureTabs(at, row.sheetFileId!, TABS, opts);

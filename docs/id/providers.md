@@ -181,6 +181,8 @@ Watchbell tidak pernah push langsung ke default branch Anda.
 - Repository access: **Only select repositories**, yaitu repository yang ingin Anda beri pull request update.
 - Repository permissions: Contents: Read and write, Pull requests: Read and write, Commit statuses: Read (untuk merge
   otomatis). Tidak ada yang lain (GitHub menambahkan Metadata: Read sendiri).
+- Untuk menambahkan workflow CI dari [Build files](pages.md) (`.github/workflows/ci.yml`), token juga perlu Workflows:
+  Read and write. Tanpa izin itu pull request tetap dibuka, tanpa file tersebut, dan menyebutkannya.
 - Set tanggal kedaluwarsa.
 
 Lihat [Auto-actions](auto-actions.md#perbaikan-keamanan-otomatis).

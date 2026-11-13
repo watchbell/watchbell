@@ -71,9 +71,10 @@ export function UptimeBars({ bars }: { bars: Bar[] }) {
 // the order of `parts`, each its own strength of the accent. Same 1 px baseline for an empty slot as HourBars.
 const STACK_TONE = ["bg-brand opacity-90", "bg-brand opacity-35", "bg-ink-soft opacity-70"] as const;
 export function StackedBars({
-  bars, parts, height, label,
-}: { bars: { key: string; title: string; values: number[] }[]; parts: string[]; height: number; label: string }) {
-  const max = Math.max(1, ...bars.map((b) => b.values.reduce((s, v) => s + v, 0)));
+  bars, parts, height, label, max: scale,
+}: { bars: { key: string; title: string; values: number[] }[]; parts: string[]; height: number; label: string; max?: number }) {
+  // A fixed scale (memory against total RAM) keeps the free share visible; without one the tallest bar fills the chart.
+  const max = scale && scale > 0 ? scale : Math.max(1, ...bars.map((b) => b.values.reduce((s, v) => s + v, 0)));
   return (
     <>
       <div className="flex items-end gap-0.5" style={{ height }} role="img" aria-label={label}>

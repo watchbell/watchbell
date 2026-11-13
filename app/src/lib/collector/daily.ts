@@ -1,3 +1,4 @@
+import { osState, runOsScan } from "@/lib/data/os-scan-db";
 import "server-only";
 import { and, eq, gte, inArray, isNotNull, lt, max } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -38,7 +39,7 @@ export const GITHUB_STEP_MS = 6_000;
 // sync skips its providers' accounts). The rest (rollups, backup, retention, Advisor) is the console's own, and
 // keep-active always runs: it is a protective write the owner asked for per project, so a Database section that is off
 // never lets Supabase pause a kept project (review A1, Important 2).
-export const DAILY_STEP_SECTION: Record<string, SectionId> = { github: "devops", deps: "devops", databases: "database", security: "hosting" };
+export const DAILY_STEP_SECTION: Record<string, SectionId> = { github: "devops", deps: "devops", databases: "database", security: "hosting", os: "devops" };
 
 // Picks up where the last rollup left off, so a missed day (or a week of them) is filled in on the next run.
 async function rollupRecent(now: Date): Promise<void> {
@@ -136,6 +137,17 @@ export async function runDaily(): Promise<RunSummary> {
       const r = await runSecurityChecks(dailyDeadline(started.getTime(), Date.now()));
       for (const f of r.failed) errors.push(`security ${f}`);
     }],
+    // Owner 12 Nov: a self-hosted console scans the machine it runs on (OS vulnerabilities). Not in the cloud edition.
+    ...(osState() === "on" ? [["os", async () => {
+      const r = await runOsScan();
+      if (!r.ok) errors.push(`os: ${r.error}`);
+      else if (r.data.status !== "unsupported") { // Windows or Debian: not checked, not a failure (review I1)
+        if (r.data.error) errors.push(`os: ${r.data.error}`);
+        const failed = r.data.updates.filter((u) => u.error).length;
+        if (failed) errors.push(`os: Ubuntu's data couldn't be read for ${failed} update${failed === 1 ? "" : "s"}`);
+        if (r.data.backlog.error) errors.push(`os: ${r.data.backlog.error}`);
+      }
+    }] as [string, () => Promise<void>]] : []),
     // R3: the Advisor's hygiene items from what the steps above just wrote. Console rows only; nothing is cached, so
     // there is no tag to expire (the pages read ops.settings "advisor.latest" and the dismissals).
     ["advisor", async () => { await runAdvisor(started); }],

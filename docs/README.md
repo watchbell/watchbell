@@ -23,6 +23,10 @@ pages.
 - [AI](ai.md): your own AI provider keys, the gateway, API keys and the MCP server for AI agents.
 - [Backups](backups.md): monthly summaries in your Google Drive, and how to back up and restore Watchbell itself.
 - [SQL console](sql-console.md): read-only queries against your Supabase and Neon databases.
+- [Containers](containers.md): the Docker containers on the machine a self-hosted Watchbell runs on.
+- [OS vulnerabilities](os-vulnerabilities.md): known vulnerabilities on that machine, with scores and fixes.
+- [Pre-deploy check](precheck.md): a GitHub Actions check that comments on every pull request in your app
+  repositories.
 
 ## Reference
 

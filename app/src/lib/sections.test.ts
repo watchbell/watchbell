@@ -25,6 +25,15 @@ describe("sections (Watchbell 1.2, D11)", () => {
     expect([...sectionsAvailable([])]).toEqual(["home", "hosting", "manage"]);
   });
 
+  // 11 Nov: Containers and OS vulnerabilities (DevOps › Servers, Security) need no GitHub, so a self-hosted (or demo)
+  // console always has DevOps; the owner can still switch it off.
+  it("a self-hosted console has DevOps without GitHub, and says so", () => {
+    expect([...sectionsAvailable([], { selfhost: true })]).toEqual(["home", "hosting", "devops", "manage"]);
+    expect([...sectionsOn([], ["devops"], { selfhost: true })]).toEqual(["home", "hosting", "manage"]);
+    expect(SECTIONS.devops.holds).toMatch(/Containers and OS vulnerabilities/);
+    expect(SECTIONS.devops.appears).toMatch(/self-hosted/);
+  });
+
   it("turns Database and DevOps on when a provider of theirs is connected", () => {
     expect([...sectionsOn(["vercel"], [])]).toEqual(["home", "hosting", "manage"]);
     expect([...sectionsOn(["cloudflare"], [])]).toEqual(["home", "hosting", "manage"]);
@@ -79,6 +88,6 @@ describe("sections (Watchbell 1.2, D11)", () => {
     expect(alertPaused(paused, "MonitorDown")).toBe(false);
     expect(alertPaused(paused, "CollectorStale")).toBe(false);
     expect(alertPaused(new Set(), "DatabasePaused")).toBe(false);
-    expect(pausedAlertKeys(new Set(["devops"] as const))).toEqual({ ruleKeys: ["VulnerableDependency"], providers: ["github", "github_write"] });
+    expect(pausedAlertKeys(new Set(["devops"] as const))).toEqual({ ruleKeys: ["VulnerableDependency", "CiFailing", "OsSecurityUpdate"], providers: ["github", "github_write"] });
   });
 });

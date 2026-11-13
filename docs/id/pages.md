@@ -4,7 +4,8 @@ English: [../pages.md](../pages.md)
 
 Menu kiri mengelompokkan halaman ke dalam bagian, sama seperti di console: Home, Hosting, Database, DevOps, dan Manage.
 Home, Hosting, dan Manage sudah ada sejak awal. Database muncul dengan sendirinya saat Anda menghubungkan Supabase,
-Neon, Firebase, Turso, atau Upstash, atau begitu ada database yang dipantau; DevOps saat Anda menghubungkan GitHub.
+Neon, Firebase, Turso, atau Upstash, atau begitu ada database yang dipantau; DevOps saat Anda menghubungkan GitHub, dan
+selalu ada di console self-hosted (Containers dan OS vulnerabilities di dalamnya tidak butuh GitHub).
 Owner bisa mematikan Hosting, Database, atau DevOps di [Manage › Sections](#manage). Beberapa halaman khusus owner;
 operator dan viewer tidak melihatnya di menu (lihat [role](first-run.md#menambah-orang-lain)). Tekan Ctrl+K (Cmd+K di
 Mac) di mana saja untuk langsung pindah ke halaman berdasarkan namanya; daftarnya sama dengan halaman di menu.
@@ -62,6 +63,21 @@ Insiden yang feed-nya tidak berubah lebih dari sehari ditandai "no update for N 
 
 ## Hosting
 
+Menu Hosting dikelompokkan ke **Apps** (Applications, Deployments, Deploy an app), **Network** (Domains, DNS
+records), dan **Watch** (Uptime, Logs).
+
+**Deploy an app.** Pilih bahasa yang dipakai app (Next.js, situs statis, Node.js, Python, PHP, Go, Java, .NET, Ruby,
+atau image Docker), lalu tempat menjalankannya: host gratis lebih dulu, lalu gratis dengan kartu, trial, paket
+berbayar, dan panduan untuk cloud besar. Setiap host menampilkan catatannya dalam satu baris (tidur saat idle, hanya
+non-komersial, perlu kartu) dan apa yang bisa Watchbell lakukan setelahnya. Daftarnya dicek terhadap halaman harga
+resmi tiap host dan tanggalnya tertulis di halaman. Pilih repository (bahasa GitHub-nya memilih tile) dan tombolnya
+membuka halaman project baru milik host itu sendiri; Watchbell tidak men-deploy apa pun dan tidak pernah memasukkan
+repository Anda ke link-nya (link "deploy" milik host menyalinnya menjadi repository baru). Vercel perlu dihubungkan
+dulu; project Vercel baru muncul di Sync pada halaman Connections setelah sync berikutnya (harian, atau Sync now), lalu
+centang untuk memantaunya (atau nyalakan Watch new ones automatically). Host lain, termasuk Cloudflare, bisa dipantau
+lewat Uptime. Di bawahnya, **Where your apps run** menampilkan aplikasi Anda beserta statusnya. Untuk owner dan operator;
+viewer tidak melihat halaman ini.
+
 **Applications.** Project Vercel yang Anda pilih untuk dipantau, beserta database, domain, dan uptime-nya. Buka salah
 satunya untuk melihat:
 
@@ -84,6 +100,25 @@ satunya untuk melihat:
   nama Production yang tidak ada di `.env.example`. Yang dibaca hanya nama, tidak pernah nilainya; tidak ada yang
   berjalan terjadwal dan tidak ada yang disimpan. Kalau GitHub belum terhubung, kartunya menyebut itu dan hanya memeriksa
   pengaturan Vercel.
+- Kartu Pull requests (operator dan owner, aplikasi dengan repository yang ditautkan). **Check open pull requests**
+  membaca pull request yang masih terbuka di repository itu dan komentar [pre-deploy check](precheck.md) di tiap pull
+  request: fix before merging, check before merging, no new problems, checked an older commit, not checked
+  (repository-nya belum menjalankan pengecekan ini), atau couldn't read the comments (GitHub tidak menjawab; coba lagi).
+  Tidak ada yang berjalan terjadwal dan tidak ada yang disimpan. Kalau run GitHub Actions terakhir di branch default
+  repository itu gagal, alert **CiFailing** menyala (warning); alert itu resolved di run berikutnya yang lolos. Yang
+  dilihat adalah run terakhir dari workflow apa pun di sana, bukan hanya workflow bernama CI. Watchbell membaca run itu
+  saat sync GitHub harian, jadi token GitHub-nya perlu izin Actions: Read; run yang tidak terbaca lagi selama dua hari
+  dianggap tidak diketahui, jadi alert-nya tidak menyala dan tidak resolved karena data lama.
+- Kartu Build files (operator dan owner). **Generate** menulis `Dockerfile`, `.dockerignore`, `docker-compose.yml`,
+  workflow GitHub Actions (`.github/workflows/ci.yml`), dan manifest Kubernetes (`k8s.yaml`) dari pengaturan aplikasi:
+  framework-nya (Next.js, Vite, Create React App, atau aplikasi Node yang punya script start), Root Directory Vercel,
+  package manager dari lockfile, versi Node di `engines`, script-nya, dan nama env-nya (hanya nama, tidak pernah nilai).
+  Tiap file punya tombol Copy; fakta yang harus ditebak Watchbell dicantumkan. Owner bisa menekan **Open pull request**:
+  file-file itu masuk ke branch baru `watchbell/build-files-…` di repository yang ditautkan, dan file yang sudah ada di
+  repository tidak pernah ditimpa (dicantumkan sebagai dibiarkan). File CI butuh izin Workflows: Read and write pada
+  token PR-write; tanpa izin itu pull request tetap dibuka tanpa file tersebut dan menyebutkannya. Manifest Kubernetes
+  tidak berisi Secret: komentarnya memuat perintah `kubectl create secret … --from-env-file=.env` dan nama-nama env.
+  Tidak ada yang di-build, di-deploy, atau disimpan.
 - Tab Metrics, Deployments, dan Logs untuk aplikasi itu.
 - Aksi untuk operator dan owner: redeploy, roll back, check now. Menu baris di daftar Applications juga punya Redeploy
   (dengan konfirmasi yang sama) dan View logs (tab Logs aplikasi itu).
@@ -131,12 +166,21 @@ menyimpannya selama 7 hari.
 
 ## Database
 
+Menu Database dikelompokkan ke **Providers** (Supabase, Neon, Firebase, Turso, Upstash Redis, Cloudflare D1) dan
+**Tools** (SQL console, Free databases).
+
 **Supabase.** Status, region, dan versi Postgres tiap project dari Management API, yang tidak menyentuh database Anda.
 Ukuran database dibaca sekali sehari, dan hanya selama project-nya memang sedang aktif. Per project (khusus owner):
 **Keep active** memberi peringatan mulai hari ke-5 tanpa trafik API dan mengirim satu query keep-alive per hari agar
 project gratis tidak di-pause; **Auto-restore** menghidupkan kembali project yang di-pause saat akunnya punya slot
 gratis. **Check services** di menu baris langsung membaca kesehatan layanan project (Auth, REST, Realtime, Storage,
 Database) dari Management API.
+
+**Compute** di bawah tabel, per project yang punya metrics key (Secret API key yang ditambahkan owner): CPU, RAM, disk,
+dan koneksi saat ini beserta 24 rata-rata per jam, lalu **Memory** (used, cache + buffers, dan swap dari total RAM, per
+jam) dan **Memory commitment** (memori yang dijanjikan ke proses, dari batas sebelum kernel menolak; Warning mulai
+85 %), seperti di Observability › Database Supabase. Dibaca dari Metrics API Supabase setiap kali collector jalan: tiap
+30 menit di konsol cloud, tiap 5 menit di self-host.
 
 **Neon.** Status compute, CU-hour, storage, dan transfer dari Neon API. Membaca data itu tidak membangunkan compute dan
 Watchbell tidak pernah terhubung ke database-nya. Operator bisa membangunkan compute yang sedang suspended.
@@ -170,10 +214,22 @@ menunggu approval juga tampil di Overview. Pembuatan butuh token dengan akses tu
 
 ## DevOps
 
-Di bawah sub-judul **Automation**:
+Di bawah sub-judul **Code**:
 
 **Repositories.** Browser read-only untuk repository yang bisa dibaca token GitHub Anda: README, file, commit, branch,
 run Actions, dan dependency advisory. Menampilkan "GitHub isn't connected" sampai Anda menambahkan token GitHub.
+
+Di bawah sub-judul **Servers** (hanya self-hosted):
+
+**Containers.** Container Docker di mesin tempat Watchbell berjalan, untuk operator dan owner. Mati sampai Anda
+menyalakannya: lihat [Containers](containers.md).
+
+Di bawah sub-judul **Security** (hanya self-hosted):
+
+**OS vulnerabilities.** Kerentanan yang diketahui di mesin tempat Watchbell berjalan (Ubuntu untuk sekarang): kernel
+dan reboot yang tertunda, update keamanan yang menunggu beserta skor CVSS tiap CVE, prioritas Ubuntu dan tautannya,
+serta perintah untuk di-copy. Alert **OsSecurityUpdate** menyala selama salah satunya memperbaiki CVE dengan skor 7.0
+ke atas. Lihat [OS vulnerabilities](os-vulnerabilities.md).
 
 ## Manage
 

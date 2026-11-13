@@ -20,6 +20,8 @@ vi.mock("@/lib/data/security-db", () => ({ runSecurityChecks: h.runSecurityCheck
 vi.mock("@/lib/data/advisor-db", () => ({ runAdvisor: h.runAdvisor }));
 vi.mock("@/lib/data/events-write", () => ({ recordEvents: h.recordEvents }));
 vi.mock("@/lib/data/heartbeats-db", () => ({ recordPing: h.recordPing }));
+const os = vi.hoisted(() => ({ runOsScan: vi.fn() }));
+vi.mock("@/lib/data/os-scan-db", () => ({ runOsScan: os.runOsScan, osState: () => (process.env.WATCHBELL_MODE === "selfhost" ? "on" : "off-cloud") }));
 // Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
 const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
 vi.mock("@/lib/data/sections-db", () => ({ pausedSections: async () => sec.paused }));
@@ -74,6 +76,36 @@ describe("runDaily keep-active step (A8)", () => {
     expect(deadline).toBeGreaterThanOrEqual(before);
     expect(r.tasks).toContain("keep-active");
     expect(r.errors).toEqual(["keep-active/quillpad: x"]);
+  });
+});
+
+describe("runDaily OS scan (owner 12 Nov)", () => {
+  it("a self-hosted console scans its machine after the security check; a scan problem is one line", async () => {
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    os.runOsScan.mockReset().mockResolvedValue({ ok: true, data: { status: "error", error: "Couldn't read the waiting updates (apt isn't installed).", updates: [], backlog: { error: null } } });
+    const r = await runDaily();
+    expect(r.tasks.slice(-2)).toEqual(["os", "advisor"]);
+    expect(r.errors).toContain("os: Couldn't read the waiting updates (apt isn't installed).");
+  });
+  it("an unsupported machine (Windows, Debian) is not a daily failure; failed lookups are (review I1, M7)", async () => {
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    os.runOsScan.mockReset().mockResolvedValue({ ok: true, data: { status: "unsupported", error: "OS checks run on Ubuntu for now; this machine is win32.", updates: [], backlog: { error: null } } });
+    expect((await runDaily()).errors.filter((e) => e.startsWith("os"))).toEqual([]);
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    os.runOsScan.mockReset().mockResolvedValue({ ok: true, data: { status: "ok", error: null, updates: [{ error: "x" }, { error: null }, { error: "y" }], backlog: { error: "OSV.dev answered HTTP 500." } } });
+    expect((await runDaily()).errors.filter((e) => e.startsWith("os"))).toEqual(["os: Ubuntu's data couldn't be read for 2 updates", "os: OSV.dev answered HTTP 500."]);
+  });
+  it("the cloud edition has no OS step, and a paused DevOps section skips it", async () => {
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    os.runOsScan.mockReset();
+    expect((await runDaily()).tasks).not.toContain("os");
+    vi.stubEnv("WATCHBELL_MODE", "selfhost");
+    sec.paused = new Set(["devops"]);
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    expect((await runDaily()).tasks).not.toContain("os");
+    expect(os.runOsScan).not.toHaveBeenCalled();
   });
 });
 

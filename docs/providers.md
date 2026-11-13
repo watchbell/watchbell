@@ -175,6 +175,8 @@ update pull requests when you allow that. It never pushes to your default branch
 - Repository access: **Only select repositories**, the ones you want update pull requests for.
 - Repository permissions: Contents: Read and write, Pull requests: Read and write, Commit statuses: Read (for
   automatic merges). Nothing else (GitHub adds Metadata: Read itself).
+- To add the CI workflow from [Build files](pages.md) (`.github/workflows/ci.yml`), the token also needs Workflows: Read
+  and write. Without it the pull request still opens, without that file, and says so.
 - Set an expiry date.
 
 See [Auto-actions](auto-actions.md#automatic-security-fixes).

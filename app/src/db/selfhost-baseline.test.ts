@@ -119,7 +119,7 @@ describe("self-host migration baseline", { timeout: 30_000 }, () => {
 
   it("seeds the alert rules the cloud migrations insert", async () => {
     const keys = rowsOf<{ key: string }>(await db.execute(sql`select key from ops.alert_rules`)).map((r) => r.key);
-    expect(keys).toEqual(expect.arrayContaining(["MonitorDown", "CollectorStale", "HighLatency", "DeploymentFailed", "VulnerableDependency", "ComputeHigh", "DbQuotaHigh", "FrameworkVulnerable", "MonitorDomainMoved"]));
+    expect(keys).toEqual(expect.arrayContaining(["MonitorDown", "CollectorStale", "HighLatency", "DeploymentFailed", "VulnerableDependency", "ComputeHigh", "DbQuotaHigh", "FrameworkVulnerable", "MonitorDomainMoved", "CiFailing", "OsSecurityUpdate"]));
   });
 
   // Review T1 minor 10: FrameworkVulnerable takes the owner's channels of VulnerableDependency (else the default), in both
@@ -144,6 +144,33 @@ describe("self-host migration baseline", { timeout: 30_000 }, () => {
         await db.execute(sql`delete from ops.alert_rules where key = 'FrameworkVulnerable'`);
         await db.execute(sql.raw(seed));
         expect(await channels("FrameworkVulnerable")).toEqual(["telegram", "email_digest"]);
+        await db.execute(sql`insert into ops.alert_rules (key, severity, threshold, channels, enabled) values (${vd.key}, ${vd.severity}, ${vd.threshold}, ${JSON.stringify(vd.channels)}::jsonb, ${vd.enabled})`);
+      }
+    } finally {
+      await db.execute(sql`update ops.alert_rules set channels = ${JSON.stringify(before)}::jsonb where key = 'VulnerableDependency'`);
+    }
+  });
+
+  // Watchbell 1.4: CiFailing takes VulnerableDependency's channels (the other GitHub rule), else the default, in both
+  // editions' seeds; an existing CiFailing row is never changed.
+  it("seeds CiFailing with VulnerableDependency's channels, else the default (cloud 0059 and self-host 0008)", async () => {
+    const channels = async (key: string) =>
+      rowsOf<{ channels: unknown }>(await db.execute(sql`select channels from ops.alert_rules where key = ${key}`)).map((r) => r.channels)[0];
+    const seeds = [readFileSync(resolve("drizzle/0059_ci_failing_rule.sql"), "utf8"), readFileSync(join(selfhostMigrationsFolder(), "0008_ci_failing_rule.sql"), "utf8")];
+    const before = await channels("VulnerableDependency");
+    try {
+      for (const seed of seeds) {
+        await db.execute(sql`delete from ops.alert_rules where key = 'CiFailing'`);
+        await db.execute(sql`update ops.alert_rules set channels = '["discord"]'::jsonb where key = 'VulnerableDependency'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("CiFailing")).toEqual(["discord"]);
+        await db.execute(sql`update ops.alert_rules set channels = '["email_digest"]'::jsonb where key = 'CiFailing'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("CiFailing")).toEqual(["email_digest"]);
+        const vd = rowsOf<Record<string, unknown>>(await db.execute(sql`delete from ops.alert_rules where key = 'VulnerableDependency' returning key, severity, threshold, channels, enabled`))[0];
+        await db.execute(sql`delete from ops.alert_rules where key = 'CiFailing'`);
+        await db.execute(sql.raw(seed));
+        expect(await channels("CiFailing")).toEqual(["telegram", "email_digest"]);
         await db.execute(sql`insert into ops.alert_rules (key, severity, threshold, channels, enabled) values (${vd.key}, ${vd.severity}, ${vd.threshold}, ${JSON.stringify(vd.channels)}::jsonb, ${vd.enabled})`);
       }
     } finally {

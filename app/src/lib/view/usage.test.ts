@@ -14,7 +14,7 @@ const latest = (o: Partial<MetricsLatest> = {}): MetricsLatest => ({ at: at(2).t
 describe("computePanel", () => {
   it("has three shapes: no key, waiting for the first scrape (or its error), values", () => {
     expect(computePanel(undefined, now)).toEqual({ kind: "none" });
-    expect(computePanel({ latest: null, lastTryAt: null, lastOkAt: null, lastError: null, hours: [] }, now)).toEqual({ kind: "waiting", note: "Waiting for the first scrape (every 5 minutes)." });
+    expect(computePanel({ latest: null, lastTryAt: null, lastOkAt: null, lastError: null, hours: [] }, now)).toEqual({ kind: "waiting", note: "Waiting for the first scrape (with the next collector run)." });
     expect(computePanel({ latest: null, lastTryAt: at(4), lastOkAt: null, lastError: "Supabase rejected the metrics key (401).", hours: [] }, now))
       .toEqual({ kind: "waiting", note: "Last try 4 min ago: Supabase rejected the metrics key (401)." });
   });
@@ -32,9 +32,54 @@ describe("computePanel", () => {
     expect(p.gauges[3].series[22]).toBe(50);
   });
 
-  it("marks values older than 20 minutes as not updating", () => {
-    const p = computePanel({ latest: latest({ at: at(40).toISOString() }), lastTryAt: at(1), lastOkAt: at(40), lastError: "timeout", hours: [] }, now);
+  it("marks values older than 45 minutes as not updating (the cloud scrapes every 30)", () => {
+    const p = computePanel({ latest: latest({ at: at(50).toISOString() }), lastTryAt: at(1), lastOkAt: at(50), lastError: "timeout", hours: [] }, now);
+    expect(computePanel({ latest: latest({ at: at(35).toISOString() }), lastTryAt: at(35), lastOkAt: at(35), lastError: null, hours: [] }, now)).toMatchObject({ stale: false });
     expect(p).toMatchObject({ kind: "ok", stale: true, error: "timeout" });
+  });
+});
+
+// Owner 13 Nov: memory like Supabase's Observability › Database (Used, Cache + Buffers, Swap of Total RAM; Memory
+// commitment with a warning).
+describe("computePanel memory and commitment", () => {
+  const GB = 1024 ** 3;
+  const MB = 1024 ** 2;
+  const mem = { totalB: 1.8 * GB, usedB: 400 * MB, cacheB: 300 * MB, swapB: 200 * MB };
+  const hour = (h: number, o: Record<string, number | null> = {}) => ({
+    hour: new Date(Date.UTC(2026, 9, 16, h)), samples: 2, cpuSamples: 2, cpuAvg: 5, cpuMax: 6, memAvg: 40, memMax: 41, diskPct: 8, connUsed: 9, connMax: 60,
+    memTotalB: 1.8 * GB, memUsedB: 400 * MB, memCacheB: 300 * MB, swapB: 200 * MB, commitPct: 89, commitMax: 90, ...o,
+  });
+  const panel = (o: Partial<MetricsLatest> = {}, hours = [hour(12), hour(11, { memUsedB: null, memCacheB: null, swapB: null })]) =>
+    computePanel({ latest: latest({ mem, commit: { usedB: 1.25 * GB, limitB: 1.4 * GB, pct: 89.3 }, ...o }), lastTryAt: at(2), lastOkAt: at(2), lastError: null, hours }, now);
+
+  it("says what RAM holds now, in the units Supabase uses", () => {
+    const p = panel();
+    if (p.kind !== "ok") throw new Error("ok");
+    expect(p.memory?.now).toEqual({ total: "1.80 GB", used: "400 MB", cache: "300 MB", swap: "200 MB" });
+  });
+  it("stacks 24 hours of used, cache + buffers and swap against total RAM, a gap where an hour has none", () => {
+    const p = panel();
+    if (p.kind !== "ok" || !p.memory) throw new Error("memory");
+    expect(p.memory.parts).toEqual(["Used", "Cache + Buffers", "Swap"]);
+    expect(p.memory.max).toBe(1.8 * GB);
+    expect(p.memory.bars).toHaveLength(24);
+    expect(p.memory.bars[23]).toMatchObject({ values: [400 * MB, 300 * MB, 200 * MB] });
+    expect(p.memory.bars[23].title).toMatch(/used 400 MB, cache \+ buffers 300 MB, swap 200 MB of 1\.80 GB$/);
+    expect(p.memory.bars[22].values).toEqual([0, 0, 0]);
+  });
+  it("shows the commitment of its limit, warns from 85 % and is red past the limit", () => {
+    const p = panel();
+    if (p.kind !== "ok") throw new Error("ok");
+    expect(p.commit).toMatchObject({ value: "1.25 GB of 1.40 GB", pct: 89.3, tone: "warn", peak: "90% peak 24 h" });
+    expect(p.commit?.series[23]).toBe(89);
+    const over = panel({ commit: { usedB: 1.5 * GB, limitB: 1.4 * GB, pct: 107.1 } });
+    expect(over.kind === "ok" && over.commit?.tone).toBe("err");
+    const fine = panel({ commit: { usedB: 0.5 * GB, limitB: 1.4 * GB, pct: 35.7 } });
+    expect(fine.kind === "ok" && fine.commit?.tone).toBeUndefined();
+  });
+  it("has neither before the first scrape with the detail (values stored before 13 Nov)", () => {
+    const p = panel({ mem: undefined, commit: undefined }, []);
+    expect(p).toMatchObject({ kind: "ok", memory: null, commit: null });
   });
 });
 

@@ -12,7 +12,9 @@ const DRIVE = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files";
 const SHEETS = "https://sheets.googleapis.com/v4/spreadsheets";
 
-export type DriveFailure = { ok: false; kind: "auth" | "missing" | "full" | "transient" | "format"; error: string; status?: number };
+// denied: a plain 403, this connection may not touch that file (e.g. it was made under another Google account or OAuth
+// client: drive.file only reaches the client's own files).
+export type DriveFailure = { ok: false; kind: "auth" | "missing" | "denied" | "full" | "transient" | "format"; error: string; status?: number };
 export type DriveResult<T> = { ok: true; data: T } | DriveFailure;
 type Method = "GET" | "POST" | "PATCH";
 
@@ -51,7 +53,7 @@ async function call(method: Method, url: string, token: string, body: { json?: u
   if (res.status === 429 || res.status >= 500 || (res.status === 403 && /rateLimit/i.test(reason ?? ""))) {
     return { ok: false, kind: "transient", status: res.status, error: `Google Drive is busy (${res.status}). The next run tries again.` };
   }
-  return { ok: false, kind: "format", status: res.status, error: `Google Drive refused the request (${res.status}${reason ? ` ${reason}` : ""}).` };
+  return { ok: false, kind: res.status === 403 ? "denied" : "format", status: res.status, error: `Google Drive refused the request (${res.status}${reason ? ` ${reason}` : ""}).` };
 }
 
 const idOnly = z.object({ id: z.string().min(1) });
@@ -76,7 +78,7 @@ export async function findFolder(token: string, name: string, opts: FetchOpts = 
 // Drive (whatever the owner calls it), so the console can show it.
 export async function folderState(token: string, id: string, opts: FetchOpts = {}): Promise<DriveResult<{ usable: boolean; name: string | null }>> {
   const r = await call("GET", `${DRIVE}/${encodeURIComponent(id)}?fields=id,trashed,name`, token, null, opts);
-  if (!r.ok) return r.kind === "missing" ? { ok: true, data: { usable: false, name: null } } : r;
+  if (!r.ok) return r.kind === "missing" || r.kind === "denied" ? { ok: true, data: { usable: false, name: null } } : r;
   const p = z.object({ id: z.string(), trashed: z.boolean().optional(), name: z.string().optional() }).safeParse(r.data);
   return p.success ? { ok: true, data: { usable: !p.data.trashed, name: p.data.name?.trim() || null } } : fmt("the folder");
 }
@@ -142,7 +144,7 @@ export function multipartBody(meta: Record<string, unknown>, content: Buffer, mi
 }
 
 // Multipart upload (spec §11). With `fileId` the same file's content is replaced (a retry or the full backup after a
-// "Back up now"); a file that no longer exists is created again.
+// "Back up now"); a file that no longer exists, or that this connection may no longer write (403), is created again.
 export async function uploadFile(
   token: string, f: { name: string; mimeType: string; folderId: string; content: Buffer; fileId?: string | null }, opts: FetchOpts = {},
 ): Promise<DriveResult<{ id: string; size: number }>> {
@@ -155,7 +157,7 @@ export async function uploadFile(
   if (f.fileId) {
     const raw = multipartBody({ name: f.name, mimeType: f.mimeType }, f.content, f.mimeType);
     const u = await call("PATCH", `${UPLOAD}/${encodeURIComponent(f.fileId)}?uploadType=multipart&fields=id,size`, token, { raw, contentType }, opts);
-    if (u.ok || u.kind !== "missing") return parse(u);
+    if (u.ok || (u.kind !== "missing" && u.kind !== "denied")) return parse(u);
   }
   const raw = multipartBody({ name: f.name, mimeType: f.mimeType, parents: [f.folderId] }, f.content, f.mimeType);
   return parse(await call("POST", `${UPLOAD}?uploadType=multipart&fields=id,size`, token, { raw, contentType }, opts));

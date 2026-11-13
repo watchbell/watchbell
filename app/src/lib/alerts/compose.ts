@@ -63,6 +63,9 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     // Review T1: the office proposes the update PR only for an app linked to its GitHub repository.
     FrameworkVulnerable: "if the app's GitHub repository isn't linked yet, link it on the app page to get an update PR from the office; or update next yourself.",
     // Watchbell 1.2.1: the app moved; nothing to redeploy.
+    // Watchbell 1.4
+    CiFailing: "open the run on GitHub from the app page; Watchbell reads it once a day, so a fix shows after the next sync.",
+    OsSecurityUpdate: "open DevOps › OS vulnerabilities for the command to copy (Watchbell never installs anything), run it on the machine, reboot for a new kernel, then Scan now.",
     MonitorDomainMoved: "press Update monitor on the Uptime page (or approve the proposal) so the monitor checks the new domain; the app itself is fine.",
   },
   // The owner's own words, as they were before 62caff7.
@@ -77,6 +80,8 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     DnsProxiedToVercel: "matiin proxy (awan oranye) record itu di Cloudflare, Vercel butuh DNS only.",
     CredentialExpiring: "bikin token baru dan ganti di Settings → Connections sebelum habis.",
     FrameworkVulnerable: "kalau repo GitHub app-nya belum di-link, link di halaman app biar office bikinin PR update; atau update next sendiri.",
+    CiFailing: "buka run-nya di GitHub dari halaman app; Watchbell baca sekali sehari, jadi fix-nya kelihatan setelah sync berikutnya.",
+    OsSecurityUpdate: "buka DevOps › OS vulnerabilities, copy perintahnya (Watchbell nggak install apa-apa sendiri), jalanin di mesinnya, reboot kalau ada kernel baru, terus Scan now.",
     MonitorDomainMoved: "pencet Update monitor di halaman Uptime (atau approve usulannya) biar monitor ngecek domain baru; app-nya sendiri aman.",
   },
 };

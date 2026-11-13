@@ -1,0 +1,503 @@
+{
+ "cves": [
+  {
+   "id": "CVE-2026-111183",
+   "priority": "medium",
+   "cvss3": 9.8,
+   "description": "GStreamer rtpL16depay Heap-based Buffer Overflow Remote Code Execution\nVulnerability. This vulnerability allows remote attackers to execute\narbitrary code on affected installations of GStreamer. Interaction with\nthis library is required to ",
+   "notices_ids": [
+    "USN-9038-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.6",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.8",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2026-18297",
+   "priority": "medium",
+   "cvss3": 7.8,
+   "description": "GStreamer OGG File Parsing Stack-based Buffer Overflow Remote Code\nExecution Vulnerability. This vulnerability allows remote attackers to\nexecute arbitrary code on affected installations of GStreamer. User\ninteraction is required to exploit",
+   "notices_ids": [
+    "USN-8797-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.7",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.5",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2026-2921",
+   "priority": "medium",
+   "cvss3": 7.8,
+   "description": "GStreamer RIFF Palette Integer Overflow Remote Code Execution\nVulnerability. This vulnerability allows remote attackers to execute\narbitrary code on affected installations of GStreamer. Interaction with\nthis library is required to exploit t",
+   "notices_ids": [
+    "USN-8130-1",
+    "USN-8130-2",
+    "USN-8130-3"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.6",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2025-47808",
+   "priority": "medium",
+   "cvss3": 5.6,
+   "description": "In GStreamer through 1.26.1, the subparse plugin's tmplayer_parse_line\nfunction may dereference a NULL pointer while parsing a subtitle file,\nleading to a crash.",
+   "notices_ids": [
+    "USN-7716-1",
+    "USN-7827-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.5",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.3",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2025-47807",
+   "priority": "medium",
+   "cvss3": 5.5,
+   "description": "In GStreamer through 1.26.1, the subparse plugin's\nsubrip_unescape_formatting function may dereference a NULL pointer while\nparsing a subtitle file, leading to a crash.",
+   "notices_ids": [
+    "USN-7716-1",
+    "USN-7827-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.5",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.3",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2025-47806",
+   "priority": "medium",
+   "cvss3": 5.6,
+   "description": "In GStreamer through 1.26.1, the subparse plugin's parse_subrip_time\nfunction may write data past the bounds of a stack buffer, leading to a\ncrash.",
+   "notices_ids": [
+    "USN-7716-1",
+    "USN-7827-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.5",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.3",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47835",
+   "priority": "medium",
+   "cvss3": 7.5,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. A null pointer dereference vulnerability has been detected in\nthe parse_lrc function within gstsubparse.c. The parse_lrc function calls\nstrchr() to find the charac",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47615",
+   "priority": "medium",
+   "cvss3": 9.8,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. An OOB-Write has been detected in the function\ngst_parse_vorbis_setup_packet within vorbis_parse.c. The integer size is\nread from the input file without proper val",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47607",
+   "priority": "medium",
+   "cvss3": 9.8,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents.  stack-buffer overflow has been detected in the\ngst_opus_dec_parse_header function within `gstopusdec.c'. The pos array is\na stack-allocated buffer of size 64. If ",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47600",
+   "priority": "medium",
+   "cvss3": 9.1,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. An OOB-read vulnerability has been detected in the\nformat_channel_mask function in gst-discoverer.c. The vulnerability affects\nthe local array position, which is d",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47542",
+   "priority": "medium",
+   "cvss3": 7.5,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. A null pointer dereference has been discovered in the\nid3v2_read_synch_uint function, located in id3v2.c. If\nid3v2_read_synch_uint is called with a null work->hdr.",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47541",
+   "priority": "medium",
+   "cvss3": 7.5,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. An OOB-write vulnerability has been identified in the\ngst_ssa_parse_remove_override_codes function of the gstssaparse.c file.\nThis function is responsible for pars",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-47538",
+   "priority": "medium",
+   "cvss3": 9.8,
+   "description": "GStreamer is a library for constructing graphs of media-handling\ncomponents. A stack-buffer overflow has been detected in the\n`vorbis_handle_identification_packet` function within `gstvorbisdec.c`. The\nposition array is a stack-allocated bu",
+   "notices_ids": [
+    "USN-7175-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.4",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2024-4453",
+   "priority": "medium",
+   "cvss3": 7.8,
+   "description": "GStreamer EXIF Metadata Parsing Integer Overflow Remote Code Execution\nVulnerability. This vulnerability allows remote attackers to execute\narbitrary code on affected installations of GStreamer. Interaction with\nthis library is required to ",
+   "notices_ids": [
+    "USN-6798-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.2",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "released",
+       "description": "1.24.2-1ubuntu0.1",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2023-37328",
+   "priority": "medium",
+   "cvss3": 8.8,
+   "description": "GStreamer PGS File Parsing Heap-based Buffer Overflow Remote Code Execution\nVulnerability. This vulnerability allows remote attackers to execute\narbitrary code on affected installations of GStreamer. Interaction with\nthis library is require",
+   "notices_ids": [
+    "USN-6268-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "1.22.4-1",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "CVE-2023-37327",
+   "priority": "medium",
+   "cvss3": 7.6,
+   "description": "GStreamer FLAC File Parsing Integer Overflow Remote Code Execution\nVulnerability. This vulnerability allows remote attackers to execute\narbitrary code on affected installations of GStreamer. Interaction with\nthis library is required to expl",
+   "notices_ids": [
+    "USN-6268-1",
+    "USN-6269-1",
+    "USN-7807-1"
+   ],
+   "packages": [
+    {
+     "name": "gst-plugins-base1.0",
+     "statuses": [
+      {
+       "release_codename": "jammy",
+       "status": "released",
+       "description": "1.20.1-1ubuntu0.1",
+       "component": null,
+       "pocket": "security"
+      },
+      {
+       "release_codename": "noble",
+       "status": "not-affected",
+       "description": "1.22.4-1",
+       "component": null,
+       "pocket": "security"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "offset": 0,
+ "limit": 20,
+ "total_results": 16
+}

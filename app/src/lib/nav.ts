@@ -5,7 +5,7 @@ import { SECTION_IDS, SECTIONS, type SectionId } from "@/lib/sections";
 export type NavIconKey =
   | "dashboard" | "topology" | "activity" | "apps" | "rocket" | "world" | "sitemap" | "bolt" | "database"
   | "flame" | "books" | "heartbeat" | "bell" | "file" | "broadcast" | "plug" | "cloud-upload" | "settings"
-  | "route" | "api" | "github" | "terminal" | "cloud" | "layout" | "page";
+  | "route" | "api" | "github" | "terminal" | "cloud" | "layout" | "page" | "container" | "deploy" | "shield";
 
 export type NavItem = {
   key: string;
@@ -15,6 +15,8 @@ export type NavItem = {
   stage: number;
   ownerOnly?: boolean;
   hideForViewer?: boolean;
+  // Watchbell 1.5: shown only by a self-hosted (or demo) console; the layout says which (visibleNav's opts.selfhost).
+  selfhostOnly?: boolean;
   // A sub-heading inside the section (DevOps › Automation); items with the same `sub` sit together under it.
   sub?: string;
 };
@@ -30,27 +32,34 @@ const ITEMS: Record<SectionId, NavItem[]> = {
     { key: "events", label: "Events", href: "/events", icon: "activity", stage: 2 },
     { key: "status", label: "Provider status", href: "/status", icon: "broadcast", stage: 5 },
   ],
+  // Owner 12 Nov: sub-headings Apps / Network / Watch (Database: Providers / Tools; DevOps: Code / Servers / Security).
   hosting: [
-    { key: "apps", label: "Applications", href: "/apps", icon: "apps", stage: 2 },
-    { key: "deployments", label: "Deployments", href: "/deployments", icon: "rocket", stage: 2 },
-    { key: "domains", label: "Domains", href: "/domains", icon: "world", stage: 4 },
-    { key: "dns", label: "DNS records", href: "/dns", icon: "sitemap", stage: 4 },
-    { key: "uptime", label: "Uptime", href: "/uptime", icon: "heartbeat", stage: 2 },
-    { key: "logs", label: "Logs", href: "/logs", icon: "file", stage: 5, hideForViewer: true },
+    { key: "apps", label: "Applications", href: "/apps", icon: "apps", stage: 2, sub: "Apps" },
+    { key: "deployments", label: "Deployments", href: "/deployments", icon: "rocket", stage: 2, sub: "Apps" },
+    // Watchbell 1.6 (spec §6): pick a language and a host, then hand off to the host's own new-project page.
+    { key: "deploy", label: "Deploy an app", href: "/deploy", icon: "deploy", stage: 16, hideForViewer: true, sub: "Apps" },
+    { key: "domains", label: "Domains", href: "/domains", icon: "world", stage: 4, sub: "Network" },
+    { key: "dns", label: "DNS records", href: "/dns", icon: "sitemap", stage: 4, sub: "Network" },
+    { key: "uptime", label: "Uptime", href: "/uptime", icon: "heartbeat", stage: 2, sub: "Watch" },
+    { key: "logs", label: "Logs", href: "/logs", icon: "file", stage: 5, hideForViewer: true, sub: "Watch" },
   ],
   database: [
-    { key: "supabase", label: "Supabase", href: "/supabase", icon: "bolt", stage: 3 },
-    { key: "neon", label: "Neon", href: "/neon", icon: "database", stage: 3 },
-    { key: "firebase", label: "Firebase", href: "/firebase", icon: "flame", stage: 3 },
-    { key: "turso", label: "Turso", href: "/turso", icon: "database", stage: 8 },
-    { key: "upstash", label: "Upstash Redis", href: "/upstash", icon: "bolt", stage: 8 },
-    { key: "d1", label: "Cloudflare D1", href: "/d1", icon: "cloud", stage: 8 },
-    { key: "sql", label: "SQL console", href: "/sql", icon: "terminal", stage: 9, ownerOnly: true },
-    { key: "catalog", label: "Free databases", href: "/catalog", icon: "books", stage: 7 },
+    { key: "supabase", label: "Supabase", href: "/supabase", icon: "bolt", stage: 3, sub: "Providers" },
+    { key: "neon", label: "Neon", href: "/neon", icon: "database", stage: 3, sub: "Providers" },
+    { key: "firebase", label: "Firebase", href: "/firebase", icon: "flame", stage: 3, sub: "Providers" },
+    { key: "turso", label: "Turso", href: "/turso", icon: "database", stage: 8, sub: "Providers" },
+    { key: "upstash", label: "Upstash Redis", href: "/upstash", icon: "bolt", stage: 8, sub: "Providers" },
+    { key: "d1", label: "Cloudflare D1", href: "/d1", icon: "cloud", stage: 8, sub: "Providers" },
+    { key: "sql", label: "SQL console", href: "/sql", icon: "terminal", stage: 9, ownerOnly: true, sub: "Tools" },
+    { key: "catalog", label: "Free databases", href: "/catalog", icon: "books", stage: 7, sub: "Tools" },
   ],
   // Owner 16 Oct: a read-only browser of the synced repositories (README, files, commits, branches, Actions, CVEs).
   devops: [
-    { key: "repos", label: "Repositories", href: "/repos", icon: "github", stage: 9, sub: "Automation" },
+    { key: "repos", label: "Repositories", href: "/repos", icon: "github", stage: 9, sub: "Code" },
+    // Watchbell 1.5 (10c): the Docker containers on the machine a self-hosted Watchbell runs on.
+    { key: "containers", label: "Containers", href: "/containers", icon: "container", stage: 15, hideForViewer: true, selfhostOnly: true, sub: "Servers" },
+    // Owner 12 Nov: known vulnerabilities on the machine a self-hosted Watchbell runs on (Ubuntu for now).
+    { key: "os", label: "OS vulnerabilities", href: "/os", icon: "shield", stage: 17, hideForViewer: true, selfhostOnly: true, sub: "Security" },
   ],
   // Alerts sit here for every role (the bell in the top bar too); the rest is the owner's. Extension pages (Auto-actions
   // after Alerts, AI Gateway and API explorer after Backups) are inserted by navGroups.
@@ -92,11 +101,11 @@ export function navGroups(ext: NavExtension = NO_EXTENSION): NavGroup[] {
 }
 
 // `on`: the sections shown (lib/sections.ts sectionsOn); without it every section is shown.
-export function visibleNav(role: Role, ext: NavExtension = NO_EXTENSION, on?: Iterable<SectionId>) {
+export function visibleNav(role: Role, ext: NavExtension = NO_EXTENSION, on?: Iterable<SectionId>, opts: { selfhost?: boolean } = {}) {
   const shown = on ? new Set(on) : null;
   return navGroups(ext)
     .filter((g) => !shown || shown.has(g.section))
-    .map((g) => ({ ...g, items: g.items.filter((i) => canSee(i, role)) }))
+    .map((g) => ({ ...g, items: g.items.filter((i) => canSee(i, role) && (!i.selfhostOnly || opts.selfhost === true)) }))
     .filter((g) => g.items.length > 0);
 }
 

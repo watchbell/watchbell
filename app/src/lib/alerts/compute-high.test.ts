@@ -28,7 +28,7 @@ describe("ComputeHigh", () => {
     const { observations, evaluated } = evaluate(facts([
       { id: "p1", name: "quillpad", latest: latest({ memPct: 93, diskPct: 85 }) },
       { id: "p2", name: "ticketer", latest: latest() },
-      { id: "p3", name: "old", latest: latest({ at: at(30) }) },
+      { id: "p3", name: "old", latest: latest({ at: at(50) }) }, // past FRESH_MS (45 min)
       { id: "p4", name: "new", latest: null },
     ]), [rule()]);
     expect(evaluated.has("ComputeHigh")).toBe(true);

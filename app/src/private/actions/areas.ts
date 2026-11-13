@@ -21,9 +21,11 @@ export const ALARM_ROOM: Record<RuleKey, ActionArea> = {
   VulnerableDependency: "workloads", // Stage 9 slice 5: an app's dependencies, like its deployments
   FrameworkVulnerable: "workloads", // Watchbell 1.2: the app's Next.js version (its Security card)
   MonitorDomainMoved: "workloads", // Watchbell 1.2.1: an app's monitor on a domain it no longer has
+  CiFailing: "workloads", // Watchbell 1.4: an app's CI, like its deployments
+  OsSecurityUpdate: "observe", // owner 12 Nov: the machine Watchbell runs on, like the collector
 };
 
-const APP_RULES = new Set<string>(["MonitorDown", "HighLatency", "DeploymentFailed", "VulnerableDependency", "FrameworkVulnerable", "MonitorDomainMoved"]);
+const APP_RULES = new Set<string>(["MonitorDown", "HighLatency", "DeploymentFailed", "VulnerableDependency", "FrameworkVulnerable", "MonitorDomainMoved", "CiFailing"]);
 
 export function areaForAlert(a: { ruleKey: string; resourceKind: string | null }): ActionArea {
   if (isRuleKey(a.ruleKey)) {

@@ -1,0 +1,2 @@
+-- Owner 12 Nov: the alert rule OsSecurityUpdate, the same seed row as the cloud migration 0060 (VulnerableDependency's channels, else the default).
+insert into ops.alert_rules (key, severity, threshold, channels) select 'OsSecurityUpdate', 'warning', 7, coalesce((select channels from ops.alert_rules where key = 'VulnerableDependency'), '["telegram","email_digest"]'::jsonb) on conflict (key) do nothing;

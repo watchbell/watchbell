@@ -1,0 +1,91 @@
+# Watchbell pre-deploy check (Watchbell 1.4): a reusable workflow an app repository calls on its pull requests.
+# It looks at what the pull request adds — packages with known advisories (OSV.dev), possible secrets in its commits
+# (gitleaks), the Next.js version and new env names — and writes the result as one comment on the pull request,
+# edited on every push, plus the job summary. Warning only: the job always passes and never blocks a merge.
+# Nothing is sent to Watchbell; package names and versions go to OSV.dev. See docs/precheck.md.
+#
+# In the app repository, .github/workflows/watchbell-check.yml:
+#   on:
+#     pull_request:
+#   permissions:
+#     contents: read
+#     pull-requests: write
+#   jobs:
+#     precheck:
+#       uses: watchbell/watchbell/.github/workflows/precheck.yml@v1.4.0
+#       with:
+#         working-directory: .   # the folder with package.json, e.g. apps/web
+name: Watchbell pre-deploy check
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: The folder with the app's package.json and lockfile, relative to the repository root.
+        type: string
+        default: "."
+permissions:
+  contents: read
+jobs:
+  precheck:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # One run per pull request: a newer push cancels the older run, so two runs never race for the comment.
+    concurrency:
+      group: watchbell-precheck-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      REPOSITORY: ${{ github.repository }}
+      WORK_DIR: ${{ inputs.working-directory }}
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - name: Check out the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the Watchbell check
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: watchbell/watchbell
+          ref: v1.6.0
+          path: .watchbell
+          sparse-checkout: precheck
+          persist-credentials: false
+      - name: Install gitleaks
+        id: gitleaks
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+      - name: Look for secrets in the pull request's commits
+        id: scan
+        if: steps.gitleaks.outcome == 'success'
+        continue-on-error: true
+        run: |
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ && "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "bad commit"; exit 1; }
+          "$RUNNER_TEMP/gitleaks" git --log-opts="$BASE_SHA..$HEAD_SHA" --redact --no-banner --exit-code 0 \
+            --report-format json --report-path "$RUNNER_TEMP/gitleaks.json" . || { rm -f "$RUNNER_TEMP/gitleaks.json"; exit 1; }
+      # Warning only: without the check script the job still passes, with a note on the run.
+      - name: Say the check couldn't be downloaded
+        if: hashFiles('.watchbell/precheck/precheck.mjs') == ''
+        run: echo "::warning::The Watchbell pre-deploy check couldn't be downloaded, so this pull request wasn't checked."
+      - name: Check the pull request
+        if: hashFiles('.watchbell/precheck/precheck.mjs') != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_REPORT: ${{ runner.temp }}/gitleaks.json
+          # gitleaks writes its report before failing; only a scan that succeeded counts.
+          GITLEAKS_OUTCOME: ${{ steps.scan.outcome }}
+        run: node .watchbell/precheck/precheck.mjs

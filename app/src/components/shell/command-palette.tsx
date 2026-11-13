@@ -15,8 +15,8 @@ import { NAV_ICONS } from "./nav-icons";
 // render pays for them and an app added in Sync shows up on the next opening. The previous list stays visible while the
 // new one loads, and the pages are listed before the first one arrives.
 export function CommandPalette({
-  role, ext, sections, open, opener, onOpen, onClose,
-}: { role: Role; ext: ClientExtension; sections?: SectionId[]; open: boolean; opener: Element | null; onOpen: (opener: Element | null) => void; onClose: () => void }) {
+  role, ext, sections, selfhost = false, open, opener, onOpen, onClose,
+}: { role: Role; ext: ClientExtension; sections?: SectionId[]; selfhost?: boolean; open: boolean; opener: Element | null; onOpen: (opener: Element | null) => void; onClose: () => void }) {
   const [source, setSource] = useState<PaletteSource | null>(null);
   const [failed, setFailed] = useState(false);
   const inflight = useRef(false);
@@ -44,7 +44,7 @@ export function CommandPalette({
       .finally(() => { inflight.current = false; });
   }, [open]);
 
-  const items = useMemo(() => buildItems(role, source, ext, sections), [role, source, ext, sections]);
+  const items = useMemo(() => buildItems(role, source, ext, sections, { selfhost }), [role, source, ext, sections, selfhost]);
   if (!open) return null;
   return <PaletteDialog items={items} loading={source === null && !failed} opener={opener} onClose={onClose} />;
 }

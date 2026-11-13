@@ -1,5 +1,6 @@
 // What the rules look at, read once per evaluation (lib/data/alert-facts-db.ts). `dbs`, `domains` and `dns` are null
 // until stages 3 and 4 deliver them: the rules that need them are then not evaluated at all (S1).
+import type { RepoRun } from "@/db/schema";
 import type { ComputeFact } from "@/lib/databases/compute-metrics";
 import type { Finding, SecurityStatus } from "@/lib/security/types";
 import type { State } from "@/lib/status";
@@ -35,6 +36,20 @@ export type DepFact = {
 // Watchbell 1.2: a watched app's last Next.js security check (ops.app_security, lib/data/security-db.ts frameworkFacts).
 export type FrameworkFact = { appId: string; version: string | null; status: SecurityStatus; findings: Finding[] };
 
+// Watchbell 1.4: a watched app's linked repository and its default branch's latest Actions run (github_repos.actions,
+// lib/data/ci-facts-db.ts). run null: not read yet.
+export type CiFact = { appId: string; repo: string; branch: string | null; run: RepoRun | null };
+
+// Owner 12 Nov: the last OS scan of a self-hosted console's machine (lib/os/view.ts osFact). updates: the security
+// updates whose fixed CVEs have a score, worst CVE first; kernelWaiting: a newer kernel is installed than runs.
+export type OsFact = {
+  system: string;
+  updates: { source: string; score: number | null; cves: string[] }[];
+  kernelWaiting: { installed: string; running: string } | null;
+  // A lookup failed (Ubuntu's API, the time limit): fire on what is known, never resolve on what isn't (review I2).
+  partial?: boolean;
+};
+
 export type Facts = {
   now: Date; lastMinuteRunAt: Date | null;
   // The last finished run of any scheduler (cron-job.org, QStash fallback, manual). Absent: use lastMinuteRunAt.
@@ -46,4 +61,8 @@ export type Facts = {
   deps?: DepFact[] | null;
   // Absent or null: no app has a Next.js security check yet, so FrameworkVulnerable isn't evaluated.
   frameworks?: FrameworkFact[] | null;
+  // Absent, null or empty: no linked repository has Actions data (the token may lack Actions: Read), so CiFailing isn't evaluated.
+  ci?: CiFact[] | null;
+  // Absent or null: the cloud edition, or no OS scan yet, so OsSecurityUpdate isn't evaluated.
+  os?: OsFact | null;
 };

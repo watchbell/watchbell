@@ -69,8 +69,8 @@ export function rankShown(items: PaletteItem[], shown: PaletteItem[], query: str
 // Pages first (the same nav config as the sidebar, so a role never sees a page it cannot open), then watched apps, then watched domains, then monitors.
 // Extension entries (5c, owner only: the layout sends them to owners alone, and they are dropped here for anyone else)
 // follow the pages; each takes the group and icon of the extension nav item it lives under.
-export function buildItems(role: Role, source: PaletteSource | null, ext: ClientExtension = { nav: [], palette: [] }, sections?: SectionId[]): PaletteItem[] {
-  const groups = visibleNav(role, ext, sections);
+export function buildItems(role: Role, source: PaletteSource | null, ext: ClientExtension = { nav: [], palette: [] }, sections?: SectionId[], opts: { selfhost?: boolean } = {}): PaletteItem[] {
+  const groups = visibleNav(role, ext, sections, opts);
   const pages = groups.flatMap((g) => g.items.map((i): PaletteItem => ({ id: `page:${i.key}`, label: i.label, hint: g.group, href: i.href, icon: i.icon })));
   const extra = role !== "owner" ? [] : ext.palette.filter((e) => !pages.some((p) => p.href === e.href)).map((e): PaletteItem => {
     const under = ext.nav.flatMap((g) => g.items.map((i) => ({ g, i }))).find(({ i }) => e.href === i.href || e.href.startsWith(`${i.href}/`));

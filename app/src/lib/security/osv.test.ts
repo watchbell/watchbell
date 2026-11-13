@@ -21,10 +21,10 @@ const nextAffected = (events: Record<string, string>[]) => ({ package: { name: "
 describe("parseOsv", () => {
   it("keeps id, CVE alias, summary, severity and the fix for the running branch, worst first", () => {
     expect(parseOsv(osvFixture, "15.1.0")).toEqual([
-      { id: "GHSA-9qr9-h5gf-34mp", cve: "CVE-2025-66478", summary: "Next.js is vulnerable to RCE in React flight protocol", severity: "CRITICAL", fixed: "15.1.9" },
-      { id: "GHSA-f82v-jwr5-mffw", cve: "CVE-2025-29927", summary: "Authorization Bypass in Next.js Middleware", severity: "CRITICAL", fixed: "15.2.3" },
-      { id: "GHSA-g5qg-72qw-gw5v", cve: "CVE-2025-57752", summary: "Next.js Affected by Cache Key Confusion for Image Optimization API Routes", severity: "MODERATE", fixed: "15.4.5" },
-      { id: "GHSA-qpjv-v59x-3qc4", cve: "CVE-2025-32421", summary: "Next.js Race Condition to Cache Poisoning", severity: "LOW", fixed: "15.1.6" },
+      { id: "GHSA-9qr9-h5gf-34mp", cve: "CVE-2025-66478", summary: "Next.js is vulnerable to RCE in React flight protocol", severity: "CRITICAL", score: 9.8, fixed: "15.1.9" },
+      { id: "GHSA-f82v-jwr5-mffw", cve: "CVE-2025-29927", summary: "Authorization Bypass in Next.js Middleware", severity: "CRITICAL", score: 9.1, fixed: "15.2.3" },
+      { id: "GHSA-g5qg-72qw-gw5v", cve: "CVE-2025-57752", summary: "Next.js Affected by Cache Key Confusion for Image Optimization API Routes", severity: "MODERATE", score: 5.9, fixed: "15.4.5" },
+      { id: "GHSA-qpjv-v59x-3qc4", cve: "CVE-2025-32421", summary: "Next.js Race Condition to Cache Poisoning", severity: "LOW", score: 3.7, fixed: "15.1.6" },
     ]);
   });
   it("picks the fix from the range that holds the version, on another branch too", () => {
@@ -35,7 +35,14 @@ describe("parseOsv", () => {
     const r = parseOsv({
       vulns: [{ id: "GHSA-aaaa-bbbb-cccc", aliases: ["PYSEC-1"], affected: [nextAffected([{ introduced: "15.0.0" }, { last_affected: "15.1.2" }])] }],
     }, "15.1.0");
-    expect(r).toEqual([{ id: "GHSA-aaaa-bbbb-cccc", cve: null, summary: "", severity: "UNKNOWN", fixed: null }]);
+    expect(r).toEqual([{ id: "GHSA-aaaa-bbbb-cccc", cve: null, summary: "", severity: "UNKNOWN", score: null, fixed: null }]);
+  });
+  it("scores a CVSS v3 vector, and ignores a v4 or unreadable one (owner 12 Nov: show the score)", () => {
+    const r = parseOsv({ vulns: [
+      { id: "A", severity: [{ type: "CVSS_V4", score: "CVSS:4.0/AV:N" }, { type: "CVSS_V3", score: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" }], affected: [] },
+      { id: "B", severity: [{ type: "CVSS_V3", score: "nonsense" }], affected: [] },
+    ] }, "15.1.0");
+    expect(r!.map((f) => [f.id, f.score])).toEqual([["A", 9.8], ["B", null]]);
   });
   it("reads severity case-insensitively and maps MEDIUM to MODERATE", () => {
     const r = parseOsv({ vulns: [
@@ -54,7 +61,7 @@ describe("parseOsv", () => {
         nextAffected([{ introduced: "15.0.0" }, { fixed: "15.1.1" }]),
       ] },
     ] }, "15.1.0");
-    expect(r).toEqual([{ id: "X", cve: null, summary: "", severity: "UNKNOWN", fixed: "15.1.1" }]);
+    expect(r).toEqual([{ id: "X", cve: null, summary: "", severity: "UNKNOWN", score: null, fixed: "15.1.1" }]);
   });
   it("caps the list at 50 and trims long summaries", () => {
     const vulns = Array.from({ length: 60 }, (_, i) => ({ id: `GHSA-${String(i).padStart(4, "0")}`, summary: "x".repeat(400), affected: [] }));

@@ -24,6 +24,10 @@ Halaman-halaman ini menjelaskan cara memasangnya dan cara memakai setiap bagiann
 - [Backup](backups.md): ringkasan bulanan di Google Drive Anda, serta cara mem-backup dan me-restore Watchbell itu
   sendiri.
 - [SQL console](sql-console.md): query read-only ke database Supabase dan Neon Anda.
+- [Containers](containers.md): container Docker di mesin tempat Watchbell self-hosted berjalan.
+- [OS vulnerabilities](os-vulnerabilities.md): kerentanan yang diketahui di mesin itu, beserta skor dan perbaikannya.
+- [Pre-deploy check](precheck.md): pengecekan GitHub Actions yang berkomentar di setiap pull request di repository
+  aplikasi Anda.
 
 ## Referensi
 

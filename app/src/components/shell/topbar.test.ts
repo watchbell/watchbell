@@ -13,6 +13,17 @@ const render = (shot: boolean) => renderToStaticMarkup(h(AliasProvider, {
   children: h(Topbar, { user: { email: "owner@example.com", role: "owner" }, alerts: 0, onToggleNav: () => {}, onOpenPalette: () => {} }),
 }));
 
+describe("Topbar fits a ~1,000 px window (the main column is ~750 px next to the sidebar)", () => {
+  it("the search box shrinks instead of pushing the icons off the page; icon buttons never shrink", () => {
+    const out = render(false);
+    expect(out).toMatch(/aria-label="Search"[^>]*class="[^"]*\bmin-w-0\b[^"]*"/);
+    expect(out).toMatch(/aria-label="Toggle navigation"[^>]*class="[^"]*\bshrink-0\b/);
+    expect(out).toMatch(/aria-label="Alerts"[^>]*class="[^"]*\bshrink-0\b/);
+    expect(out).toMatch(/aria-label="Account menu"[^>]*class="[^"]*\bshrink-0\b/);
+    expect(out).toMatch(/aria-label="Toggle theme"[^>]*class="[^"]*\bshrink-0\b/);
+  });
+});
+
 describe("Topbar screenshot mode (privacy)", () => {
   it("has an eye toggle, off by default, and no pill", () => {
     const out = render(false);

@@ -39,7 +39,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <>
       <TimeZoneSync zone={timeZone()} />
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections}><UpdateBanner notice={notice} />{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

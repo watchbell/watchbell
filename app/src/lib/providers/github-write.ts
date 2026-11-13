@@ -99,8 +99,14 @@ export async function lockfileAt(token: string, fullName: string, ref: string, p
   return typeof r.data === "string" ? { ok: true, data: r.data } : fmt("the lockfile");
 }
 
+// Watchbell 1.5 Build files: its pull request's own branch. Branches may be created and pulled from, and files created
+// on it (putNewFile); package.json edits and merges stay on watchpost/deps-… branches only.
+export const BUILD_FILES_BRANCH = /^watchbell\/build-files-[0-9a-f]{8}$/;
+const isWritable = (branch: string, defaultBranch: string): boolean =>
+  isOwnBranch(branch, defaultBranch) || (BUILD_FILES_BRANCH.test(branch) && branch !== defaultBranch);
+
 export async function createBranch(token: string, fullName: string, branch: string, fromSha: string, defaultBranch: string, opts: FetchOpts = {}): Promise<Result<true>> {
-  if (!isFullName(fullName) || !isOwnBranch(branch, defaultBranch) || !/^[0-9a-f]{40}$/.test(fromSha)) return badRepo;
+  if (!isFullName(fullName) || !isWritable(branch, defaultBranch) || !/^[0-9a-f]{40}$/.test(fromSha)) return badRepo;
   const r = await call("POST", `/repos/${repoPath(fullName)}/git/refs`, token, { ref: `refs/heads/${branch}`, sha: fromSha }, opts);
   return r.ok ? { ok: true, data: true } : r;
 }
@@ -111,6 +117,32 @@ export async function putManifest(token: string, fullName: string, branch: strin
     message, content: Buffer.from(text, "utf8").toString("base64"), sha: blobSha, branch,
   }, opts);
   return r.ok ? { ok: true, data: true } : r;
+}
+
+// The five build files, in the app's folder (CI at the root): the only paths putNewFile writes.
+export const BUILD_FILE_PATH = /^(?:(?:[A-Za-z0-9._-]{1,100}\/){0,6}(?:Dockerfile|\.dockerignore|docker-compose\.yml|k8s\.yaml)|\.github\/workflows\/ci\.yml)$/;
+const isBuildFilePath = (p: string): boolean => BUILD_FILE_PATH.test(p) && !p.split("/").some((s) => s === "." || s === "..");
+
+// Creates a file that doesn't exist yet: no blob sha is sent, so GitHub refuses (422) to overwrite one, read as "exists".
+export async function putNewFile(token: string, fullName: string, branch: string, defaultBranch: string, path: string, text: string, message: string, opts: FetchOpts = {}): Promise<Result<"created" | "exists">> {
+  if (!isFullName(fullName) || !BUILD_FILES_BRANCH.test(branch) || branch === defaultBranch || !isBuildFilePath(path)) return badRepo;
+  const r = await call("PUT", manifestUrl(fullName, path), token, { message, content: Buffer.from(text, "utf8").toString("base64"), branch }, opts);
+  if (r.ok) return { ok: true, data: "created" };
+  if (r.status !== 422) return r;
+  // 422 also means a bad path or a file too large: only a file that's really on the branch counts as "exists" (M6).
+  const there = await call("GET", `${manifestUrl(fullName, path)}?ref=${encodeURIComponent(branch)}`, token, undefined, opts);
+  return there.ok ? { ok: true, data: "exists" } : r;
+}
+
+// Watchbell 1.5 (M5): an open build-files pull request of this repository, so a second press doesn't open another.
+export async function openBuildFilesPull(token: string, fullName: string, opts: FetchOpts = {}): Promise<Result<{ number: number; url: string } | null>> {
+  if (!isFullName(fullName)) return badRepo;
+  const r = await call("GET", `/repos/${repoPath(fullName)}/pulls?state=open&per_page=100`, token, undefined, opts);
+  if (!r.ok) return r;
+  const p = z.array(z.object({ number: z.number(), html_url: z.string(), head: z.object({ ref: z.string(), repo: z.object({ full_name: z.string() }).nullable() }) })).safeParse(r.data);
+  if (!p.success) return fmt("the pull requests");
+  const hit = p.data.find((x) => BUILD_FILES_BRANCH.test(x.head.ref) && x.head.repo?.full_name.toLowerCase() === fullName.toLowerCase());
+  return { ok: true, data: hit ? { number: hit.number, url: hit.html_url } : null };
 }
 
 const pullSchema = z.object({ number: z.number(), html_url: z.string().startsWith("https://github.com/") });
@@ -130,7 +162,7 @@ export async function openPull(token: string, fullName: string, owner: string, b
 export async function createPull(
   token: string, fullName: string, branch: string, defaultBranch: string, title: string, body: string, opts: FetchOpts = {}, extra: { draft?: boolean } = {},
 ): Promise<Result<{ number: number; url: string }>> {
-  if (!isFullName(fullName) || !isOwnBranch(branch, defaultBranch) || !isGitRef(defaultBranch)) return badRepo;
+  if (!isFullName(fullName) || !isWritable(branch, defaultBranch) || !isGitRef(defaultBranch)) return badRepo;
   const r = await call("POST", `/repos/${repoPath(fullName)}/pulls`, token, { title, head: branch, base: defaultBranch, body, maintainer_can_modify: true, ...(extra.draft ? { draft: true } : {}) }, opts);
   if (!r.ok) return r;
   const p = pullSchema.safeParse(r.data);

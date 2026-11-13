@@ -4,7 +4,8 @@ export const SEVERITIES = ["CRITICAL", "HIGH", "MODERATE", "LOW", "UNKNOWN"] as 
 export type Severity = (typeof SEVERITIES)[number];
 
 // One OSV advisory for the running version. `fixed` is the first fixed version in the range that holds it.
-export type Finding = { id: string; cve: string | null; summary: string; severity: Severity; fixed: string | null };
+// `score`: the CVSS v3 base score from the advisory's vector (owner 12 Nov); absent on rows stored before it.
+export type Finding = { id: string; cve: string | null; summary: string; severity: Severity; score?: number | null; fixed: string | null };
 
 export const SECURITY_STATUSES = ["ok", "vulnerable", "unknown", "error"] as const;
 export type SecurityStatus = (typeof SECURITY_STATUSES)[number];

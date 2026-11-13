@@ -4,3 +4,5 @@
 
 # The npm CLI (app/bin/watchbell.mjs): its "#!/usr/bin/env node" line must end in LF.
 app/bin/*.mjs text eol=lf
+# The pre-deploy check bundle runs on Linux GitHub runners.
+precheck/*.mjs text eol=lf

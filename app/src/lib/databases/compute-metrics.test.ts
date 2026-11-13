@@ -48,15 +48,54 @@ describe("parsePrometheus", () => {
   });
 });
 
+// Owner 13 Nov: the memory detail Supabase's Observability › Database charts (Used, Cache + Buffers, Swap, Total RAM,
+// Memory commitment). Numbers made up: 1 GB total, 200 MB free, 150 + 100 + 50 MB cache, 64 of 512 MB swap, 900 MB of
+// a 1 GB commit limit.
+const MEM = `node_memory_MemFree_bytes{supabase_identifier="${REF}"} 2e+08
+node_memory_Buffers_bytes{supabase_identifier="${REF}"} 1.5e+08
+node_memory_Cached_bytes{supabase_identifier="${REF}"} 1e+08
+node_memory_SReclaimable_bytes{supabase_identifier="${REF}"} 5e+07
+node_memory_SwapTotal_bytes{supabase_identifier="${REF}"} 5.12e+08
+node_memory_SwapFree_bytes{supabase_identifier="${REF}"} 4.48e+08
+node_memory_Committed_AS_bytes{supabase_identifier="${REF}"} 9e+08
+node_memory_CommitLimit_bytes{supabase_identifier="${REF}"} 1e+09`;
+const NO_MEM = { free: null, buffers: null, cached: null, sReclaimable: null, swapTotal: null, swapFree: null, committed: null, commitLimit: null };
+
+describe("memory detail (owner 13 Nov)", () => {
+  it("reads free, buffers, cache, swap and the commit limit of the primary", () => {
+    const raw = extractSample(parsePrometheus(scrape(100, 20, 90, 30, MEM)), REF);
+    expect(raw.memory).toEqual({ free: 2e8, buffers: 1.5e8, cached: 1e8, sReclaimable: 5e7, swapTotal: 5.12e8, swapFree: 4.48e8, committed: 9e8, commitLimit: 1e9 });
+  });
+  it("splits RAM into used and cache + buffers, swap in use, and the commitment as a share of its limit", () => {
+    const v = computeValues(extractSample(parsePrometheus(scrape(100, 20, 90, 30, MEM)), REF), null, "x");
+    expect(v.mem).toEqual({ totalB: 1e9, usedB: 5e8, cacheB: 3e8, swapB: 6.4e7 });
+    expect(v.commit).toEqual({ usedB: 9e8, limitB: 1e9, pct: 90 });
+  });
+  it("has no breakdown without the numbers, and never a negative used", () => {
+    const v = computeValues(extractSample(parsePrometheus(scrape(100, 20, 90, 30)), REF), null, "x");
+    expect(v.mem).toBeNull();
+    expect(v.commit).toBeNull();
+    const odd = computeValues({ cpu: null, memTotal: 100, memAvailable: 0, diskSize: null, diskAvail: null, backends: null, maxConnections: null,
+      memory: { ...NO_MEM, free: 80, buffers: 30, cached: 10, sReclaimable: 0 } }, null, "x");
+    expect(odd.mem).toEqual({ totalB: 100, usedB: 0, cacheB: 40, swapB: null });
+  });
+  it("averages the memory bytes and the commitment per hour, with its peak", () => {
+    let r: HourRow | null = null;
+    r = mergeHour(r, { cpuPct: null, memPct: 40, diskPct: 10, connUsed: 5, connMax: 60, mem: { totalB: 1000, usedB: 400, cacheB: 300, swapB: 0 }, commit: { usedB: 80, limitB: 100, pct: 80 } });
+    r = mergeHour(r, { cpuPct: null, memPct: 60, diskPct: 10, connUsed: 5, connMax: 60, mem: { totalB: 1000, usedB: 600, cacheB: 100, swapB: 20 }, commit: { usedB: 90, limitB: 100, pct: 90 } });
+    expect(r).toMatchObject({ memTotalB: 1000, memUsedB: 500, memCacheB: 200, swapB: 10, commitPct: 85, commitMax: 90 });
+  });
+});
+
 describe("extractSample", () => {
   it("sums the CPU counters of the primary only, picks /data over /, sums backends and reads max_connections", () => {
     const raw = extractSample(parsePrometheus(scrape(100, 20, 90, 30)), REF);
-    expect(raw).toEqual({ cpu: { busy: 50, total: 240 }, memTotal: 1e9, memAvailable: 6e8, diskSize: 8000, diskAvail: 6000, backends: 9, maxConnections: 60 });
+    expect(raw).toMatchObject({ cpu: { busy: 50, total: 240 }, memTotal: 1e9, memAvailable: 6e8, diskSize: 8000, diskAvail: 6000, backends: 9, maxConnections: 60 });
   });
 
   it("uses every series when the ref isn't among the identifiers, and gives null for missing metrics", () => {
     const raw = extractSample(parsePrometheus('node_cpu_seconds_total{cpu="0",mode="idle"} 10\nnode_cpu_seconds_total{cpu="0",mode="system"} 5'), REF);
-    expect(raw).toEqual({ cpu: { busy: 5, total: 15 }, memTotal: null, memAvailable: null, diskSize: null, diskAvail: null, backends: null, maxConnections: null });
+    expect(raw).toEqual({ cpu: { busy: 5, total: 15 }, memTotal: null, memAvailable: null, diskSize: null, diskAvail: null, backends: null, maxConnections: null, memory: NO_MEM });
   });
 
   it("falls back to / when there is no /data volume", () => {
@@ -71,13 +110,17 @@ describe("cpuPct (counter deltas)", () => {
     expect(cpuPct({ at: at(0), busy: 50, total: 240 }, { at: at(5), busy: 110, total: 840 })).toBe(10);
     expect(cpuPct({ at: at(0), busy: 0, total: 0 }, { at: at(5), busy: 300, total: 300 })).toBe(100);
   });
-  it("is null without a previous scrape, after a counter reset, with no time between or a gap over 30 min", () => {
+  // 13 Nov: the cloud collector runs every 30 minutes, so two scrapes are ~30 min apart (a few seconds either way).
+  it("counts scrapes up to 45 minutes apart, the cloud collector's 30-minute cadence included", () => {
+    expect(cpuPct({ at: new Date(Date.UTC(2026, 9, 16, 9, 34)).toISOString(), busy: 0, total: 0 }, { at: at(5), busy: 300, total: 3000 })).toBe(10);
+  });
+  it("is null without a previous scrape, after a counter reset, with no time between or a gap over 45 min", () => {
     const cur = { at: at(5), busy: 10, total: 100 };
     expect(cpuPct(null, cur)).toBeNull();
     expect(cpuPct({ at: at(0), busy: 50, total: 500 }, cur)).toBeNull();
     expect(cpuPct({ at: at(0), busy: 20, total: 50 }, cur)).toBeNull(); // busy went down: reset
     expect(cpuPct({ at: at(5), busy: 1, total: 10 }, cur)).toBeNull();
-    expect(cpuPct({ at: new Date(Date.UTC(2026, 9, 16, 9, 30)).toISOString(), busy: 1, total: 10 }, cur)).toBeNull();
+    expect(cpuPct({ at: new Date(Date.UTC(2026, 9, 16, 9, 19)).toISOString(), busy: 1, total: 10 }, cur)).toBeNull();
     expect(cpuPct({ at: at(0), busy: 1, total: 10 }, null)).toBeNull();
   });
 });
@@ -109,7 +152,7 @@ describe("computeValues and nextLatest", () => {
 
   it("gives null shares for a zero total", () => {
     expect(computeValues({ cpu: null, memTotal: 0, memAvailable: 0, diskSize: 0, diskAvail: 0, backends: 1, maxConnections: 0 }, null, "x"))
-      .toEqual({ cpuPct: null, memPct: null, diskPct: null, connUsed: 1, connMax: 0 });
+      .toEqual({ cpuPct: null, memPct: null, diskPct: null, connUsed: 1, connMax: 0, mem: null, commit: null });
   });
 });
 
@@ -119,7 +162,10 @@ describe("mergeHour (hourly rollups)", () => {
     r = mergeHour(r, { cpuPct: null, memPct: 40, diskPct: 10, connUsed: 5, connMax: 60 });
     r = mergeHour(r, { cpuPct: 20, memPct: 60, diskPct: 11, connUsed: 9, connMax: 60 });
     r = mergeHour(r, { cpuPct: 40, memPct: 50, diskPct: null, connUsed: 3, connMax: null });
-    expect(r).toEqual({ samples: 3, cpuSamples: 2, cpuAvg: 30, cpuMax: 40, memAvg: 50, memMax: 60, diskPct: 11, connUsed: 9, connMax: 60 });
+    expect(r).toEqual({
+      samples: 3, cpuSamples: 2, cpuAvg: 30, cpuMax: 40, memAvg: 50, memMax: 60, diskPct: 11, connUsed: 9, connMax: 60,
+      memTotalB: null, memUsedB: null, memCacheB: null, swapB: null, commitPct: null, commitMax: null,
+    });
   });
 
   it("lays out 24 hourly points, oldest first, with gaps", () => {
@@ -150,7 +196,8 @@ describe("ComputeHigh limits and breaches", () => {
     const L = computeLimits(80);
     expect(computeBreaches(latest(), L, now)).toEqual([]);
     expect(computeBreaches(null, L, now)).toBeNull();
-    expect(computeBreaches(latest({ at: at(25) }), L, now)).toBeNull();
+    expect(computeBreaches(latest({ at: at(35) }), L, now)).toEqual([]); // a 30-minute-old scrape is the cloud's normal
+    expect(computeBreaches(latest({ at: at(50) }), L, now)).toBeNull();
   });
 
   it("fires CPU only when every scrape of the last 15 minutes is above the limit", () => {

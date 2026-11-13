@@ -16,7 +16,7 @@ describe("nav", () => {
   it("puts today's pages where spec §5 says", () => {
     expect(groupKeys()).toEqual({
       Home: ["overview", "topology", "events", "status"],
-      Hosting: ["apps", "deployments", "domains", "dns", "uptime", "logs"],
+      Hosting: ["apps", "deployments", "deploy", "domains", "dns", "uptime", "logs"],
       Database: ["supabase", "neon", "firebase", "turso", "upstash", "d1", "sql", "catalog"],
       DevOps: ["repos"],
       Manage: ["alerts", "status-page", "connections", "settings", "sections", "backups"],
@@ -25,14 +25,22 @@ describe("nav", () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
+  // Owner 12 Nov: sub-headings in Hosting, Database and DevOps (same URLs, only the menu grouping).
+  it("groups each section's items under sub-headings", () => {
+    const subs = (group: string) => NAV.find((g) => g.group === group)!.items.map((i) => `${i.sub}:${i.key}`);
+    expect(subs("Hosting")).toEqual(["Apps:apps", "Apps:deployments", "Apps:deploy", "Network:domains", "Network:dns", "Watch:uptime", "Watch:logs"]);
+    expect(subs("Database")).toEqual(["Providers:supabase", "Providers:neon", "Providers:firebase", "Providers:turso", "Providers:upstash", "Providers:d1", "Tools:sql", "Tools:catalog"]);
+    expect(subs("DevOps")).toEqual(["Code:repos", "Servers:containers", "Security:os"]);
+  });
+
   it("keeps every existing URL", () => {
     const hrefs = NAV.flatMap((g) => g.items.map((i) => i.href));
     for (const href of ["/overview", "/topology", "/events", "/apps", "/deployments", "/repos", "/domains", "/dns", "/supabase", "/neon", "/firebase", "/turso",
       "/upstash", "/d1", "/sql", "/catalog", "/uptime", "/alerts", "/logs", "/status", "/connections", "/backups", "/settings"]) expect(hrefs).toContain(href);
   });
 
-  it("puts the GitHub pages under DevOps › Automation", () => {
-    expect(NAV.find((g) => g.section === "devops")?.items.map((i) => [i.key, i.sub])).toEqual([["repos", "Automation"]]);
+  it("puts the GitHub pages under DevOps › Code and Containers under Servers", () => {
+    expect(NAV.find((g) => g.section === "devops")?.items.map((i) => [i.key, i.sub])).toEqual([["repos", "Code"], ["containers", "Servers"], ["os", "Security"]]);
     expect(groupOf("repos")).toBe("DevOps");
     expect(sectionOf("uptime")).toBe("hosting");
     expect(sectionOf("alerts")).toBe("manage");
@@ -125,5 +133,20 @@ describe("nav", () => {
       const lost = { nav: [{ ...ext.nav[0], after: "nope" }] };
       expect(visibleNav("owner", lost).find((g) => g.section === "manage")?.items.slice(-2).map((i) => i.key)).toEqual(["ai", "api-docs"]);
     });
+  });
+});
+
+// Watchbell 1.5: DevOps › Containers is part of the self-hosted edition only (and the demo, which shows made-up ones).
+describe("selfhost-only pages", () => {
+  const keys = (selfhost?: boolean) => visibleNav("owner", undefined, undefined, { selfhost }).flatMap((g) => g.items.map((i) => i.key));
+  it("shows Containers only when the console says it's self-hosted", () => {
+    expect(keys()).not.toContain("containers");
+    expect(keys(false)).not.toContain("containers");
+    expect(keys(true)).toContain("containers");
+  });
+  it("shows Containers to operators but not viewers", () => {
+    const of = (role: "operator" | "viewer") => visibleNav(role, undefined, undefined, { selfhost: true }).flatMap((g) => g.items.map((i) => i.key));
+    expect(of("operator")).toContain("containers");
+    expect(of("viewer")).not.toContain("containers");
   });
 });

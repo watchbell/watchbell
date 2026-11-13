@@ -70,6 +70,8 @@ can be changed at any time.
 | `WATCHBELL_MIGRATIONS_DIR` | Folder with the database migrations, only needed if you start the server from outside `app/` (default `drizzle-selfhost`). |
 | `WATCHBELL_TIMEZONE` | The time zone of every time shown and sent, the daily job and the digest, as an IANA name such as `Europe/Berlin`. Unset means `Asia/Jakarta` (WIB). See [Time zone](#time-zone). |
 | `WATCHBELL_ALLOW_REMOTE_DB` | Set to `1` to allow a remote Postgres in `DATABASE_URL` that Watchbell would otherwise refuse (a hosted Supabase database, or an address it can't check). |
+| `WATCHBELL_DOCKER` | Set to `on` to turn on DevOps › Containers. Off by default, because access to the Docker socket is root-equivalent on the machine. The user that runs Watchbell also needs access to the socket. See [Containers](containers.md). |
+| `DOCKER_HOST` | Only when Docker listens on a socket other than the default: `unix:///path/to/docker.sock` or `npipe:////./pipe/name`. Watchbell refuses a TCP address. |
 | `WATCHBELL_COLLECT_MIN_GAP_MIN` | The least minutes between two runs that an outside scheduler starts through `POST /api/collect` (default `10`, `0` turns it off). A call sooner than that after the last run is answered at once without running, so a schedule set to every minute by mistake can't use up a free plan's CPU. Refresh now and the built-in scheduler are not limited. |
 
 Each notification setting is independent: a missing one only turns its channel off, with a note on Alerts ›

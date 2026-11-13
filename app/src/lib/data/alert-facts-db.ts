@@ -5,6 +5,9 @@ import { accounts, checks, deployments, links, monitors, resources, snapshots } 
 import type { Facts, LinkFact } from "@/lib/alerts/facts";
 import { dbFact, dnsFacts, domainFacts } from "@/lib/alerts/facts-map";
 import { lastCollectorRunAt, lastMinuteRunAt } from "@/lib/collector/last-run";
+import { ciFacts } from "@/lib/data/ci-facts-db";
+import { loadOsScan, osState } from "@/lib/data/os-scan-db";
+import { osFact } from "@/lib/os/view";
 import { computeFacts } from "@/lib/data/supabase-metrics-db";
 import { domainMove } from "@/lib/domain-move";
 import { loadAppDeps } from "@/lib/data/deps-db";
@@ -54,6 +57,10 @@ export async function loadFacts(now: Date): Promise<Facts> {
   const deps = appIds.length ? await loadAppDeps(appIds).catch(() => null) : null;
   // Watchbell 1.2: the apps' Next.js security checks (null until the first check: FrameworkVulnerable not evaluated).
   const frameworks = appIds.length ? await frameworkFacts(appIds).catch(() => null) : null;
+  // Watchbell 1.4: the linked repositories' latest default-branch Actions runs (empty or failed read: CiFailing not evaluated).
+  const ci = appIds.length ? await ciFacts(appIds).catch(() => null) : null;
+  // Owner 12 Nov: the last OS scan of a self-hosted console's machine (none in the cloud edition: not evaluated).
+  const os = osState() === "on" ? osFact(await loadOsScan().catch(() => null)) : null;
 
   return {
     now, lastMinuteRunAt: lastRun, lastAnyRunAt: lastAny,
@@ -81,5 +88,7 @@ export async function loadFacts(now: Date): Promise<Facts> {
     compute,
     deps: deps && deps.length ? deps : null,
     frameworks: frameworks && frameworks.length ? frameworks : null,
+    ci: ci && ci.length ? ci : null,
+    os,
   };
 }

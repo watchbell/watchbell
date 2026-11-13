@@ -154,24 +154,30 @@ export async function seedDatabases(ctx: SeedCtx, seeded: SeededApps): Promise<S
 }
 
 // Stage 12 compute of the Supabase project: the newest scrape and 24 hourly rollups, all well under the ComputeHigh
-// limits (CPU 80 %, RAM 90 %).
+// limits (CPU 80 %, RAM 90 %), with the memory breakdown of a 1 GB instance and its commitment (owner 13 Nov).
 async function seedCompute(ctx: SeedCtx, resourceId: string): Promise<void> {
   const { db, seed, now } = ctx;
   const rng = rngFor(seed, "compute");
   const scraped = ago(now, rng.int(1, 4) * MINUTE);
   const connMax = 60;
+  const totalB = 1024 ** 3;
   const hours = Array.from({ length: 24 }, (_, i) => {
     const hour = new Date(hourStart(now).getTime() - i * HOUR);
     const cpu = Math.round((6 + 18 * rng.next()) * 10) / 10;
     const mem = Math.round((34 + 14 * rng.next()) * 10) / 10;
+    const commit = Math.round((58 + 14 * rng.next()) * 10) / 10;
     return {
       resourceId, hour, samples: i === 0 ? Math.max(1, Math.floor((now.getTime() - hour.getTime()) / (5 * MINUTE))) : 12, cpuSamples: i === 0 ? 1 : 11,
       cpuAvg: cpu, cpuMax: Math.round(Math.min(70, cpu * (1.4 + rng.next())) * 10) / 10, memAvg: mem, memMax: Math.round(Math.min(85, mem + 6 * rng.next()) * 10) / 10,
       diskPct: 9.8, connUsed: rng.int(8, 22), connMax,
+      memTotalB: totalB, memUsedB: Math.round(totalB * mem / 100), memCacheB: Math.round(totalB * (0.28 + 0.06 * rng.next())),
+      swapB: Math.round((60 + 50 * rng.next()) * 1024 ** 2), commitPct: commit, commitMax: Math.round(Math.min(84, commit + 5 * rng.next()) * 10) / 10,
     };
   });
   const latest = {
     cpuPct: hours[0].cpuAvg, memPct: hours[0].memAvg, diskPct: 9.8, connUsed: hours[0].connUsed, connMax, at: scraped.toISOString(), prev: null,
+    mem: { totalB, usedB: hours[0].memUsedB, cacheB: hours[0].memCacheB, swapB: hours[0].swapB },
+    commit: { usedB: Math.round(1.4 * totalB * hours[0].commitPct / 100), limitB: Math.round(1.4 * totalB), pct: hours[0].commitPct },
     recent: Array.from({ length: 6 }, (_, i) => ({ at: ago(scraped, (5 - i) * 5 * MINUTE).toISOString(), cpu: Math.round((6 + 18 * rng.next()) * 10) / 10 })),
   };
   await db.insert(supabaseMetricsKeys).values({

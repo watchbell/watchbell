@@ -6,7 +6,7 @@ export type RuleKey =
   | "MonitorDown" | "CollectorStale" | "HighLatency" | "DeploymentFailed" | "DatabasePaused" | "CertExpiringSoon" | "DomainExpiringSoon"
   | "StorageAlmostFull" | "NeonComputeHigh" | "FirestoreQuotaHigh" | "AutoPauseRisk" | "DnsProxiedToVercel" | "CredentialExpiring"
   | "ComputeHigh" | "DbQuotaHigh"
-  | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved";
+  | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved" | "CiFailing" | "OsSecurityUpdate";
 
 export type RuleDef = {
   key: RuleKey; severity: Severity; threshold: number | null; bounds: [number, number] | null; source: "own" | "api" | "test";
@@ -41,6 +41,11 @@ export const RULES: Record<RuleKey, RuleDef> = {
   // Watchbell 1.2 (owner 23 Oct): the Security card's Next.js check (the version the live site runs, against OSV.dev) says
   // "vulnerable". One alert per app. A critical advisory raises the default warning to critical.
   FrameworkVulnerable: { key: "FrameworkVulnerable", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The app's Next.js version has a known advisory (OSV.dev)" },
+  // Watchbell 1.4: the latest GitHub Actions run on the linked repository's default branch (read in the daily sync).
+  CiFailing: { key: "CiFailing", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "The latest GitHub Actions run on the default branch failed" },
+  // Owner 12 Nov: the machine a self-hosted Watchbell runs on has a security update waiting that fixes a CVE scored at
+  // least the threshold (CVSS, whole numbers; 0 = every scored fix), or a newer kernel waits for a reboot. A 9+ score raises it to critical.
+  OsSecurityUpdate: { key: "OsSecurityUpdate", severity: "warning", threshold: 7, bounds: [0, 10], source: "own", needs: null, sampled: false, condition: (n) => `A waiting security update fixes a CVE scored ${(n ?? 7).toFixed(1)}+ (CVSS), or a new kernel waits for a reboot` },
   // Watchbell 1.2.1: an HTTP monitor still checks a domain its app no longer has (the app moved to a new domain). Fires
   // instead of MonitorDown for that monitor; the fix is Update monitor, never a redeploy.
   MonitorDomainMoved: { key: "MonitorDomainMoved", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The monitor's domain is no longer one of the app's domains" },
@@ -95,6 +100,8 @@ export const RULE_NAMES: Record<RuleKey, string> = {
   CredentialExpiring: "Token expiring",
   VulnerableDependency: "Vulnerable package",
   FrameworkVulnerable: "Next.js needs a security update",
+  CiFailing: "CI is failing",
+  OsSecurityUpdate: "Security updates waiting on this machine",
   MonitorDomainMoved: "App moved to a new domain",
 };
 export const ruleName = (key: string): string => (isRuleKey(key) ? RULE_NAMES[key] : key);

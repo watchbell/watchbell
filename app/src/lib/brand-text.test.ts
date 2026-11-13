@@ -63,7 +63,7 @@ function leftovers(): string[] {
 describe("brand: Watchbell", () => {
   it("no user-visible string in app/src still says Watchpost (kept identifiers aside)", () => {
     expect(leftovers()).toEqual([]);
-  });
+  }, 30_000); // reads every file in app/src: ~2.5 s alone, past 5 s when the full suite loads the CPU
   it("finds a leftover in a string but not in a comment or an identifier", () => {
     const texts = visibleTexts(join(root, "lib", "brand-env.ts"));
     expect(texts).toContain("WATCHPOST_");

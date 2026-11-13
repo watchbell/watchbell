@@ -1,3 +1,4 @@
+import { cvssText, nvdUrl } from "@/lib/security/links";
 import { IconExternalLink } from "@tabler/icons-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -32,6 +33,7 @@ import { productionSourceLine } from "@/lib/deps/branch";
 import { actionsStatus, linkSourceText, suggestionWhy } from "@/lib/view/github";
 import { isUuid } from "@/lib/ids";
 import { suggestDatabase } from "@/lib/links";
+import { isDemo } from "@/lib/mode";
 import { type EolData, eolLine } from "@/lib/security/eol";
 import type { SecurityRow } from "@/lib/security/types";
 import { ago } from "@/lib/time";
@@ -55,7 +57,9 @@ import { DEPLOY_HEAD, deploymentRows } from "../../deployments/deployment-rows";
 import { LogViewer } from "../../logs/log-viewer";
 import { AppActions, type DeployRef, PromoteStaged } from "./app-actions";
 import { DependenciesCard } from "./deps-card";
+import { BuildFilesCard } from "./buildfiles-card";
 import { EnvCard } from "./env-card";
+import { PullRequestsCard } from "./pr-card";
 import { LinkDialog } from "./link-dialog";
 import { ConfirmRepo, RefreshActionsButton, RepoDialog } from "./repo-dialog";
 import { SecurityCheckButton } from "./security-check-button";
@@ -222,6 +226,16 @@ export default async function AppPage({ params, searchParams }: { params: Promis
               <EnvCard appId={app.id} />
             </div>
           )}
+          {act && !app.gone && (
+            <div className="mt-4">
+              <BuildFilesCard appId={app.id} owner={member.role === "owner"} demo={isDemo()} />
+            </div>
+          )}
+          {act && !app.gone && repoView?.link && (
+            <div className="mt-4">
+              <PullRequestsCard appId={app.id} />
+            </div>
+          )}
           {repoView && (repoView.connected || repoView.link) && (
             <div className="mt-4">
               <RepositoryCard app={{ id: app.id, name: app.name }} view={repoView} suggestion={repoView.link ? null : suggestionFor(app.name, repoView)} owner={member.role === "owner"} canAct={act} now={now} />
@@ -348,7 +362,7 @@ function SecurityCard({ app, security, canAct: act, now, eol }: { app: { id: str
       </div>
       {isVulnerable(security) && (
         <PlainTable
-          head={["ID", "Severity", "Summary", "Fix"]}
+          head={["ID", "Severity (CVSS)", "Summary", "Fix"]}
           rows={security.findings.map((f) => ({
             key: f.id,
             state: f.severity,
@@ -357,9 +371,9 @@ function SecurityCard({ app, security, canAct: act, now, eol }: { app: { id: str
               <tr className={rowClass}>
                 <td className={td}>
                   <a href={`https://osv.dev/vulnerability/${encodeURIComponent(f.id)}`} target="_blank" rel="noopener" className={mono}>{f.id}</a>
-                  {f.cve && <div className={cn(mono, "mt-0.5 text-xs text-ink-faint")}>{f.cve}</div>}
+                  {f.cve && <div className={cn(mono, "mt-0.5 text-xs text-ink-faint")}>{nvdUrl(f.cve) ? <a href={nvdUrl(f.cve)!} target="_blank" rel="noopener noreferrer" title="NVD">{f.cve}</a> : f.cve}</div>}
                 </td>
-                <td className={td}><SevTag severity={f.severity} /></td>
+                <td className={td}><SevTag severity={f.severity} />{cvssText(f.score) && <span className={cn(mono, "ml-1.5 text-[12.5px]")}>{cvssText(f.score)}</span>}</td>
                 <td className={cn(td, tdWrap)}>{f.summary || <span className="text-ink-faint">No summary</span>}</td>
                 <td className={cn(td, mono)}>{f.fixed ? `Fixed in ${f.fixed}` : <span className="text-ink-faint">No fix yet</span>}</td>
               </tr>

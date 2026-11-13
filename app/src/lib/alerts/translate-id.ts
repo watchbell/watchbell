@@ -29,7 +29,15 @@ const computeParts = (s: string) => s
 
 const DEP_SEVERITY: Record<string, string> = { critical: "kritis", high: "tinggi", moderate: "sedang", low: "rendah", unknown: "nggak diketahui" };
 
+// Owner 12 Nov, lib/alerts/evaluate.ts osSecurityUpdate(): "x fixes CVE-… (9.8) and 1 more; 2 more packages; kernel … waits for a reboot".
+const osItems = (s: string) => s
+  .replace(/ fixes /g, " nambal ").replace(/ and (\d+) more\b/g, " dan $1 lagi").replace(/\b(\d+) more packages\b/g, "$1 paket lagi").replace(/ waits for a reboot/g, " nunggu reboot");
+
 const SHAPES: Record<string, Shape[]> = {
+  OsSecurityUpdate: [
+    [/^On (.+?), no waiting security update fixes a CVE scored (\S+) or more, and the newest kernel runs\.$/, (_, sys, s) => `Di ${sys} nggak ada update security yang nunggu buat CVE skor ${s} ke atas, dan kernel terbaru udah jalan.`],
+    [/^On (.+?): (.+)\.$/, (_, sys, items) => `Di ${sys}: ${osItems(items)}.`],
+  ],
   MonitorDown: [
     [/^(.+): no ping for (\d+ (?:min|h|days?))\.$/, (_, who, s) => `${who}: nggak ada ping selama ${span(s)}.`],
     [/^(.+): (the job reported a failure|started but didn't finish|never pinged|no ping in time)\.$/, (_, who, why) => `${who}: ${HEARTBEAT[why]}.`],
@@ -102,6 +110,11 @@ const SHAPES: Record<string, Shape[]> = {
       `${k} paket rentan (${counts.replace(/\b(critical|high|moderate|low|unknown)\b/g, (w) => DEP_SEVERITY[w])}): ${rest.replace(/ \(no fix yet\)/g, " (belum ada fix)").replace(/, \+(\d+) more\.$/, ", +$1 lagi.")}`],
   ],
   // lib/deps/framework.ts frameworkMessage(): "Next.js 16.3.8 has 2 known vulnerabilities (critical), fixed in 16.4.1."
+  // lib/alerts/evaluate.ts CiFailing: "The latest CI run on main failed (run #42)." / "… passed."
+  CiFailing: [
+    [/^The latest (.+) run on (.+) (failed|passed)( \(run #\d+\))?\.$/, (_, name, branch, how, num) =>
+      `Run ${name} terbaru di ${branch === "the default branch" ? "branch default" : branch} ${how === "failed" ? "gagal" : "lolos"}${num ?? ""}.`],
+  ],
   FrameworkVulnerable: [
     [/^(.+) runs Next\.js (.+) with no known advisories\.$/, (_, app, v) => `${app} pakai Next.js ${v} tanpa advisory yang diketahui.`],
     // "…, fixed in 15.5.7 (one fix needs Next.js 16)." (review T1: the same-major version the update PR uses)

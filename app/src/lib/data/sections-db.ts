@@ -5,6 +5,7 @@ import { db } from "@/db/client";
 import { rowsOf } from "@/db/rows";
 import { accounts, alerts, monitors, resources } from "@/db/schema";
 import { type Provider, PROVIDERS } from "@/lib/providers/info";
+import { mode } from "@/lib/mode";
 import { cleanSectionsOff, pausedAlertKeys, pausedSections as pausedOf, type SectionId, sectionsAvailable } from "@/lib/sections";
 import { sectionsOffSql } from "./settings-db";
 
@@ -40,7 +41,7 @@ const readState = cache(async (): Promise<{ providers: Provider[]; databases: bo
 export async function sectionState(): Promise<SectionState> {
   const { providers, databases, off } = await readState();
   const has = { databases };
-  const available = [...sectionsAvailable(providers, has)];
+  const available = [...sectionsAvailable(providers, { ...has, selfhost: mode() !== "cloud" })];
   return { on: available.filter((id) => !off.includes(id)), available, off, providers, has };
 }
 

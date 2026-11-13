@@ -176,14 +176,16 @@ export function LiveIndicator() {
     return () => clearInterval(t);
   }, [polling]);
   if (last === null) return null;
+  const text = liveText(last, Math.max(now, last), slow, choice);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
         aria-label="Refresh: choose how often this page updates"
-        className="mr-2 inline-flex items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-1 text-[12.5px] text-ink-soft hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 max-[720px]:hidden"
+        className="mr-2 inline-flex min-w-0 items-center gap-1.5 whitespace-nowrap rounded-md px-1.5 py-1 text-[12.5px] text-ink-soft hover:bg-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 max-[720px]:hidden"
       >
-        <span className={choice === "off" ? "size-2 rounded-full bg-idle" : "size-2 rounded-full bg-ok"} aria-hidden />
-        <span aria-live="off">{liveText(last, Math.max(now, last), slow, choice)}</span>
+        <span className={choice === "off" ? "size-2 shrink-0 rounded-full bg-idle" : "size-2 shrink-0 rounded-full bg-ok"} aria-hidden />
+        {/* Shortened with … when the top bar is tight (~1,000 px); the whole line is in the tooltip. */}
+        <span aria-live="off" className="min-w-0 truncate" title={text}>{text}</span>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-[220px]">
         <DropdownMenuGroup>

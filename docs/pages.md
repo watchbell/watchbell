@@ -4,7 +4,8 @@ Bahasa Indonesia: [id/pages.md](id/pages.md)
 
 The left menu groups the pages into sections, the way the console does: Home, Hosting, Database, DevOps and Manage.
 Home, Hosting and Manage are there from the start. Database appears by itself when you connect Supabase, Neon,
-Firebase, Turso or Upstash, or once a database is watched; DevOps when you connect GitHub. An owner can turn Hosting,
+Firebase, Turso or Upstash, or once a database is watched; DevOps when you connect GitHub, and always on a
+self-hosted console (its Containers and OS vulnerabilities need no GitHub). An owner can turn Hosting,
 Database or DevOps off in [Manage › Sections](#manage). Some pages are for owners only; operators and viewers don't
 see them in the menu (see [roles](first-run.md#add-more-people)). Press Ctrl+K (Cmd+K on a Mac) anywhere to jump to a
 page by name; it lists the same pages as the menu.
@@ -58,6 +59,20 @@ says "no update for N days, may be stale".
 
 ## Hosting
 
+The menu groups Hosting under **Apps** (Applications, Deployments, Deploy an app), **Network** (Domains, DNS records)
+and **Watch** (Uptime, Logs).
+
+**Deploy an app.** Pick what the app is written in (Next.js, a static site, Node.js, Python, PHP, Go, Java, .NET, Ruby
+or a Docker image), then where it should run: free hosts first, then free with a card, trials, paid plans, and guides
+for the big clouds. Each host shows its catch in one line (sleeps when idle, non-commercial only, card needed) and what
+Watchbell can do with it afterwards. The list is checked against the hosts' official pricing pages and dated on the
+page. Pick a repository (its GitHub language picks the tile) and the button opens the host's own new-project page;
+Watchbell deploys nothing itself and never puts your repository into the link (the hosts' "deploy" links copy it into
+a new repository). Vercel needs a connection first; a new Vercel project shows up under Sync on Connections after the
+next sync (daily, or Sync now), where you tick it to watch it (or turn on Watch new ones automatically). Any other host,
+Cloudflare included, can be watched through Uptime. Below it, **Where your apps run** lists your applications and
+their state. Owner and operators; viewers don't see the page.
+
 **Applications.** Your Vercel projects that you chose to watch, with their database, domain and uptime. Open one for:
 
 - Details: status, response time, page views, 5xx responses, uptime, security advisories for its dependencies, and its
@@ -77,6 +92,24 @@ says "no update for N days, may be stale".
   Preview or Development only, a `NEXT_PUBLIC_` name that looks secret (it ends up in the browser), and a Production
   name missing from `.env.example`. Only names are read, never values; nothing runs on a schedule and nothing is stored.
   Without GitHub connected it says so and checks Vercel's settings only.
+- The Pull requests card (operators and owners, apps with a linked repository). **Check open pull requests** reads the
+  repository's open pull requests and what the [pre-deploy check](precheck.md) commented on each: fix before merging,
+  check before merging, no new problems, checked an older commit, not checked (the repository doesn't run the check
+  yet), or couldn't read the comments (GitHub didn't answer; try again). Nothing runs on a schedule and nothing is
+  stored. When the latest GitHub Actions run on the repository's default branch fails, the **CiFailing** alert fires
+  (warning); it resolves on the next passing run. That is the latest run of any workflow there, not one named CI.
+  Watchbell reads that run in the daily GitHub sync, so the GitHub token needs Actions: Read; a run not read again for
+  two days counts as unknown, so the alert neither fires nor resolves on old data.
+- The Build files card (operators and owners). **Generate** writes a `Dockerfile`, `.dockerignore`,
+  `docker-compose.yml`, a GitHub Actions workflow (`.github/workflows/ci.yml`) and a Kubernetes manifest (`k8s.yaml`)
+  from the app's settings: its framework (Next.js, Vite, Create React App, or a Node app with a start script), the
+  Vercel Root Directory, the lockfile's package manager, the Node version in `engines`, its scripts and its env names
+  (names only, never values). Each file has a Copy button; facts Watchbell had to guess are listed. Owners can press
+  **Open pull request**: the files go on a new `watchbell/build-files-…` branch of the linked repository, and a file the
+  repository already has is never overwritten (it's listed as left alone). The CI file needs the PR-write token's
+  Workflows: Read and write permission; without it the pull request opens without that file and says so. The
+  Kubernetes manifest doesn't contain a Secret: its comment gives the `kubectl create secret … --from-env-file=.env`
+  command and the env names. Nothing is built, deployed or stored.
 - Metrics, Deployments and Logs tabs for that app.
 - Actions for operators and owners: redeploy, roll back, check now. The row menu of the Applications list has Redeploy
   (the same confirm) and View logs (the app's Logs tab) too.
@@ -120,11 +153,20 @@ keeps only a short history, so the collector copies warnings and errors every 5 
 
 ## Database
 
+The menu groups Database under **Providers** (Supabase, Neon, Firebase, Turso, Upstash Redis, Cloudflare D1) and
+**Tools** (SQL console, Free databases).
+
 **Supabase.** Each project's status, region and Postgres version from the Management API, which doesn't touch your
 database. Database size is read once a day, and only while the project is already active. Per project (owner only):
 **Keep active** warns from day 5 without API traffic and sends one keep-alive query a day so a free project isn't
 paused; **Auto-restore** brings a paused project back when its account has a free slot. **Check services** in the row
 menu reads the project's service health (Auth, REST, Realtime, Storage, Database) from the Management API at once.
+
+**Compute** under the table, per project with a metrics key (a Secret API key the owner adds): CPU, RAM, disk and
+connections now with 24 hourly averages, then **Memory** (used, cache + buffers and swap against total RAM, hour by
+hour) and **Memory commitment** (memory promised to processes, of the limit before the kernel refuses more; Warning
+from 85 %), as Supabase's Observability › Database shows them. Read from Supabase's Metrics API with each collector
+run: every 30 minutes on the cloud console, every 5 minutes self-hosted.
 
 **Neon.** Compute state, CU-hours, storage and transfer from the Neon API. Reading them doesn't wake the compute and
 Watchbell never connects to the database. Operators can wake a suspended compute.
@@ -157,10 +199,22 @@ approval also show on Overview. Creating needs a token with write access for tha
 
 ## DevOps
 
-Under the sub-heading **Automation**:
+Under the sub-heading **Code**:
 
 **Repositories.** A read-only browser of the repositories your GitHub token can read: README, files, commits,
 branches, Actions runs and dependency advisories. Shows "GitHub isn't connected" until you add a GitHub token.
+
+Under the sub-heading **Servers** (self-hosted only):
+
+**Containers.** The Docker containers on the machine Watchbell runs on, for operators and owners. Off until you turn it
+on: see [Containers](containers.md).
+
+Under the sub-heading **Security** (self-hosted only):
+
+**OS vulnerabilities.** Known vulnerabilities on the machine Watchbell runs on (Ubuntu for now): the kernel and a
+pending reboot, security updates waiting with each CVE's CVSS score, Ubuntu priority and links, and a command to copy.
+The **OsSecurityUpdate** alert fires while one of them fixes a CVE scored 7.0 or more. See
+[OS vulnerabilities](os-vulnerabilities.md).
 
 ## Manage
 

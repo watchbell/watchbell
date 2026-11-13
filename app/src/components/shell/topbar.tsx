@@ -26,13 +26,13 @@ export function Topbar({
         onClick={(e) => onOpenPalette(e.currentTarget)}
         aria-label="Search"
         aria-keyshortcuts="Control+K Meta+K"
-        className="ml-2 flex w-[280px] items-center gap-2 whitespace-nowrap rounded-[7px] border border-line bg-surface-2 px-2.5 py-1.5 text-ink-faint max-[720px]:w-auto"
+        className="ml-2 flex w-[280px] min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap rounded-[7px] border border-line bg-surface-2 px-2.5 py-1.5 text-ink-faint max-[720px]:w-auto"
       >
-        <IconSearch size={16} />
-        <span className="max-[720px]:hidden">Search apps, databases, pages</span>
+        <IconSearch size={16} className="shrink-0" />
+        <span className="min-w-0 truncate max-[720px]:hidden">Search apps, databases, pages</span>
         <kbd className="ml-auto rounded border border-line-strong px-[5px] font-mono text-[11px] text-ink-soft max-[720px]:hidden">Ctrl K</kbd>
       </button>
-      <div className="ml-auto flex items-center gap-0.5">
+      <div className="ml-auto flex min-w-0 items-center gap-0.5">
         {/* Screenshot mode: always visible while on, so it is never left on by accident; a click turns it off. */}
         {shot && (
           <button type="button" onClick={() => setShot(false)} title="Screenshot mode is on. Click to turn it off." aria-label="Screenshot mode is on. Turn it off"
@@ -47,7 +47,7 @@ export function Topbar({
         {office && user.role === "owner" && <ExtensionDrawer link={office} />}
         <IconButton label="Screenshot mode" pressed={shot} onClick={() => setShot(!shot)}>{shot ? <IconEyeOff size={18} /> : <IconEye size={18} />}</IconButton>
         <ThemeToggle />
-        <Link href="/alerts" aria-label={alerts ? `Alerts, ${alerts} firing` : "Alerts"} className="relative inline-grid size-[34px] place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink">
+        <Link href="/alerts" aria-label={alerts ? `Alerts, ${alerts} firing` : "Alerts"} className="relative inline-grid size-[34px] shrink-0 place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink">
           <IconBell size={18} />
           {alerts > 0 && <span aria-hidden className="absolute right-0.5 top-[3px] rounded-[9px] bg-err px-1 font-mono text-[10px] font-medium leading-[15px] text-white">{alerts}</span>}
         </Link>

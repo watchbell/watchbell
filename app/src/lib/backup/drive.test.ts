@@ -50,6 +50,14 @@ describe("folder", () => {
     expect(await folderState("tok", "a", fake(json({ id: "a" })))).toEqual({ ok: true, data: { usable: true, name: null } });
     expect(await folderState("tok", "a", fake(json({ error: {} }, 404)))).toEqual({ ok: true, data: { usable: false, name: null } });
   });
+  it("a folder this connection may not open (made under another Google account or client) is not usable either", async () => {
+    expect(await folderState("tok", "a", fake(json({ error: { status: "PERMISSION_DENIED" } }, 403)))).toEqual({ ok: true, data: { usable: false, name: null } });
+  });
+  it("tells a plain 403 (no access to that file) from a full Drive and a rate limit", async () => {
+    expect(await folderUsable("tok", "a", fake(json({ error: { errors: [{ reason: "storageQuotaExceeded" }] } }, 403)))).toMatchObject({ ok: false, kind: "full" });
+    expect(await ensureTabs("tok", "s", ["Overview"], fake(json({ error: { status: "PERMISSION_DENIED" } }, 403))))
+      .toEqual({ ok: false, kind: "denied", status: 403, error: "Google Drive refused the request (403 PERMISSION_DENIED)." });
+  });
 });
 
 describe("spreadsheet", () => {

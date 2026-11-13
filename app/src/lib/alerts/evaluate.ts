@@ -33,6 +33,9 @@ const heartbeatReason = (lastError: string | null | undefined) =>
 
 type Ev = (f: Facts, t: number | null) => Observation[] | null; // null: source not available
 
+// GitHub's conclusions that mean the run failed (lib/view/github.ts shows the same three as "Failing").
+const CI_FAILED = new Set(["failure", "timed_out", "startup_failure"]);
+
 const base = (rule: RuleKey, subject: string, o: Partial<Observation>): Observation => ({
   rule, subject, status: "unknown", resourceId: null, accountId: null, title: subject, message: "", provider: null, sampleAt: null, ...o,
 });
@@ -159,7 +162,36 @@ const EVALUATORS: Record<RuleKey, Ev> = {
     if (s.status !== "vulnerable" || !s.findings.length) return [o];
     return [{ ...o, status: "firing" as const, message: frameworkMessage(s.version, s.findings), ...(worstSeverity(s.findings) === "CRITICAL" ? { severity: "critical" as const } : {}) }];
   }) : null,
+  // Watchbell 1.4: one subject per watched app with a linked repository. A failed run fires, a passing one resolves;
+  // a running, cancelled or skipped run, or none read yet, says nothing new. No Actions data at all: not evaluated.
+  CiFailing: (f) => f.ci?.length ? f.ci.flatMap((c) => {
+    const app = f.apps.find((a) => a.id === c.appId);
+    if (!app) return [];
+    const o = base("CiFailing", c.appId, { resourceId: c.appId, title: app.name, provider: "github" });
+    if (!c.run || "none" in c.run || c.run.status !== "completed") return [o];
+    const what = `The latest ${c.run.name ?? "Actions"} run on ${c.run.branch ?? c.branch ?? "the default branch"}`;
+    if (c.run.conclusion === "success") return [{ ...o, status: "ok" as const, message: `${what} passed.` }];
+    if (!CI_FAILED.has(c.run.conclusion ?? "")) return [o];
+    return [{ ...o, status: "firing" as const, message: `${what} failed${c.run.runNumber ? ` (run #${c.run.runNumber})` : ""}.` }];
+  }) : null,
+  OsSecurityUpdate: (f, t) => osSecurityUpdate(f, t),
 };
+
+// Owner 12 Nov: one subject, the machine. Lists up to three packages (worst score first), counts the rest, and adds a
+// kernel that waits for a reboot. Resolves when neither is left.
+function osSecurityUpdate(f: Facts, t: number | null): Observation[] | null {
+  if (!f.os) return null;
+  const min = t ?? 7;
+  const sys = f.os.system;
+  const hits = f.os.updates.filter((u) => u.score !== null && u.score >= min).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const items = hits.slice(0, 3).map((u) => `${u.source} fixes ${u.cves[0]} (${u.score!.toFixed(1)})${u.cves.length > 1 ? ` and ${u.cves.length - 1} more` : ""}`);
+  if (hits.length > 3) items.push(`${hits.length - 3} more packages`);
+  if (f.os.kernelWaiting) items.push(`kernel ${f.os.kernelWaiting.installed} waits for a reboot`);
+  const o = base("OsSecurityUpdate", "os", { title: sys });
+  if (!items.length && f.os.partial) return [o]; // says nothing new: a failed lookup may hide a fix
+  if (!items.length) return [{ ...o, status: "ok", message: `On ${sys}, no waiting security update fixes a CVE scored ${min.toFixed(1)} or more, and the newest kernel runs.` }];
+  return [{ ...o, status: "firing", message: `On ${sys}: ${items.join("; ")}.`, ...(hits.some((u) => (u.score ?? 0) >= 9) ? { severity: "critical" as const } : {}) }];
+}
 
 export function evaluate(f: Facts, rules: RuleConfig[], only?: RuleKey[]): { observations: Observation[]; evaluated: Set<RuleKey> } {
   const observations: Observation[] = [];

@@ -1,4 +1,5 @@
 import { abortPromise, readCapped } from "@/lib/collector/http-check";
+import { cvss3Score } from "@/lib/deps/osv";
 import { sortFindings } from "./rules";
 import { compareVersions } from "./semver";
 import { type Finding, type Severity, SEVERITIES } from "./types";
@@ -17,6 +18,17 @@ function severityOf(v: Obj): Severity {
   const raw = isObj(v.database_specific) ? str(v.database_specific.severity)?.toUpperCase() : undefined;
   if (raw === "MEDIUM") return "MODERATE";
   return (SEVERITIES as readonly string[]).includes(raw ?? "") ? (raw as Severity) : "UNKNOWN";
+}
+
+// The first CVSS v3 vector OSV lists, scored; v4 and unreadable vectors give none.
+function scoreOf(v: Obj): number | null {
+  for (const s of arr(v.severity)) {
+    if (isObj(s) && s.type === "CVSS_V3") {
+      const n = cvss3Score(str(s.score) ?? "");
+      if (n !== null) return n;
+    }
+  }
+  return null;
 }
 
 const isNext = (a: Obj) => isObj(a.package) && a.package.name === "next" && a.package.ecosystem === "npm";
@@ -75,6 +87,7 @@ function parseVulns(vulns: unknown[], version: string): Finding[] | null {
       cve: arr(v.aliases).map(str).find((a): a is string => !!a && /^CVE-\d{4}-\d+$/.test(a)) ?? null,
       summary: (str(v.summary) ?? "").replace(/\s+/g, " ").trim().slice(0, SUMMARY_MAX),
       severity: severityOf(v),
+      score: scoreOf(v),
       fixed: fixedFor(v.affected, version),
     });
   }

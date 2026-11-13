@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { dependabotAlerts, rootFiles } from "./github-deps";
 import {
-  branchHead, commitFiles, createBranch, createPull, lockfileAt, manifestAt, mergeWatchpostPull, openPull, pullCommits, pullFiles, putManifest, repoInfo, tokenLogin, WRITE_SCOPE_ERROR,
+  branchHead, commitFiles, createBranch, createPull, lockfileAt, manifestAt, mergeWatchpostPull, openPull, pullCommits, pullFiles, putManifest, putNewFile, repoInfo, tokenLogin, WRITE_SCOPE_ERROR,
 } from "./github-write";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -135,5 +135,44 @@ describe("github-write: the merge watcher's allow-list reads (audit M1)", () => 
     expect(await tokenLogin("t", { fetch: r.fetch })).toEqual({ ok: true, data: "me" });
     expect(r.seen.map((x) => x.method)).toEqual(["GET", "GET", "GET", "GET"]);
     expect(await pullFiles("t", "../r", 7, { fetch: r.fetch })).toMatchObject({ ok: false });
+  });
+});
+
+// Watchbell 1.5 Build files: a create-only file put on the build-files branch.
+describe("putNewFile", () => {
+  const BF = "watchbell/build-files-0123abcd";
+  it("creates a file without a sha, so GitHub never overwrites one", async () => {
+    const r = recorder(() => json({ content: {} }, 201));
+    expect(await putNewFile("t", "o/r", BF, "main", "apps/web/Dockerfile", "FROM x", "Add Dockerfile", { fetch: r.fetch })).toEqual({ ok: true, data: "created" });
+    expect(r.seen[0].method).toBe("PUT");
+    expect(r.seen[0].url).toBe("https://api.github.com/repos/o/r/contents/apps/web/Dockerfile");
+    expect(r.seen[0].body).toEqual({ message: "Add Dockerfile", content: Buffer.from("FROM x").toString("base64"), branch: BF });
+  });
+  // Minor M6: a 422 is "exists" only when the file is really there on the branch.
+  it("reads GitHub's 422 as a file that already exists when the file is there", async () => {
+    const r = recorder((_u, init) => (init.method === "PUT" ? json({ message: "sha wasn't supplied" }, 422) : json({ sha: "x" })));
+    expect(await putNewFile("t", "o/r", BF, "main", "Dockerfile", "x", "m", { fetch: r.fetch })).toEqual({ ok: true, data: "exists" });
+    expect(r.seen.at(-1)).toMatchObject({ method: "GET", url: `https://api.github.com/repos/o/r/contents/Dockerfile?ref=${encodeURIComponent(BF)}` });
+  });
+  it("passes any other 422 on as a refusal", async () => {
+    const r = recorder((_u, init) => (init.method === "PUT" ? json({ message: "too large" }, 422) : json({ message: "Not Found" }, 404)));
+    expect(await putNewFile("t", "o/r", BF, "main", "Dockerfile", "x", "m", { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
+  });
+  it("refuses anything but the five build files, and any branch but its own", async () => {
+    const r = recorder(() => json({}, 201));
+    for (const p of ["src/index.ts", "../Dockerfile", "a/../Dockerfile", ".github/workflows/deploy.yml", "package.json"]) {
+      expect(await putNewFile("t", "o/r", BF, "main", p, "x", "m", { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
+    }
+    for (const b of ["main", "watchbell/build-files-zz", BRANCH]) {
+      expect(await putNewFile("t", "o/r", b, "main", "Dockerfile", "x", "m", { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
+    }
+    expect(r.seen).toEqual([]);
+  });
+  it("lets the build-files branch be created and pulled, but never merged or given a package.json", async () => {
+    const r = recorder(() => json({ number: 3, html_url: "https://github.com/o/r/pull/3" }, 201));
+    expect((await createBranch("t", "o/r", BF, SHA, "main", { fetch: r.fetch })).ok).toBe(true);
+    expect((await createPull("t", "o/r", BF, "main", "t", "b", { fetch: r.fetch })).ok).toBe(true);
+    expect(await putManifest("t", "o/r", BF, "main", "{}", SHA, "m", { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
+    expect(await mergeWatchpostPull("t", "o/r", 3, BF, "main", SHA, "t", { fetch: r.fetch })).toMatchObject({ ok: false, kind: "format" });
   });
 });

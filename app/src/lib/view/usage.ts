@@ -1,4 +1,4 @@
-import { computeLine, type ComputeValues, connPct, FRESH_MS, hourSeries, type HourRow, type MetricsLatest } from "@/lib/databases/compute-metrics";
+import { computeLine, type ComputeValues, connPct, FRESH_MS, hourSeries, hourStart, type HourRow, type MetricsLatest } from "@/lib/databases/compute-metrics";
 import { d1Shares, type Share, tursoShares, upstashShares } from "@/lib/databases/extra";
 import { FIRESTORE_FREE, FIRESTORE_USAGE_STORAGE, quotaDayStart } from "@/lib/databases/firebase";
 import { NEON_FREE } from "@/lib/databases/neon";
@@ -6,7 +6,7 @@ import { d1Data, firebaseData, neonData, readData, supabaseData, tursoData, upst
 import { FREE_DB_BYTES } from "@/lib/databases/supabase";
 import type { DbRow } from "@/lib/data/databases-db";
 import type { State } from "@/lib/status";
-import { ago } from "@/lib/time";
+import { ago, clock } from "@/lib/time";
 import { type AliasBook, dbAlias, EMPTY_BOOK } from "./display-name";
 
 // Stage 12: usage and compute of the watched databases, every number with where it comes from.
@@ -28,10 +28,56 @@ export type ComputeRead = {
 };
 
 export type Gauge = { label: string; value: string; pct: number | null; tone?: "warn" | "err"; series: (number | null)[]; peak: string | null };
+// Owner 13 Nov, as Supabase's Observability › Database shows memory: what RAM holds now, 24 hourly stacks of used,
+// cache + buffers and swap against total RAM, and the memory commitment of its limit.
+export type MemoryView = {
+  now: { total: string; used: string; cache: string; swap: string | null };
+  parts: string[]; max: number; bars: { key: string; title: string; values: number[] }[];
+};
+export type CommitView = { value: string; pct: number; tone?: "warn" | "err"; series: (number | null)[]; peak: string | null };
 export type ComputePanel =
   | { kind: "none" }
   | { kind: "waiting"; note: string }
-  | { kind: "ok"; gauges: Gauge[]; asOf: string; stale: boolean; error: string | null };
+  | { kind: "ok"; gauges: Gauge[]; asOf: string; stale: boolean; error: string | null; memory: MemoryView | null; commit: CommitView | null };
+
+const GIB = 1024 ** 3;
+const MIB = 1024 ** 2;
+// Memory the way Supabase writes it: whole MB under a GB, two decimals above.
+export const memText = (n: number): string => (n >= GIB ? `${(n / GIB).toFixed(2)} GB` : `${Math.round(n / MIB)} MB`);
+const HOUR_MS = 3_600_000;
+
+function memoryView(l: MetricsLatest, hours: ({ hour: Date } & HourRow)[], now: Date): MemoryView | null {
+  const m = l.mem;
+  if (!m) return null;
+  const end = hourStart(now).getTime();
+  const at = new Map(hours.map((h) => [h.hour.getTime(), h]));
+  const bars = Array.from({ length: 24 }, (_, i) => {
+    const start = new Date(end - (23 - i) * HOUR_MS);
+    const h = at.get(start.getTime());
+    const values = [h?.memUsedB ?? 0, h?.memCacheB ?? 0, h?.swapB ?? 0];
+    const total = h?.memTotalB ?? m.totalB;
+    const title = h && h.memUsedB !== null && h.memUsedB !== undefined
+      ? `${clock(start)} · used ${memText(values[0])}, cache + buffers ${memText(values[1])}, swap ${memText(values[2])} of ${memText(total)}`
+      : `${clock(start)} · no data`;
+    return { key: start.toISOString(), title, values };
+  });
+  return {
+    now: { total: memText(m.totalB), used: memText(m.usedB), cache: memText(m.cacheB), swap: m.swapB === null ? null : memText(m.swapB) },
+    parts: ["Used", "Cache + Buffers", "Swap"], max: m.totalB, bars,
+  };
+}
+
+// Warns from 85 % (Supabase marked 89 % WARNING on 13 Nov); past 100 % the server is overcommitted.
+function commitView(l: MetricsLatest, hours: ({ hour: Date } & HourRow)[], now: Date): CommitView | null {
+  const c = l.commit;
+  if (!c) return null;
+  const series = hourSeries(hours.map((h) => ({ ...h, commitPct: h.commitPct ?? null })), "commitPct", now);
+  const peaks = hourSeries(hours.map((h) => ({ ...h, commitMax: h.commitMax ?? null })), "commitMax", now);
+  return {
+    value: `${memText(c.usedB)} of ${memText(c.limitB)}`, pct: c.pct,
+    tone: c.pct >= 100 ? "err" : c.pct >= 85 ? "warn" : undefined, series, peak: peakOf(peaks),
+  };
+}
 
 const tone = (p: number | null, warnAt: number): Gauge["tone"] => (p === null ? undefined : p >= 95 ? "err" : p >= warnAt ? "warn" : undefined);
 const pctText = (n: number | null) => (n === null ? "—" : `${Math.round(n)}%`);
@@ -44,7 +90,7 @@ export function computePanel(read: ComputeRead | undefined, now: Date): ComputeP
   if (!read) return { kind: "none" };
   const l = read.latest;
   if (!l) {
-    return { kind: "waiting", note: read.lastError ? `Last try ${read.lastTryAt ? ago(read.lastTryAt, now) : "—"}: ${read.lastError}` : "Waiting for the first scrape (every 5 minutes)." };
+    return { kind: "waiting", note: read.lastError ? `Last try ${read.lastTryAt ? ago(read.lastTryAt, now) : "—"}: ${read.lastError}` : "Waiting for the first scrape (with the next collector run)." };
   }
   const series = <K extends keyof HourRow>(k: K) => hourSeries(read.hours, k, now);
   const cpu = series("cpuAvg");
@@ -59,7 +105,10 @@ export function computePanel(read: ComputeRead | undefined, now: Date): ComputeP
     { label: "Connections", value: l.connUsed === null ? "—" : `${l.connUsed}${l.connMax ? ` / ${l.connMax}` : ""}`, pct: c, tone: tone(c, 80), series: conn, peak: null },
   ];
   const stale = now.getTime() - new Date(l.at).getTime() > FRESH_MS;
-  return { kind: "ok", gauges, asOf: ago(new Date(l.at), now), stale, error: read.lastError };
+  return {
+    kind: "ok", gauges, asOf: ago(new Date(l.at), now), stale, error: read.lastError,
+    memory: memoryView(l, read.hours, now), commit: commitView(l, read.hours, now),
+  };
 }
 
 // ---- the cross-provider overview (Databases → Free databases) ----

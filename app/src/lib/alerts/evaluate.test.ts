@@ -131,3 +131,62 @@ describe("evaluate", () => {
     expect(evaluate({ ...base, monitors: [mon({ failStreak: 3 })] }, off).evaluated.has("MonitorDown")).toBe(false);
   });
 });
+
+// Owner 12 Nov: OsSecurityUpdate over the last scan of the machine a self-hosted Watchbell runs on.
+describe("evaluate: OsSecurityUpdate (owner 12 Nov)", () => {
+  const os = (o: Partial<NonNullable<Facts["os"]>> = {}): NonNullable<Facts["os"]> => ({ ...{ system: "Ubuntu 22.04.5 LTS", updates: [{ source: "gst-plugins-base1.0", score: 9.8, cves: ["CVE-2026-111183"] }, { source: "gst-plugins-good1.0", score: 9.8, cves: ["CVE-2026-111183", "CVE-2026-46471"] }], kernelWaiting: { installed: "5.15.0-203.213", running: "5.15.0-202.212" } }, ...o });
+  const ev = (f: Facts["os"]) => evaluate({ ...base, os: f }, rules, ["OsSecurityUpdate"]);
+  it("fires, critical, while a waiting update fixes a CVE scored 9+, naming it and the pending kernel", () => {
+    expect(find(ev(os()), "OsSecurityUpdate", "os")).toMatchObject({
+      status: "firing", severity: "critical", title: "Ubuntu 22.04.5 LTS",
+      message: "On Ubuntu 22.04.5 LTS: gst-plugins-base1.0 fixes CVE-2026-111183 (9.8); gst-plugins-good1.0 fixes CVE-2026-111183 (9.8) and 1 more; kernel 5.15.0-203.213 waits for a reboot.",
+    });
+  });
+  it("a fix scored under the threshold (7) doesn't fire on its own; a kernel waiting for a reboot does, as a warning", () => {
+    const low = [{ source: "glib2.0", score: 5.5, cves: ["CVE-2026-1"] }];
+    const k = find(ev(os({ updates: low })), "OsSecurityUpdate", "os");
+    expect(k).toMatchObject({ status: "firing", message: "On Ubuntu 22.04.5 LTS: kernel 5.15.0-203.213 waits for a reboot." });
+    expect(k?.severity).toBeUndefined();
+    expect(find(ev(os({ updates: low, kernelWaiting: null })), "OsSecurityUpdate", "os")).toMatchObject({
+      status: "ok", message: "On Ubuntu 22.04.5 LTS, no waiting security update fixes a CVE scored 7.0 or more, and the newest kernel runs.",
+    });
+  });
+  it("names three packages and counts the rest", () => {
+    const many = ["a", "b", "c", "d", "e"].map((s) => ({ source: s, score: 7.5, cves: [`CVE-2026-${s.charCodeAt(0)}`] }));
+    expect(find(ev(os({ updates: many, kernelWaiting: null })), "OsSecurityUpdate", "os")?.message).toBe("On Ubuntu 22.04.5 LTS: a fixes CVE-2026-97 (7.5); b fixes CVE-2026-98 (7.5); c fixes CVE-2026-99 (7.5); 2 more packages.");
+  });
+  it("a scan with a lookup that failed fires on what it knows but never resolves (review I2)", () => {
+    expect(find(ev(os({ partial: true, kernelWaiting: null })), "OsSecurityUpdate", "os")?.status).toBe("firing");
+    expect(find(ev(os({ partial: true, updates: [], kernelWaiting: null })), "OsSecurityUpdate", "os")?.status).toBe("unknown");
+  });
+  it("isn't evaluated without a scan (the cloud edition, or not scanned yet)", () => {
+    expect(evaluate({ ...base }, rules, ["OsSecurityUpdate"]).evaluated.has("OsSecurityUpdate")).toBe(false);
+    expect(evaluate({ ...base, os: null }, rules, ["OsSecurityUpdate"]).evaluated.has("OsSecurityUpdate")).toBe(false);
+  });
+});
+
+// Watchbell 1.4: CiFailing over the default branch's latest Actions run (github_repos.actions, read in the daily sync).
+describe("evaluate: CiFailing (1.4)", () => {
+  const apps = [{ id: "a1", name: "web", latestProduction: null }];
+  const run = (o: Partial<Exclude<NonNullable<NonNullable<Facts["ci"]>[number]["run"]>, { none: true }>> = {}) => ({
+    status: "completed", conclusion: "success", name: "CI", branch: "main", sha: "a".repeat(40), url: "https://github.com/me/web/actions/runs/1", at: now.toISOString(), runNumber: 42, ...o,
+  });
+  const ci = (r: NonNullable<Facts["ci"]>[number]["run"]) => evaluate({ ...base, apps, ci: [{ appId: "a1", repo: "me/web", branch: "main", run: r }] }, rules, ["CiFailing"]);
+  it("fires when the latest run on the default branch failed", () => {
+    expect(find(ci(run({ conclusion: "failure" })), "CiFailing", "a1")).toMatchObject({ status: "firing", title: "web", message: "The latest CI run on main failed (run #42)." });
+    expect(find(ci(run({ conclusion: "timed_out" })), "CiFailing", "a1")?.status).toBe("firing");
+  });
+  it("resolves on a passing run", () => {
+    expect(find(ci(run()), "CiFailing", "a1")).toMatchObject({ status: "ok", message: "The latest CI run on main passed." });
+  });
+  it("says nothing new while a run is going, was cancelled, or there is none", () => {
+    for (const r of [run({ status: "in_progress", conclusion: null }), run({ conclusion: "cancelled" }), { none: true as const }, null]) {
+      const o = find(ci(r), "CiFailing", "a1");
+      expect(o?.status).toBe("unknown");
+    }
+  });
+  it("isn't evaluated without any Actions data (the token may lack Actions: Read)", () => {
+    expect(evaluate({ ...base, apps, ci: [] }, rules, ["CiFailing"]).evaluated.has("CiFailing")).toBe(false);
+    expect(evaluate({ ...base, apps, ci: null }, rules, ["CiFailing"]).evaluated.has("CiFailing")).toBe(false);
+  });
+});

@@ -3,7 +3,8 @@ import { parseRuleForm, RULE_KEYS, RULES, ruleName } from "./catalog";
 
 describe("RULES", () => {
   it("has the 13 rules of spec §10 (+ Stage 12 ComputeHigh, Stage 9 slice 5 VulnerableDependency, Stage 8 DbQuotaHigh) with the mockup's conditions", () => {
-    expect(RULE_KEYS).toHaveLength(18); // + Watchbell 1.2 FrameworkVulnerable, 1.2.1 MonitorDomainMoved
+    expect(RULE_KEYS).toHaveLength(20); // + Watchbell 1.2 FrameworkVulnerable, 1.2.1 MonitorDomainMoved, 1.4 CiFailing, OsSecurityUpdate
+    expect(RULES.OsSecurityUpdate).toMatchObject({ severity: "warning", threshold: 7, bounds: [0, 10], needs: null, source: "own" });
     expect(RULES.DbQuotaHigh).toMatchObject({ severity: "warning", threshold: 80, bounds: [10, 100], needs: "databases" });
     expect(RULES.DbQuotaHigh.condition(80)).toBe("Turso, Upstash or D1 usage > 80% of a free-plan quota");
     expect(RULES.VulnerableDependency).toMatchObject({ severity: "warning", threshold: null, bounds: null, needs: null, sampled: false });

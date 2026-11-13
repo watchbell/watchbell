@@ -89,7 +89,13 @@ describe("demo dataset: every console section has data", () => {
     expect(sv.usedBy.length).toBeGreaterThan(0);
     expect(slotCards(await supabaseSlotInputs())).toEqual([expect.objectContaining({ used: 1, total: 2 })]);
     const compute = await readCompute([sv.id], NOW);
-    expect(computePanel(compute.get(sv.id), NOW)).toMatchObject({ kind: "ok", stale: false });
+    const panel = computePanel(compute.get(sv.id), NOW);
+    expect(panel).toMatchObject({ kind: "ok", stale: false });
+    // Owner 13 Nov: the demo shows the memory breakdown of a 1 GB instance and its commitment, under the warning line.
+    expect(panel.kind === "ok" && panel.memory?.now.total).toBe("1.00 GB");
+    expect(panel.kind === "ok" && panel.memory?.bars.filter((b) => b.values.some((v) => v > 0))).toHaveLength(24);
+    expect(panel.kind === "ok" && panel.commit?.tone).toBeUndefined();
+    expect(panel.kind === "ok" && panel.commit?.value).toMatch(/ of 1.40 GB$/);
     expect((await keepActiveFlags([sv.id])).get(sv.id)).toMatchObject({ keep: true });
 
     const [neon] = neonBlocks(await listDatabases("neon_project"), NOW, book);

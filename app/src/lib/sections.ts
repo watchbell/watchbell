@@ -28,7 +28,10 @@ export const SECTIONS: Record<SectionId, { label: string; holds: string; appears
     appears: "Appears when you connect Supabase, Neon, Firebase, Turso or Upstash, or once a database is watched.",
     keeps: "Keep active and Auto-restore keep running while it is off, so your free Supabase projects aren't paused.",
   },
-  devops: { label: "DevOps", holds: "Automation: GitHub repositories, their Actions runs and dependency advisories.", appears: "Appears when you connect GitHub." },
+  devops: {
+    label: "DevOps", holds: "Code: GitHub repositories, their Actions runs and dependency advisories. Servers and Security (self-hosted): Containers and OS vulnerabilities.",
+    appears: "Appears when you connect GitHub; always there on a self-hosted console.",
+  },
   manage: { label: "Manage", holds: "Connections, Alerts, Auto-actions, Sections, Settings, AI gateway, API explorer, Status page and Backups.", appears: "Always on." },
 };
 
@@ -45,8 +48,9 @@ export function cleanSectionsOff(v: unknown): SectionId[] {
 }
 
 // What the install already has besides its accounts: an existing database resource keeps Database on, so an upgraded
-// install loses no section that has data. (Hosting needs nothing: it is always available.)
-export type SectionData = { databases?: boolean };
+// install loses no section that has data. (Hosting needs nothing: it is always available.) selfhost: a self-hosted or
+// demo console, whose DevOps holds Containers and OS vulnerabilities, which need no GitHub (11 Nov).
+export type SectionData = { databases?: boolean; selfhost?: boolean };
 
 // The sections available before the owner's switches: Home, Hosting and Manage always; Database and DevOps when a
 // provider of theirs is connected (or, for Database, a database exists).
@@ -57,6 +61,7 @@ export function sectionsAvailable(connectedProviders: readonly Provider[], has: 
     if (s) auto.add(s);
   }
   if (has.databases) auto.add("database");
+  if (has.selfhost) auto.add("devops");
   return new Set(SECTION_IDS.filter((id) => auto.has(id)));
 }
 
@@ -83,6 +88,8 @@ export const RULE_SECTION: Record<string, SectionId | "account" | null> = {
   // the version from the app's live site and asks OSV.dev, and the Security card is on the app page. Only its fix (the
   // update PR) needs GitHub, so update-PR proposals pause with DevOps instead (private/actions/proposals-db.ts).
   FrameworkVulnerable: "hosting",
+  CiFailing: "devops",
+  OsSecurityUpdate: "devops",
   MonitorDomainMoved: "hosting", // Watchbell 1.2.1: an uptime monitor on a domain its app no longer has
   CredentialExpiring: "account",
   CollectorStale: null,

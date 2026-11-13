@@ -36,7 +36,7 @@ export function IconButton({
       title={label}
       aria-pressed={pressed}
       className={cn(
-        "relative inline-grid size-[34px] place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
+        "relative inline-grid size-[34px] shrink-0 place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40",
         pressed && "bg-brand-soft text-brand",
       )}
       {...props}
