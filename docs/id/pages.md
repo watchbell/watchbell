@@ -233,7 +233,7 @@ ke atas. Lihat [OS vulnerabilities](os-vulnerabilities.md).
 
 ## Manage
 
-Di menu, Manage dibagi jadi tiga judul: **Alerting** (Alerts, Auto-actions, Status page), **Setup** (Connections,
+Di menu, Manage dibagi jadi tiga judul: **Alerting** (Alerts, Auto-actions, Status page, Reports), **Setup** (Connections,
 Settings, Sections, Backups), dan **AI & API** (AI Gateway, API explorer).
 
 **Connections** (khusus owner). Akun provider yang dibaca Watchbell: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
@@ -292,6 +292,11 @@ Supabase yang dijaga tidak pernah di-pause gara-gara sakelar ini.
   maintenance. Badge uptime untuk README ada di tab ini, tidak di halaman publik. Halaman ini tidak pernah menampilkan
   alamat, teks error, atau nama provider. Nonaktif sampai Anda mempublikasikannya; alamat yang tidak dikenal atau belum
   dipublikasikan menampilkan "No status page here" saja.
+- Branding (khusus owner, 1.7): nama aplikasi Anda, logo PNG persegi (maksimal 512 px dan 256 KB), warna aksen (dicek
+  tetap terbaca di mode terang dan gelap), nama pengirim email (alamatnya tetap dari channel email Anda), dan alamat
+  publik untuk tautan. Semuanya muncul di halaman login, sidebar, tab browser, laporan bulanan, email, dan status page
+  publik, dengan tulisan kecil "Powered by Watchbell" yang bisa dimatikan. Command line, tautan docs, dan label versi
+  tetap Watchbell.
 - Lockfile: workflow GitHub Actions opsional di repository kecil milik Anda sendiri yang membuat `package-lock.json`
   untuk pull request update (lihat [Auto-actions](auto-actions.md#perbaikan-keamanan-otomatis)).
 - Auto-actions: aksi aman mana yang boleh berjalan tanpa bertanya, auto-rollback, dan perbaikan keamanan otomatis.
@@ -307,6 +312,15 @@ tersebut.
 **Backups** (khusus owner). Ringkasan bulanan yang disimpan ke Google Drive Anda. Lihat [Backup](backups.md).
 
 **Status page** (khusus owner). Membuka tab Status page di Settings (di atas).
+
+**Reports** (1.7, semua member). Laporan PDF dua halaman tiap bulan per klien, dalam bahasa Indonesia atau Inggris.
+Halaman 1 berisi kalender sebulan (tiap hari normal, lambat atau gangguan singkat, atau tidak bisa dibuka), hari
+bermasalah dalam kata-kata biasa, serta uptime, response, dan update; halaman 2 berisi response per hari, update,
+peringatan, catatan Anda, dan arti angka-angkanya. Website di laporan memakai nama yang Anda ketik, tidak pernah alamat,
+teks error, atau nama provider. Unduh bulan mana pun yang datanya masih disimpan (Settings › Retention), dalam kedua
+bahasa. Owner bisa mengirimnya otomatis tiap tanggal 1 dengan PDF terlampir, ke maksimal 5 alamat, lewat channel Email
+(SMTP) atau Resend; pengiriman yang gagal dicoba lagi tanggal 2 dan 3, lalu alert ReportSendFailed memberi tahu Anda.
+Operator mengubah isi laporan dan mengirim tes ke dirinya sendiri; viewer mengunduh.
 
 ## Halaman di luar menu
 

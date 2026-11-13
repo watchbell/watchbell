@@ -9,6 +9,7 @@ import { seedMember } from "./members";
 import { seedNetwork } from "./network";
 import { seedAiUsage, seedLogs, seedProviderStatus } from "./observe";
 import { seedProposals } from "./proposals";
+import { seedReports } from "./reports";
 import { seedUptime } from "./uptime";
 
 export { demoUserId } from "./members";
@@ -31,6 +32,7 @@ export async function seedDemoDb(db: Db, seed: string, now: Date, email: string,
     const apps = await seedApps(ctx);
     const uptime = await seedUptime(ctx, apps);
     await seedAppSnapshots(ctx, apps, uptime.monitors);
+    await seedReports(ctx, apps, uptime); // Watchbell 1.7
     const dbs = await seedDatabases(ctx, apps);
     const net = await seedNetwork(ctx, apps, dbs);
     const alerts = await seedAlerts(ctx, apps, uptime, dbs, net);

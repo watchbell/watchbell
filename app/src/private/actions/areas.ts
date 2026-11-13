@@ -23,6 +23,7 @@ export const ALARM_ROOM: Record<RuleKey, ActionArea> = {
   MonitorDomainMoved: "workloads", // Watchbell 1.2.1: an app's monitor on a domain it no longer has
   CiFailing: "workloads", // Watchbell 1.4: an app's CI, like its deployments
   OsSecurityUpdate: "observe", // owner 12 Nov: the machine Watchbell runs on, like the collector
+  ReportSendFailed: "observe", // Watchbell 1.7: the monthly client report, Watchbell's own work
 };
 
 const APP_RULES = new Set<string>(["MonitorDown", "HighLatency", "DeploymentFailed", "VulnerableDependency", "FrameworkVulnerable", "MonitorDomainMoved", "CiFailing"]);

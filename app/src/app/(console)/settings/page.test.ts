@@ -16,6 +16,8 @@ vi.mock("./budget-tab", () => ({ BudgetTab: () => "[budget]" }));
 vi.mock("./users-tab", () => ({ UsersTab: () => "[users]" }));
 vi.mock("./retention-tab", () => ({ RetentionTab: () => "[retention]" }));
 vi.mock("./status-page-tab", () => ({ StatusPageTab: () => "[status-page]" }));
+vi.mock("./branding-tab", () => ({ BrandingTab: () => "[branding]" }));
+vi.mock("@/lib/data/branding-db", () => ({ readBrand: async () => ({ name: null, accent: null, senderName: null, publicUrl: null, poweredBy: true, hasLogo: false }) }));
 vi.mock("./actions-lockfile-card", () => ({ ActionsLockfileCard: () => "[actions-lockfile-card]" }));
 
 import SettingsPage from "./page";
@@ -35,7 +37,7 @@ beforeEach(() => {
 describe("Settings and the runner extension", () => {
   it("without a runner (open source edition): no Runner tab; the GitHub Actions lockfile card is its own tab", async () => {
     ext.extensions = { nav: [], palette: [], settingsTabs: [{ key: "office-auto-run", label: "Auto-actions", Tab: AutoRunTab }] };
-    expect(tabs(await render())).toEqual(["Collector", "Free tier budget", "Users", "Retention", "Status page", "Lockfile", "Auto-actions"]);
+    expect(tabs(await render())).toEqual(["Collector", "Free tier budget", "Users", "Retention", "Status page", "Branding", "Lockfile", "Auto-actions"]);
     const html = await render("lockfile");
     expect(html).toContain("[actions-lockfile-card]");
     expect(html).not.toContain("Runner");
@@ -46,7 +48,7 @@ describe("Settings and the runner extension", () => {
       nav: [], palette: [], runner,
       settingsTabs: [{ key: "runner", label: "Runner", Tab: RunnerTab }, { key: "office-auto-run", label: "Auto-actions", Tab: AutoRunTab }],
     };
-    expect(tabs(await render())).toEqual(["Collector", "Free tier budget", "Users", "Retention", "Status page", "Runner", "Auto-actions"]);
+    expect(tabs(await render())).toEqual(["Collector", "Free tier budget", "Users", "Retention", "Status page", "Branding", "Runner", "Auto-actions"]);
     expect(await render("runner")).toContain("[runner-tab]");
     // ?tab=lockfile is not a tab here: the default (Users) opens.
     const html = await render("lockfile");

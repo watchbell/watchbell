@@ -1,4 +1,5 @@
 import "server-only";
+import { reportSendFacts } from "@/lib/data/report-db";
 import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { accounts, checks, deployments, links, monitors, resources, snapshots } from "@/db/schema";
@@ -61,6 +62,8 @@ export async function loadFacts(now: Date): Promise<Facts> {
   const ci = appIds.length ? await ciFacts(appIds).catch(() => null) : null;
   // Owner 12 Nov: the last OS scan of a self-hosted console's machine (none in the cloud edition: not evaluated).
   const os = osState() === "on" ? osFact(await loadOsScan().catch(() => null)) : null;
+  // Watchbell 1.7: the latest automatic send of each report that sends itself (none: ReportSendFailed not evaluated).
+  const reportSends = await reportSendFacts().catch(() => null);
 
   return {
     now, lastMinuteRunAt: lastRun, lastAnyRunAt: lastAny,
@@ -90,5 +93,6 @@ export async function loadFacts(now: Date): Promise<Facts> {
     frameworks: frameworks && frameworks.length ? frameworks : null,
     ci: ci && ci.length ? ci : null,
     os,
+    reportSends, // [] still evaluates (an alert whose report went away resolves); null when it couldn't be read
   };
 }

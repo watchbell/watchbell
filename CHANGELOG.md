@@ -2,6 +2,28 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.7.0
+
+For people who look after websites for clients: a monthly report to hand over, under your own name.
+
+### Reports
+
+- **Manage › Reports**: a two-page PDF per client and month, in Indonesian or English. Page 1 is the month as a calendar
+  (all up, slow or a short outage, down), the bad days in plain words, and uptime, response and updates; page 2 has
+  response per day, updates, alerts, your note and what the numbers mean. Websites appear under names you type, never an
+  address, error text or provider. See [docs/pages.md](docs/pages.md#manage).
+- Download any month the data still covers. Owners can have a report emailed on the 1st with the PDF attached (up to 5
+  addresses, through the Email (SMTP) channel or Resend); a failed send is retried on the 2nd and 3rd, then the new alert
+  **ReportSendFailed** tells you. Operators edit a report and send a test to themselves; viewers download.
+- The daily job keeps a per-day count of deploys before old deployments are deleted, so a month's updates stay complete.
+- The PDF is drawn without a browser (a fraction of a second of CPU), only when someone downloads or a report is sent.
+
+### Branding
+
+- **Settings › Branding** (owner): app name, a square PNG logo, an accent colour checked for contrast, the email sender
+  name and the public address. They show on the sign-in page, the sidebar, the browser tab, reports, emails and the
+  public status page, with a "Powered by Watchbell" line you can turn off.
+
 ## 1.6.1
 
 - The sidebar names the Watchbell you run, under the collector status, linked to that version's notes here.

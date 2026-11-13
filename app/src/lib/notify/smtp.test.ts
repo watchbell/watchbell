@@ -112,4 +112,23 @@ describe("SMTP channel (1.2.3)", () => {
     expect(m.split("\r\n").filter((l) => l.startsWith("."))).toEqual([]);
     expect(Buffer.from(m.split("\r\n\r\n")[1].replace(/\r\n/g, ""), "base64").toString()).toBe(".hidden line\r\nsecond");
   });
+
+  // Watchbell 1.7: the brand only names the sender (the address stays the channel's), and a report goes as an attachment.
+  it("names the sender from the brand and keeps the address", () => {
+    expect(buildMessage(cfg, "s", "t", new Date()).split("\r\n")[0]).toBe("From: Watchbell <alerts@example.com>");
+    expect(buildMessage(cfg, "s", "t", new Date(), { fromName: "Studio Nusa" }).split("\r\n")[0]).toBe('From: "Studio Nusa" <alerts@example.com>');
+  });
+
+  it("sends a PDF as a multipart attachment", () => {
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]);
+    const m = buildMessage(cfg, "Laporan", "Halo,\nterlampir.", new Date(), { attachment: { filename: "Kopi-Sejahtera-2026-10.pdf", contentType: "application/pdf", data: pdf } });
+    const boundary = /boundary="([^"]+)"/.exec(m)?.[1];
+    expect(m).toContain("Content-Type: multipart/mixed;");
+    expect(boundary).toBeTruthy();
+    expect(m).toContain('Content-Disposition: attachment; filename="Kopi-Sejahtera-2026-10.pdf"');
+    const parts = m.split(`--${boundary}`);
+    expect(parts).toHaveLength(4); // preamble, text, pdf, closing "--"
+    expect(Buffer.from(parts[2].split("\r\n\r\n")[1].replace(/\r\n/g, ""), "base64")).toEqual(Buffer.from(pdf));
+    expect(Buffer.from(parts[1].split("\r\n\r\n")[1].replace(/\r\n/g, ""), "base64").toString()).toBe("Halo,\r\nterlampir.");
+  });
 });

@@ -27,6 +27,18 @@ describe("sendEmail", () => {
     expect(headers!.get("idempotency-key")).toBe("digest-2026-10-13");
     expect(body).toEqual({ from: mail.from, to: ["me@example.com"], subject: "Digest", html: "<p>x</p>", text: "x" });
   });
+  // Watchbell 1.7: a monthly report goes to up to 5 addresses with the PDF attached.
+  it("sends to several addresses with an attachment", async () => {
+    let body: Record<string, unknown> = {};
+    server.use(http.post("https://api.resend.com/emails", async ({ request }) => {
+      body = (await request.json()) as Record<string, unknown>;
+      return HttpResponse.json({ id: "em_2" });
+    }));
+    expect(await sendEmail("re_x", { ...mail, to: ["a@example.com", "b@example.com"], attachments: [{ filename: "r.pdf", content: "JVBERi0=" }] })).toEqual({ ok: true });
+    expect(body.to).toEqual(["a@example.com", "b@example.com"]);
+    expect(body.attachments).toEqual([{ filename: "r.pdf", content: "JVBERi0=" }]);
+  });
+
   it("treats 429 as transient and a rejected message as a config problem", async () => {
     server.use(http.post("https://api.resend.com/emails", () => HttpResponse.json({ message: "slow down" }, { status: 429 })));
     expect(await sendEmail("re_x", mail)).toMatchObject({ ok: false, kind: "transient" });

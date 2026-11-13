@@ -50,6 +50,9 @@ export type OsFact = {
   partial?: boolean;
 };
 
+// The month a report's automatic send last touched, and how it ended ("claimed": in flight or waiting for a retry).
+export type ReportSendFact = { reportId: string; clientName: string; month: string; status: "claimed" | "sent" | "failed"; lastError: string | null };
+
 export type Facts = {
   now: Date; lastMinuteRunAt: Date | null;
   // The last finished run of any scheduler (cron-job.org, QStash fallback, manual). Absent: use lastMinuteRunAt.
@@ -65,4 +68,7 @@ export type Facts = {
   ci?: CiFact[] | null;
   // Absent or null: the cloud edition, or no OS scan yet, so OsSecurityUpdate isn't evaluated.
   os?: OsFact | null;
+  // Watchbell 1.7: the latest automatic send of each report that sends itself. Absent or null: couldn't be read, not
+  // evaluated. Empty: evaluated, so an alert whose report was deleted or stopped sending resolves (review I-4).
+  reportSends?: ReportSendFact[] | null;
 };

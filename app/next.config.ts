@@ -57,7 +57,7 @@ const nextConfig: NextConfig = {
   // The PGlite migrator reads every .sql its journal lists, from a runtime path tracing can't follow, so a Vercel build
   // (the demo) shipped only meta/_journal.json and every sign-in failed with "No file …0000_….sql found". A few KB of SQL.
   // demo-snapshot/ (about 5 MB) exists only in a demo build: the migrated database src/lib/demo/template.ts loads.
-  outputFileTracingIncludes: { "/**": ["./drizzle-selfhost/**/*", "./demo-snapshot/**/*"] },
+  outputFileTracingIncludes: { "/**": ["./drizzle-selfhost/**/*", "./demo-snapshot/**/*", "./src/lib/report/fonts/**/*"] },
   ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: appRoot, experimental: { isrFlushToDisk: false } } : {}),
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }, ...officeFrame];

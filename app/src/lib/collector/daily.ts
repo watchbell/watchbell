@@ -1,3 +1,4 @@
+import { runReportSends } from "@/lib/report/send";
 import { osState, runOsScan } from "@/lib/data/os-scan-db";
 import "server-only";
 import { and, eq, gte, inArray, isNotNull, lt, max } from "drizzle-orm";
@@ -18,6 +19,9 @@ import { dailyDeadline } from "@/lib/security/check";
 import { SYNC_PROVIDERS } from "@/lib/sync";
 import { syncAccount } from "@/lib/sync-db";
 import { taskDatabasesDaily } from "./db-tasks";
+import { stepDeployDays, zoneDay } from "./deploy-days";
+import { deployDays } from "@/db/report-schema";
+import { timeZone } from "@/lib/time";
 import { RETENTION_DAYS } from "./retention";
 import { readRetentionDays } from "@/lib/data/settings-db";
 import { pausedSections } from "@/lib/data/sections-db";
@@ -39,6 +43,9 @@ export const GITHUB_STEP_MS = 6_000;
 // sync skips its providers' accounts). The rest (rollups, backup, retention, Advisor) is the console's own, and
 // keep-active always runs: it is a protective write the owner asked for per project, so a Database section that is off
 // never lets Supabase pause a kept project (review A1, Important 2).
+// Review I-3: no new monthly report starts after this many ms into the run (the 60 s limit, the sync after it).
+const REPORTS_STOP_MS = 40_000;
+
 export const DAILY_STEP_SECTION: Record<string, SectionId> = { github: "devops", deps: "devops", databases: "database", security: "hosting", os: "devops" };
 
 // Picks up where the last rollup left off, so a missed day (or a week of them) is filled in on the next run.
@@ -70,6 +77,8 @@ async function retention(now: Date): Promise<void> {
   const days = await readRetentionDays().catch(() => RETENTION_DAYS);
   await db().delete(checks).where(lt(checks.at, new Date(now.getTime() - days.checks * DAY)));
   await db().delete(rollupsHourly).where(lt(rollupsHourly.hour, new Date(now.getTime() - days.rollupsHourly * DAY)));
+  // 1.7: the daily deploy summary is kept as long as the rollups (the monthly report reads both).
+  await db().delete(deployDays).where(lt(deployDays.day, zoneDay(new Date(now.getTime() - days.rollupsHourly * DAY), timeZone())));
   await db().delete(deployments).where(and(
     lt(deployments.createdAtProvider, new Date(now.getTime() - days.deployments * DAY)),
     eq(deployments.isCurrent, false),
@@ -91,12 +100,20 @@ export async function runDaily(): Promise<RunSummary> {
   const paused = await pausedSections();
   const steps: [string, () => Promise<void>][] = [
     ["rollups", () => rollupRecent(started)],
+    // 1.7: before retention deletes deployments older than 30 days, so the monthly report keeps every day's count.
+    ["deploy-days", () => stepDeployDays(started)],
     // B4: before retention, so the month's deployments and events are all still there. Never throws.
     ["backup", async () => {
       const problem = await monthlyBackupStep(started, started.getTime() + BACKUP_STOP_MS);
       if (problem) errors.push(`backup: ${problem}`);
     }],
     ["retention", () => retention(started)],
+    // 1.7: the monthly client reports, due on the 1st–3rd (install zone); each makes one PDF on demand (under a second).
+    ["reports", async () => {
+      const r = await runReportSends(started, undefined, started.getTime() + REPORTS_STOP_MS);
+      if (r.failed) errors.push(`reports: ${r.failed} monthly report${r.failed > 1 ? "s" : ""} not sent yet (retried on the next run, up to the 3rd)`);
+      if (r.left) errors.push(`reports: ${r.left} left for the next run, time budget used`);
+    }],
     ["sync", async () => {
       // Every provider that has a Sync (Vercel apps, database projects, Cloudflare zones). No new account sync starts
       // after SYNC_STOP_MS, so the database and security steps keep their share of the 60 s; the rest syncs tomorrow.

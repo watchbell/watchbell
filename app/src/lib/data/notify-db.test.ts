@@ -18,6 +18,9 @@ vi.mock("@/lib/notify/lang", async (orig) => ({ ...(await orig<typeof import("@/
 vi.mock("@/lib/notify/resend", () => ({ sendEmail: h.sendEmail }));
 // 1.2.4: the rules' custom texts have their own reader too.
 vi.mock("./alerts-db", () => ({ readMessageTemplates: h.readTemplates }));
+// Watchbell 1.7: the brand names the sender (its own reader, so no queued read either).
+const brand = vi.hoisted(() => ({ senderName: null as string | null, publicUrl: null as string | null }));
+vi.mock("./branding-db", () => ({ readBrand: async () => ({ name: null, accent: null, senderName: brand.senderName, publicUrl: brand.publicUrl, poweredBy: true, hasLogo: false }) }));
 
 import { deliverPending, digestData, rememberTelegramThread, sendRuleTest, sendTest, taskDigest, TELEGRAM_THREADS_KEY, telegramThread, THREAD_KEEP_MS } from "./notify-db";
 
@@ -483,6 +486,33 @@ describe("the notification language", () => {
     const send = vi.fn().mockResolvedValue(ok);
     await taskDigest(AT, { send });
     expect((send.mock.calls[0][0] as { subject: string }).subject).toMatch(/^Watchbell · 13 Okt · 1 aktif/);
+  });
+
+  it("names the digest's sender from the brand and keeps DIGEST_FROM's address (1.7)", async () => {
+    setLangs({ telegram: "en", discord: "en", email: "en" });
+    h.sendEmail.mockResolvedValue(ok);
+    brand.senderName = "Studio Nusa";
+    h.current = fakeDb(Array.from({ length: 12 }, () => answer));
+    await sendTest("email_digest", NOW);
+    expect((h.sendEmail.mock.calls[0][1] as { from: string }).from).toBe('"Studio Nusa" <a@b.co>');
+    brand.senderName = null;
+    h.sendEmail.mockClear();
+    h.current = fakeDb(Array.from({ length: 12 }, () => answer));
+    await sendTest("email_digest", NOW);
+    expect((h.sendEmail.mock.calls[0][1] as { from: string }).from).toBe("Ops <a@b.co>");
+  });
+
+  // Review I-8: the brand's public address is where the digest's links point (SITE_URL without one).
+  it("links the digest to the brand's public address", async () => {
+    setLangs({ telegram: "en", discord: "en", email: "en" });
+    h.sendEmail.mockResolvedValue(ok);
+    brand.publicUrl = "https://monitor.studio.example";
+    h.current = fakeDb(Array.from({ length: 12 }, () => answer));
+    await sendTest("email_digest", NOW);
+    brand.publicUrl = null;
+    const mail = h.sendEmail.mock.calls[0][1] as { html: string; text: string };
+    expect(mail.text).toContain("https://monitor.studio.example/alerts");
+    expect(mail.text).not.toContain("https://ops.example.com");
   });
 
   it("an English email language keeps the digest English even when Telegram is Indonesian", async () => {

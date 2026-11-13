@@ -5,6 +5,8 @@ const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 // Stage 12: the compute facts have their own tests (supabase-metrics-db.test.ts).
 vi.mock("@/lib/data/supabase-metrics-db", () => ({ computeFacts: async () => null }));
+// Watchbell 1.7: the report sends have their own reader (report-db), so they take no queued read.
+vi.mock("@/lib/data/report-db", () => ({ reportSendFacts: async () => [] }));
 
 import { loadFacts } from "./alert-facts-db";
 

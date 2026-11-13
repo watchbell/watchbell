@@ -1,3 +1,6 @@
+import type { Metadata } from "next";
+import { brandStyle, consoleMetadata, DEFAULT_BRAND, displayName } from "@/lib/branding";
+import { readBrand } from "@/lib/data/branding-db";
 import { cookies } from "next/headers";
 import { Shell } from "@/components/shell/shell";
 import { TimeZoneSync } from "@/components/time-zone-sync";
@@ -16,6 +19,11 @@ import { isDemo, mode } from "@/lib/mode";
 import { timeZone } from "@/lib/time";
 import { EMPTY_BOOK, SHOT_COOKIE } from "@/lib/view/display-name";
 
+// Watchbell 1.7: the browser tab names the brand (nothing changes without one).
+export async function generateMetadata(): Promise<Metadata> {
+  return consoleMetadata(await readBrand().catch(() => DEFAULT_BRAND));
+}
+
 export default async function ConsoleLayout({ children }: { children: React.ReactNode }) {
   // Demo: the visitor's database first, so "busy" shows as itself (lib/demo/facade.ts openDemoDb).
   if (isDemo()) await (await import("@/lib/demo/facade")).openDemoDb();
@@ -27,11 +35,14 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // Screenshot mode is a per-browser cookie (components/alias.tsx), read here so the page is masked from the first paint.
   // Watchbell 1.2: the sections that are on (lib/sections.ts); unreadable means every section, so nothing disappears.
   // 1.2.3: self-hosted, the owner sees a newer npm version or What's new after an update (null otherwise).
-  const [last, staleMs, alerts, book, jar, sections, notice] = await Promise.all([
+  const [last, staleMs, alerts, book, jar, sections, notice, brand] = await Promise.all([
     lastCollectorRunAt().catch(() => null), collectorStaleLimit().catch(() => undefined), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies(),
     sectionState().then((s) => s.on).catch(() => undefined),
     member.role === "owner" ? readUpdateNotice().catch(() => null) : null,
+    // Watchbell 1.7: the owner's brand (Settings › Branding) in the sidebar and the accent colour.
+    readBrand().catch(() => DEFAULT_BRAND),
   ]);
+  const style = brandStyle(brand);
   const shot = jar.get(SHOT_COOKIE)?.value === "1";
   // 5c (R2): the private feature's nav and palette entries reach owners only; others never get them in the payload.
   const ext = member.role === "owner" ? { nav: extensions.nav, palette: extensions.palette, office: extensions.office } : { nav: [], palette: [] };
@@ -41,7 +52,8 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   return (
     <>
       <TimeZoneSync zone={timeZone()} />
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())}><UpdateBanner notice={notice} />{children}</Shell>
+      {style && <style>{style}</style>}
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())} brand={{ name: displayName(brand), hasLogo: brand.hasLogo }}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

@@ -33,6 +33,9 @@ import { topologyColumns } from "@/lib/data/topology-db";
 import { firebaseRows, neonBlocks, slotCards, supabaseRows } from "@/lib/view/databases";
 import { d1Views, tursoViews, upstashViews } from "@/lib/view/extra-dbs";
 import { computePanel } from "@/lib/view/usage";
+import { readBrand } from "@/lib/data/branding-db";
+import { listReports } from "@/lib/data/report-db";
+import { makeReportPdf } from "@/lib/report/make";
 import { seedDemoDb } from "./index";
 
 type Drizzle = ReturnType<typeof drizzle<typeof schema>>;
@@ -264,4 +267,17 @@ describe("demo dataset: every console section has data", () => {
     });
     expect(await dump(again)).toEqual(await dump(a));
   }, 60_000);
+});
+
+// Watchbell 1.7: the demo shows the monthly client report and the branding with made-up names.
+describe("demo dataset: reports and branding (1.7)", () => {
+  it("has a brand and two reports (Indonesian and English) whose last month makes a PDF", async () => {
+    expect(await readBrand()).toMatchObject({ name: "Studio Nusa", accent: "#0f766e", poweredBy: true });
+    const list = await listReports();
+    expect(list.map((r) => r.lang).sort()).toEqual(["en", "id"]);
+    expect(list.every((r) => r.sites.length > 0 && r.recipients.every((x) => x.endsWith(".example")))).toBe(true);
+    const made = await makeReportPdf(list[0].id, "2026-09", NOW, "Asia/Jakarta");
+    if ("error" in made) throw new Error(made.error);
+    expect(new TextDecoder().decode(made.bytes.slice(0, 5))).toBe("%PDF-");
+  }, 30_000);
 });

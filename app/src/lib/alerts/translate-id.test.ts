@@ -80,6 +80,7 @@ const FIXTURES: Facts[] = [
       { appId: "a2", version: "15.0.0", status: "vulnerable", findings: [{ id: "GHSA-gggg-hhhh-iiii", cve: null, summary: "z", severity: "MODERATE", fixed: null }] },
     ],
     ci: [{ appId: "a1", repo: "me/app-a", branch: "main", run: { status: "completed", conclusion: "failure", name: "CI", branch: "main", sha: null, url: null, at: null, runNumber: 42 } }],
+    reportSends: [{ reportId: "r1", clientName: "PT Kopi Sejahtera", month: "2026-10", status: "failed", lastError: "The mail server took too long to answer." }],
     os: { system: "Ubuntu 22.04.5 LTS", updates: [{ source: "gst-plugins-base1.0", score: 9.8, cves: ["CVE-2026-111183"] }, { source: "gst-plugins-good1.0", score: 9.8, cves: ["CVE-2026-111183", "CVE-2026-46471"] }], kernelWaiting: { installed: "5.15.0-203.213", running: "5.15.0-202.212" } },
   }),
   facts({

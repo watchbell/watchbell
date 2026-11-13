@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { isPublicPath, safeNext } from "./paths";
 
 describe("isPublicPath", () => {
-  it.each(["/signin", "/auth/confirm", "/auth/not-member", "/auth/session-ended", "/api/collect", "/api/watchdog", "/api/daily", "/api/health", "/api/ping/hb_x", "/api/v1/ai/models", "/api/v1/mcp", "/api/v1/status", "/s/acme", "/s/acme/badge/web.svg"])("%s is public", (p) => expect(isPublicPath(p)).toBe(true));
+  it.each(["/signin", "/auth/confirm", "/auth/not-member", "/auth/session-ended", "/api/collect", "/api/watchdog", "/api/daily", "/api/health", "/api/ping/hb_x", "/api/v1/ai/models", "/api/v1/mcp", "/api/v1/status", "/s/acme", "/s/acme/badge/web.svg", "/brand-icon"])("%s is public", (p) => expect(isPublicPath(p)).toBe(true));
   it.each(["/", "/settings", "/authx", "/invite", "/signin-other", "/api/status", "/api/anything", "/api/pingx", "/api/healthz", "/api/health/x", "/api/ping", "/status", "/sx", "/s", "/s-x", "/settings/s/x", "/api/s/x", "/S/acme", "/api/v1", "/api/v1x", "/api-docs", "/api-docs/status", "/ai", "/ai/keys", "/office", "/office/kantor-virtual.html", "/api/office/state"])("%s needs a session", (p) => expect(isPublicPath(p)).toBe(false));
 });
 

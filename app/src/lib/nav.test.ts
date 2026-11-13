@@ -19,7 +19,7 @@ describe("nav", () => {
       Hosting: ["apps", "deployments", "deploy", "domains", "dns", "uptime", "logs"],
       Database: ["supabase", "neon", "firebase", "turso", "upstash", "d1", "sql", "catalog"],
       DevOps: ["repos"],
-      Manage: ["alerts", "status-page", "connections", "settings", "sections", "backups"],
+      Manage: ["alerts", "status-page", "reports", "connections", "settings", "sections", "backups"],
     });
     const all = NAV.flatMap((g) => g.items.map((i) => i.key));
     expect(new Set(all).size).toBe(all.length);
@@ -56,7 +56,9 @@ describe("nav", () => {
     expect(canSee(sections, "operator")).toBe(false);
     expect(keys("operator")).toContain("logs");
     expect(keys("operator")).toContain("alerts");
-    expect(groupKeys("operator").Manage).toEqual(["alerts"]);
+    expect(groupKeys("operator").Manage).toEqual(["alerts", "reports"]);
+    // Watchbell 1.7: Reports for every role (viewers download, operators edit content, owners change who gets it).
+    expect(keys("viewer")).toContain("reports");
   });
 
   it("also hides logs from viewers", () => {
@@ -106,7 +108,7 @@ describe("nav", () => {
 
     it("puts the registry's pages into their section after their anchor, for owners only", () => {
       expect(visibleNav("owner", ext).find((g) => g.section === "manage")?.items.map((i) => i.key))
-        .toEqual(["alerts", "auto-actions", "status-page", "connections", "settings", "ai", "api-docs", "sections", "backups"]);
+        .toEqual(["alerts", "auto-actions", "status-page", "reports", "connections", "settings", "ai", "api-docs", "sections", "backups"]);
       for (const role of ["operator", "viewer"] as const) {
         const k = visibleNav(role, ext).flatMap((g) => g.items.map((i) => i.key));
         expect(k).not.toContain("ai");

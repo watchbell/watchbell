@@ -48,7 +48,7 @@ export async function seedApps(ctx: SeedCtx): Promise<SeededApps> {
   return { accountId, team, apps };
 }
 
-function deploymentRows(ctx: SeedCtx, apps: SeededApp[]): DeploymentRow[] {
+export function deploymentRows(ctx: SeedCtx, apps: SeededApp[]): DeploymentRow[] {
   const { seed, now } = ctx;
   const rng = rngFor(seed, "deployments");
   const failedApp = rng.pick(apps).id;

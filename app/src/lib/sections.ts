@@ -90,6 +90,7 @@ export const RULE_SECTION: Record<string, SectionId | "account" | null> = {
   FrameworkVulnerable: "hosting",
   CiFailing: "devops",
   OsSecurityUpdate: "devops",
+  ReportSendFailed: null, // Watchbell 1.7: a client report is the owner's promise, whatever section is on
   MonitorDomainMoved: "hosting", // Watchbell 1.2.1: an uptime monitor on a domain its app no longer has
   CredentialExpiring: "account",
   CollectorStale: null,

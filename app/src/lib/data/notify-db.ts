@@ -1,4 +1,6 @@
 import "server-only";
+import { addressOf, mailFrom } from "@/lib/branding";
+import { readBrand } from "./branding-db";
 import { ENV_COPY } from "@/lib/copy/edition";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -67,16 +69,17 @@ export async function setChannelEnabled(kind: ChannelKind, enabled: boolean): Pr
 
 async function defaultSender(): Promise<{ send: Sender; configured: Set<Push> }> {
   const env = notifyEnv();
-  const [tg, dc, wh, sm] = await Promise.all([readChannel("telegram"), readChannel("discord"), readChannel("webhook"), readChannel("smtp")]);
+  const [tg, dc, wh, sm, brand] = await Promise.all([readChannel("telegram"), readChannel("discord"), readChannel("webhook"), readChannel("smtp"), readBrand()]);
   const configured = new Set<Push>();
   if (env.telegramToken && tg?.row.enabled && tg.config?.chatId) configured.add("telegram");
   if (dc?.row.enabled && dc.config?.url) configured.add("discord");
   if (wh?.row.enabled && wh.config?.url) configured.add("webhook");
   if (sm?.row.enabled && sm.config?.host) configured.add("smtp");
-  const link = `${serverEnv().SITE_URL.replace(/\/+$/, "")}/alerts`;
+  // Review I-8: links point to the brand's public address when there is one.
+  const link = `${(brand.publicUrl ?? serverEnv().SITE_URL).replace(/\/+$/, "")}/alerts`;
   const send: Sender = (kind, text, notices) => kind === "telegram" ? sendTelegram(env.telegramToken!, tg!.config.chatId, text)
     : kind === "webhook" ? sendWebhook(wh!.config, webhookPayload(text, notices ?? [], new Date(), link))
-    : kind === "smtp" ? sendSmtp(sm!.config, mailSubject(text), mailBody(text))
+    : kind === "smtp" ? sendSmtp(sm!.config, mailSubject(text), mailBody(text), {}, { fromName: brand.senderName })
     : sendDiscord(dc!.config.url, text);
   return { send, configured };
 }
@@ -261,10 +264,17 @@ export async function recordResult(kind: ChannelKind, r: SendResult, now: Date):
   await db().update(channels).set(r.ok ? { lastSentAt: now, lastError: null } : { lastError: r.error }).where(eq(channels.kind, kind));
 }
 
+// Watchbell 1.7: the brand's sender name in front of DIGEST_FROM's address; without one, DIGEST_FROM as it is.
+async function digestSender(digestFrom: string): Promise<string> {
+  const brand = await readBrand().catch(() => null);
+  return brand?.senderName ? mailFrom(brand.senderName, addressOf(digestFrom)) : digestFrom;
+}
+
 // The digest from live data, in the email language read at build time.
 async function liveDigest(now: Date): Promise<DigestContent> {
   const [data, lang] = await Promise.all([digestData(now), readNotifyLang("email")]);
-  return buildDigest({ ...data, siteUrl: serverEnv().SITE_URL }, lang);
+  const brand = await readBrand().catch(() => null);
+  return buildDigest({ ...data, siteUrl: brand?.publicUrl ?? serverEnv().SITE_URL }, lang);
 }
 
 // Builds the digest from live data and sends it through Resend to the saved address. The idempotency key keeps a
@@ -275,7 +285,8 @@ async function sendDigest(now: Date, idempotencyKey: string): Promise<SendResult
   const ch = await readChannel("email_digest");
   if (!ch?.config?.to) return { ok: false, kind: "config", error: "The daily email digest isn't connected." };
   const d = await liveDigest(now);
-  const r = await sendEmail(env.resendKey, { from: env.digestFrom, to: ch.config.to, subject: d.subject, html: d.html, text: d.text, idempotencyKey });
+  const from = await digestSender(env.digestFrom);
+  const r = await sendEmail(env.resendKey, { from, to: ch.config.to, subject: d.subject, html: d.html, text: d.text, idempotencyKey });
   await recordResult("email_digest", r, now);
   return r;
 }
@@ -292,7 +303,8 @@ export async function taskDigest(now: Date, deps: { build?: () => Promise<Digest
   const env = notifyEnv();
   const ch = await readChannel("email_digest");
   if (!env.resendKey || !env.digestFrom || !ch?.row.enabled || !ch.config?.to) return;
-  const { resendKey, digestFrom } = env;
+  const { resendKey } = env;
+  const digestFrom = await digestSender(env.digestFrom);
   const to = ch.config.to;
   const day = dayKey(now);
   const step = await stepDigest(now, {

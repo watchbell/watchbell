@@ -175,7 +175,18 @@ const EVALUATORS: Record<RuleKey, Ev> = {
     return [{ ...o, status: "firing" as const, message: `${what} failed${c.run.runNumber ? ` (run #${c.run.runNumber})` : ""}.` }];
   }) : null,
   OsSecurityUpdate: (f, t) => osSecurityUpdate(f, t),
+  // Watchbell 1.7: one subject per report. A month that failed fires; a sent one resolves; one still in flight says
+  // nothing new. The message names the client and month, never the recipients.
+  ReportSendFailed: (f) => f.reportSends ? f.reportSends.map((r) => {
+    const o = base("ReportSendFailed", r.reportId, { title: r.clientName });
+    const what = `The ${monthName(r.month)} report for ${r.clientName}`;
+    if (r.status === "sent") return { ...o, status: "ok" as const, message: `${what} was emailed.` };
+    if (r.status !== "failed") return o;
+    return { ...o, status: "firing" as const, message: `${what} couldn't be emailed after 3 tries${r.lastError ? `: ${r.lastError}` : "."}` };
+  }) : null,
 };
+
+const monthName = (month: string) => new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-15T12:00:00Z`));
 
 // Owner 12 Nov: one subject, the machine. Lists up to three packages (worst score first), counts the rest, and adds a
 // kernel that waits for a reboot. Resolves when neither is left.

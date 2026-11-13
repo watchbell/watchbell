@@ -6,7 +6,7 @@ import { Turnstile } from "@/components/turnstile";
 import type { SignInState } from "@/lib/signin";
 import { sendSignInLink } from "./actions";
 
-export function SignInForm({ siteKey }: { siteKey: string }) {
+export function SignInForm({ siteKey, appName = "Watchbell" }: { siteKey: string; appName?: string }) {
   const [state, action, pending] = useActionState<SignInState, FormData>(sendSignInLink, { status: "idle" });
   const [again, setAgain] = useState(false);
   const [attempt, setAttempt] = useState(0);
@@ -23,7 +23,7 @@ export function SignInForm({ siteKey }: { siteKey: string }) {
 
   return (
     <form action={(fd) => { setAgain(false); setAttempt((a) => a + 1); action(fd); }}>
-      <h1 className="mb-1 text-xl">Sign in to Watchbell</h1>
+      <h1 className="mb-1 text-xl">Sign in to {appName}</h1>
       <p className="mb-[18px] text-ink-soft">We&apos;ll email you a sign-in link. Only invited people can get in.</p>
       <Field id="email" label="Email" error={state.status === "error" ? state.message : undefined}>
         <input id="email" name="email" type="email" autoComplete="email" placeholder="name@example.com" required className={fieldClass} />

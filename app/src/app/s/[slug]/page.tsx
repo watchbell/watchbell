@@ -1,4 +1,6 @@
-import { BellMark } from "@/components/brand/bell-mark";
+import { BrandMark } from "@/components/brand/brand-mark";
+import { DEFAULT_BRAND, displayName } from "@/lib/branding";
+import { readBrand } from "@/lib/data/branding-db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
@@ -46,14 +48,16 @@ function Notice({ state, title, children }: { state: "info" | "maint"; title: st
 
 export default async function PublicStatusPage({ params }: Props) {
   const { slug } = await params;
-  const v = await view(slug);
+  // Watchbell 1.7: the owner's brand (Settings › Branding); without one the page looks as before.
+  const [v, brand] = await Promise.all([view(slug), readBrand().catch(() => DEFAULT_BRAND)]);
   if (!v) notFound();
   const overall = overallLine(v.monitors);
   return (
     <main className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 pb-12 pt-8">
       <header className="flex items-center gap-3">
-        <BellMark />
+        <BrandMark name={displayName(brand)} hasLogo={brand.hasLogo} />
         <div className="min-w-0">
+          {brand.name && <p className="m-0 text-[12.5px] font-medium text-ink-soft">{brand.name}</p>}
           <h1 className="text-[20px]">{v.title}</h1>
           <p className="mt-0.5 text-ink-soft">Updated every minute · times in {zoneName()}</p>
         </div>
@@ -85,6 +89,7 @@ export default async function PublicStatusPage({ params }: Props) {
         ))}
       </section>
       <p className="m-0 text-[12.5px] text-ink-faint">Last 90 days. Grey means no data, blue means maintenance (not counted).</p>
+      {brand.name && brand.poweredBy && <p className="m-0 text-[11.5px] text-ink-faint">Powered by Watchbell</p>}
     </main>
   );
 }

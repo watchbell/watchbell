@@ -33,7 +33,16 @@ const DEP_SEVERITY: Record<string, string> = { critical: "kritis", high: "tinggi
 const osItems = (s: string) => s
   .replace(/ fixes /g, " nambal ").replace(/ and (\d+) more\b/g, " dan $1 lagi").replace(/\b(\d+) more packages\b/g, "$1 paket lagi").replace(/ waits for a reboot/g, " nunggu reboot");
 
+const BULAN: Record<string, string> = { January: "Januari", February: "Februari", March: "Maret", April: "April", May: "Mei", June: "Juni", July: "Juli", August: "Agustus", September: "September", October: "Oktober", November: "November", December: "Desember" };
+const bulan = (m: string) => m.replace(/^(\w+)/, (w) => BULAN[w] ?? w);
+
 const SHAPES: Record<string, Shape[]> = {
+  // Watchbell 1.7 lib/alerts/evaluate.ts ReportSendFailed. The mail error is English (the mail server's or Resend's), so
+  // the Indonesian text points to the Reports page, which shows it.
+  ReportSendFailed: [
+    [/^The (\w+ \d{4}) report for (.+) couldn't be emailed after 3 tries(?:: (.+)|\.)$/, (_, m, client) => `Laporan ${bulan(m)} untuk ${client} gagal dikirim setelah 3 kali coba; alasannya ada di Manage › Reports.`],
+    [/^The (\w+ \d{4}) report for (.+) was emailed\.$/, (_, m, client) => `Laporan ${bulan(m)} untuk ${client} sudah terkirim.`],
+  ],
   OsSecurityUpdate: [
     [/^On (.+?), no waiting security update fixes a CVE scored (\S+) or more, and the newest kernel runs\.$/, (_, sys, s) => `Di ${sys} nggak ada update security yang nunggu buat CVE skor ${s} ke atas, dan kernel terbaru udah jalan.`],
     [/^On (.+?): (.+)\.$/, (_, sys, items) => `Di ${sys}: ${osItems(items)}.`],

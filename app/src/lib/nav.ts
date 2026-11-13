@@ -67,6 +67,8 @@ const ITEMS: Record<SectionId, NavItem[]> = {
   manage: [
     { key: "alerts", label: "Alerts", href: "/alerts", icon: "bell", stage: 5, sub: "Alerting" },
     { key: "status-page", label: "Status page", href: "/settings?tab=status-page", icon: "page", stage: 7, ownerOnly: true, sub: "Alerting" },
+    // Watchbell 1.7: the monthly client report, for every role (what each may do is in the page and its actions).
+    { key: "reports", label: "Reports", href: "/reports", icon: "file", stage: 18, sub: "Alerting" },
     { key: "connections", label: "Connections", href: "/connections", icon: "plug", stage: 1, ownerOnly: true, sub: "Setup" },
     { key: "settings", label: "Settings", href: "/settings", icon: "settings", stage: 1, ownerOnly: true, sub: "Setup" },
     { key: "sections", label: "Sections", href: "/manage/sections", icon: "layout", stage: 12, ownerOnly: true, sub: "Setup" },

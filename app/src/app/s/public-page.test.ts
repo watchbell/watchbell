@@ -5,6 +5,9 @@ import type { PublicView } from "@/lib/data/public-status-db";
 
 const publicView = vi.fn<(slug: string, now: Date) => Promise<PublicView | null>>();
 vi.mock("@/lib/data/public-status-db", () => ({ publicView: (slug: string, now: Date) => publicView(slug, now) }));
+// Watchbell 1.7: the brand on the public page.
+const brand = vi.hoisted(() => ({ value: { name: null as string | null, accent: null, senderName: null, publicUrl: null, poweredBy: true, hasLogo: false } }));
+vi.mock("@/lib/data/branding-db", () => ({ readBrand: async () => brand.value }));
 
 import PublicStatusPage from "./[slug]/page";
 import StatusPageNotFound from "./[slug]/not-found";
@@ -56,5 +59,23 @@ describe("the status page 404", () => {
     expect(html).toContain("Check the link with whoever sent it.");
     expect(html).not.toMatch(/href=/);
     expect(html).not.toMatch(/sign in|console|<script/i);
+  });
+});
+
+describe("the public status page with a brand (1.7)", () => {
+  it("shows the brand's name and logo, with Powered by Watchbell unless it is turned off", async () => {
+    publicView.mockResolvedValue(page([row("Shop", "ok", "Operational")]));
+    brand.value = { ...brand.value, name: "Studio Nusa", hasLogo: true, poweredBy: true };
+    let html = await render();
+    expect(html).toContain("Studio Nusa");
+    expect(html).toContain('src="/brand-icon"');
+    expect(html).toContain("Powered by Watchbell");
+    brand.value = { ...brand.value, poweredBy: false };
+    html = await render();
+    expect(html).not.toContain("Powered by Watchbell");
+    brand.value = { ...brand.value, name: null, hasLogo: false, poweredBy: true };
+    html = await render();
+    expect(html).not.toContain("Powered by Watchbell");
+    expect(html).not.toContain("/brand-icon");
   });
 });

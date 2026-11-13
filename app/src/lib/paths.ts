@@ -2,7 +2,8 @@ import { mode } from "./mode";
 
 // The scheduler routes authenticate themselves (bearer secret or QStash signature). /api/health is a public liveness check.
 // /api/telegram/webhook authenticates by Telegram's secret header (Stage 9 slice 7).
-const PUBLIC_EXACT = new Set(["/signin", "/api/collect", "/api/watchdog", "/api/daily", "/api/health", "/api/telegram/webhook"]);
+// /brand-icon (1.7) is the brand's logo, shown on the sign-in page and the public status page.
+const PUBLIC_EXACT = new Set(["/signin", "/api/collect", "/api/watchdog", "/api/daily", "/api/health", "/api/telegram/webhook", "/brand-icon"]);
 // The ping endpoint authenticates by its token (U3, B2). The public status page and its badges (/s/{slug}, U6/U7) are
 // for anyone: they show only what the owner chose (B1). /api/v1/ (5c) authenticates by console API key only and never
 // reads the session (R2). /api-docs is a console page.

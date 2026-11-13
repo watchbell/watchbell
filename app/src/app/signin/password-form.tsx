@@ -6,11 +6,11 @@ import type { PasswordSignInState } from "@/lib/local-auth/signin";
 import { signInWithPassword } from "./actions";
 
 // Self-host sign-in: email and password, no email link and no bot check (the console has no mail service).
-export function PasswordSignInForm({ next }: { next?: string }) {
+export function PasswordSignInForm({ next, appName = "Watchbell" }: { next?: string; appName?: string }) {
   const [state, action, pending] = useActionState<PasswordSignInState, FormData>(signInWithPassword, { status: "idle" });
   return (
     <form action={action}>
-      <h1 className="mb-1 text-xl">Sign in to Watchbell</h1>
+      <h1 className="mb-1 text-xl">Sign in to {appName}</h1>
       <p className="mb-[18px] text-ink-soft">Use the email and password an owner set up for you.</p>
       {next && <input type="hidden" name="next" value={next} />}
       <Field id="email" label="Email">

@@ -5,7 +5,9 @@ import type { SendResult } from "./telegram";
 // Resend (resend.com/docs/api-reference/emails/send-email). Free: 100 a day; we send the digest once a day with an
 // idempotency key per WIB day, so a retried run can't send it twice. A User-Agent is required (403 code 1010 without).
 export async function sendEmail(
-  key: string, mail: { from: string; to: string; subject: string; html: string; text: string; idempotencyKey: string }, opts: { fetch?: typeof fetch } = {},
+  key: string,
+  mail: { from: string; to: string | string[]; subject: string; html: string; text: string; idempotencyKey: string; attachments?: { filename: string; content: string }[] },
+  opts: { fetch?: typeof fetch } = {},
 ): Promise<SendResult> {
   if (isDemo()) return { ok: false, kind: "config", error: DEMO_UNAVAILABLE }; // the demo never sends mail
   let res: Response;
@@ -13,7 +15,11 @@ export async function sendEmail(
     res = await (opts.fetch ?? fetch)("https://api.resend.com/emails", {
       method: "POST", signal: AbortSignal.timeout(5000), cache: "no-store",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json", "User-Agent": "OpsConsole/1.0", "Idempotency-Key": mail.idempotencyKey },
-      body: JSON.stringify({ from: mail.from, to: [mail.to], subject: mail.subject, html: mail.html, text: mail.text }),
+      body: JSON.stringify({
+        from: mail.from, to: Array.isArray(mail.to) ? mail.to : [mail.to], subject: mail.subject, html: mail.html, text: mail.text,
+        // Watchbell 1.7: the monthly report's PDF (base64), when there is one.
+        ...(mail.attachments?.length ? { attachments: mail.attachments } : {}),
+      }),
     });
   } catch {
     return { ok: false, kind: "transient", error: "Resend didn't answer." };

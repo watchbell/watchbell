@@ -17,6 +17,8 @@ export const LIMITS = {
   refresh: { name: "refresh", max: 10, windowSeconds: 600 },
   check: { name: "check", max: 30, windowSeconds: 600 },
   monitorWrite: { name: "monitor-write", max: 60, windowSeconds: 600 },
+  // 1.7: making a report PDF costs CPU (under a second each); 20 in 10 minutes per member is plenty for real use.
+  reportPdf: { name: "report-pdf", max: 20, windowSeconds: 600 },
   securityCheck: { name: "security-check", max: 10, windowSeconds: 600 },
   domainCheck: { name: "domain-check", max: 10, windowSeconds: 600 },
   logsLive: { name: "logs-live", max: 60, windowSeconds: 600 },

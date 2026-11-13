@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { accounts, recommendationDismissals, rollupsHourly } from "@/db/schema";
+import { deployDays } from "@/db/report-schema";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { fakeDb, payloadOf, whereOf } from "@/lib/data/fake-db";
 import { RETENTION_DAYS } from "./retention";
@@ -25,6 +26,12 @@ vi.mock("@/lib/data/os-scan-db", () => ({ runOsScan: os.runOsScan, osState: () =
 // Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
 const sec = vi.hoisted(() => ({ paused: new Set<string>() }));
 vi.mock("@/lib/data/sections-db", () => ({ pausedSections: async () => sec.paused }));
+// Watchbell 1.7: the daily deploy summary (its own tests in deploy-days.test.ts).
+const dd = vi.hoisted(() => ({ stepDeployDays: vi.fn() }));
+// Watchbell 1.7: the monthly report sends (their own tests in lib/report/send.test.ts).
+const rs = vi.hoisted(() => ({ runReportSends: vi.fn() }));
+vi.mock("@/lib/report/send", () => ({ runReportSends: rs.runReportSends }));
+vi.mock("./deploy-days", async (orig) => ({ ...(await orig<typeof import("./deploy-days")>()), stepDeployDays: dd.stepDeployDays }));
 
 import { runDaily } from "./daily";
 
@@ -37,6 +44,8 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   h.runSecurityChecks.mockResolvedValue({ failed: [] });
   h.runAdvisor.mockResolvedValue([]);
+  rs.runReportSends.mockReset();
+  rs.runReportSends.mockResolvedValue({ sent: 0, failed: 0, left: 0 });
   sec.paused = new Set();
 });
 
@@ -55,7 +64,7 @@ describe("runDaily with paused sections (D11)", () => {
     // Keep active protects the owner's projects: it runs whatever the Database switch says.
     expect(h.runKeepAlive).toHaveBeenCalled();
     expect(h.runSecurityChecks).toHaveBeenCalled();
-    expect(r.tasks).toEqual(["rollups", "backup", "retention", "sync", "keep-active", "security", "advisor"]);
+    expect(r.tasks).toEqual(["rollups", "deploy-days", "backup", "retention", "reports", "sync", "keep-active", "security", "advisor"]);
     expect(r.errors).toEqual([]);
   });
 });
@@ -116,7 +125,7 @@ describe("runDaily backup step (stage 7, B4)", () => {
     h.monthlyBackupStep.mockImplementation(async () => { order.push("backup"); return null; });
     h.taskDatabasesDaily.mockImplementation(async () => { order.push("databases"); });
     const r = await runDaily();
-    expect(r.tasks.slice(0, 3)).toEqual(["rollups", "backup", "retention"]);
+    expect(r.tasks.slice(0, 4)).toEqual(["rollups", "deploy-days", "backup", "retention"]);
     expect(order).toEqual(["backup", "databases"]);
     const [at, deadline] = h.monthlyBackupStep.mock.calls[0] as [Date, number];
     expect(deadline).toBe(at.getTime() + 20_000);
@@ -193,6 +202,12 @@ describe("runDaily (perf P3)", () => {
     const t0 = Date.now();
     await runDaily();
     const cut = at(saved);
+    // 1.7: the deploy summary goes with the rollups (same days), and is written before retention runs.
+    expect(dd.stepDeployDays).toHaveBeenCalled();
+    const dw = saved.writes.find((x) => x.kind === "delete" && x.table === deployDays)!;
+    const dq = new PgDialect().sqlToQuery(whereOf(dw.calls)!.getSQL() as never);
+    expect(String(dq.params[0])).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(Math.round((t0 - new Date(`${String(dq.params[0])}T00:00:00Z`).getTime()) / 86_400_000)).toBeGreaterThanOrEqual(179);
     expect(cut).not.toBeNull();
     expect(Math.round((t0 - cut!.getTime()) / 86_400_000)).toBe(180);
     const fallback = fakeDb([], [[{ id: "run-1" }]]);
@@ -249,5 +264,19 @@ describe("runDaily rollups (U5)", () => {
     expect(payloadOf(w.calls)).toMatchObject({ monitorId: "m1", checks: 1, failures: 0, status5xx: 0, maintenance: 2 });
     const upsert = w.calls.find((c) => c.method === "onConflictDoUpdate")?.args[0] as { set: Record<string, unknown> };
     expect(upsert.set).toMatchObject({ checks: 1, failures: 0, maintenance: 2 });
+  });
+});
+
+describe("runDaily report sends (1.7)", () => {
+  it("sends the monthly reports after retention, and reports a failed send as one line without stopping", async () => {
+    h.current = fakeDb([], [[{ id: "run-1" }]]);
+    rs.runReportSends.mockResolvedValue({ sent: 1, failed: 2, left: 1 });
+    const r = await runDaily();
+    // Review I-3: a deadline inside the 60 s run, so the sync after it keeps its share.
+    expect(rs.runReportSends).toHaveBeenCalledWith(expect.any(Date), undefined, expect.any(Number));
+    expect(r.tasks.indexOf("reports")).toBe(r.tasks.indexOf("retention") + 1);
+    expect(r.errors).toContain("reports: 2 monthly reports not sent yet (retried on the next run, up to the 3rd)");
+    expect(r.errors).toContain("reports: 1 left for the next run, time budget used");
+    expect(r.tasks).toContain("advisor");
   });
 });

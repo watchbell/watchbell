@@ -1,3 +1,5 @@
+import { readBrand } from "@/lib/data/branding-db";
+import { BrandingTab } from "./branding-tab";
 import { PageHeader } from "@/components/kit";
 import { NoAccess } from "@/components/no-access";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,12 +14,12 @@ import { RetentionTab } from "./retention-tab";
 import { StatusPageTab } from "./status-page-tab";
 import { UsersTab } from "./users-tab";
 
-const TAB_KEYS = ["collector", "budget", "users", "retention", "status-page"];
+const TAB_KEYS = ["collector", "budget", "users", "retention", "status-page", "branding"];
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const gate = await pageGate("owner");
   if (!gate.ok) return <NoAccess role={gate.member.role} />;
-  const [{ tab }, statusPage] = await Promise.all([searchParams, statusPageSettings()]);
+  const [{ tab }, statusPage, brand] = await Promise.all([searchParams, statusPageSettings(), readBrand()]);
   const extra = extensions.settingsTabs ?? [];
   // The GitHub Actions lockfile card is a core tab of its own, unless the VM runner is registered (private edition,
   // registry r1): its Runner tab, the first extension tab, shows the card beside the runner.
@@ -34,6 +36,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <TabsTrigger value="users">Users</TabsTrigger>
           <TabsTrigger value="retention">Retention</TabsTrigger>
           <TabsTrigger value="status-page">Status page</TabsTrigger>
+          <TabsTrigger value="branding">Branding</TabsTrigger>
           {lockfileTab && <TabsTrigger value="lockfile">Lockfile</TabsTrigger>}
           {extra.map((t) => <TabsTrigger key={t.key} value={t.key}>{t.label}</TabsTrigger>)}
         </TabsList>
@@ -42,6 +45,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <TabsContent value="users" className="mt-4"><UsersTab actorId={gate.member.id} /></TabsContent>
         <TabsContent value="retention" className="mt-4"><RetentionTab /></TabsContent>
         <TabsContent value="status-page" className="mt-4"><StatusPageTab settings={statusPage} siteUrl={serverEnv().SITE_URL} /></TabsContent>
+        <TabsContent value="branding" className="mt-4"><BrandingTab brand={brand} /></TabsContent>
         {lockfileTab && <TabsContent value="lockfile" className="mt-4"><ActionsLockfileCard /></TabsContent>}
         {extra.map(({ key, Tab }) => <TabsContent key={key} value={key} className="mt-4"><Tab /></TabsContent>)}
       </Tabs>

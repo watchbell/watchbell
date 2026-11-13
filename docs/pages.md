@@ -218,7 +218,7 @@ The **OsSecurityUpdate** alert fires while one of them fixes a CVE scored 7.0 or
 
 ## Manage
 
-The menu splits Manage into three headings: **Alerting** (Alerts, Auto-actions, Status page), **Setup** (Connections,
+The menu splits Manage into three headings: **Alerting** (Alerts, Auto-actions, Status page, Reports), **Setup** (Connections,
 Settings, Sections, Backups) and **AI & API** (AI Gateway, API explorer).
 
 **Connections** (owner only). The provider accounts Watchbell reads: Vercel, Supabase, Neon, Firebase, Turso, Upstash,
@@ -273,6 +273,11 @@ never paused because of the switch.
   which service has a problem), the names you choose, the current state, 90-day bars and maintenance notices. The
   uptime badges for READMEs are listed here, not on the public page. It never shows addresses, error text or provider
   names. Off until you publish it; an unknown or unpublished address shows a plain "No status page here".
+- Branding (owner only, 1.7): your app name, a square PNG logo (up to 512 px and 256 KB), an accent colour (checked to
+  stay readable in light and dark), the email sender name (the address stays your mail channel's) and the public address
+  used in links. They show on the sign-in page, the sidebar, the browser tab, the monthly report, emails and the public
+  status page, with a small "Powered by Watchbell" you can turn off. The command line, docs links and the version label
+  stay Watchbell.
 - Lockfile: an optional GitHub Actions workflow in a small repository of your own that builds `package-lock.json`
   for update pull requests (see [Auto-actions](auto-actions.md#automatic-security-fixes)).
 - Auto-actions: which safe actions may run without asking, auto-rollback, and automatic security fixes.
@@ -287,6 +292,14 @@ with a console API key; it runs against this Watchbell with that key's scopes an
 **Backups** (owner only). Monthly summaries saved to your Google Drive. See [Backups](backups.md).
 
 **Status page** (owner only). Opens the Status page tab of Settings (above).
+
+**Reports** (1.7, every member). A monthly two-page PDF per client, in Indonesian or English. Page 1 is the month as a
+calendar (each day all up, slow or a short outage, or down), the bad days in plain words, and uptime, response and
+updates; page 2 has response per day, updates, alerts, your note and what the numbers mean. A report names its websites
+with names you type, never an address, error text or provider. Download any month the data still covers (Settings ›
+Retention), in either language. Owners can have it emailed on the 1st with the PDF attached, to up to 5 addresses,
+through the Email (SMTP) channel or Resend; a failed send is retried on the 2nd and 3rd, then the ReportSendFailed alert
+tells you. Operators edit what a report says and send a test to themselves; viewers download.
 
 ## Pages outside the menu
 

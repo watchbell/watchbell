@@ -6,7 +6,8 @@ export type RuleKey =
   | "MonitorDown" | "CollectorStale" | "HighLatency" | "DeploymentFailed" | "DatabasePaused" | "CertExpiringSoon" | "DomainExpiringSoon"
   | "StorageAlmostFull" | "NeonComputeHigh" | "FirestoreQuotaHigh" | "AutoPauseRisk" | "DnsProxiedToVercel" | "CredentialExpiring"
   | "ComputeHigh" | "DbQuotaHigh"
-  | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved" | "CiFailing" | "OsSecurityUpdate";
+  | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved" | "CiFailing" | "OsSecurityUpdate"
+  | "ReportSendFailed";
 
 export type RuleDef = {
   key: RuleKey; severity: Severity; threshold: number | null; bounds: [number, number] | null; source: "own" | "api" | "test";
@@ -46,6 +47,8 @@ export const RULES: Record<RuleKey, RuleDef> = {
   // Owner 12 Nov: the machine a self-hosted Watchbell runs on has a security update waiting that fixes a CVE scored at
   // least the threshold (CVSS, whole numbers; 0 = every scored fix), or a newer kernel waits for a reboot. A 9+ score raises it to critical.
   OsSecurityUpdate: { key: "OsSecurityUpdate", severity: "warning", threshold: 7, bounds: [0, 10], source: "own", needs: null, sampled: false, condition: (n) => `A waiting security update fixes a CVE scored ${(n ?? 7).toFixed(1)}+ (CVSS), or a new kernel waits for a reboot` },
+  // Watchbell 1.7 (spec §6): a monthly client report that couldn't be emailed on the 1st, 2nd or 3rd.
+  ReportSendFailed: { key: "ReportSendFailed", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "A monthly client report couldn't be emailed after 3 tries" },
   // Watchbell 1.2.1: an HTTP monitor still checks a domain its app no longer has (the app moved to a new domain). Fires
   // instead of MonitorDown for that monitor; the fix is Update monitor, never a redeploy.
   MonitorDomainMoved: { key: "MonitorDomainMoved", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The monitor's domain is no longer one of the app's domains" },
@@ -102,6 +105,7 @@ export const RULE_NAMES: Record<RuleKey, string> = {
   FrameworkVulnerable: "Next.js needs a security update",
   CiFailing: "CI is failing",
   OsSecurityUpdate: "Security updates waiting on this machine",
+  ReportSendFailed: "Client report not sent",
   MonitorDomainMoved: "App moved to a new domain",
 };
 export const ruleName = (key: string): string => (isRuleKey(key) ? RULE_NAMES[key] : key);

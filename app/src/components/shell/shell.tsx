@@ -20,7 +20,7 @@ const EMPTY_EXT: ClientExtension = { nav: [], palette: [] };
 // `collector.demo`: demo mode (WATCHBELL_MODE=demo), which also shows the demo banner above every page.
 // `sections`: the sections that are on (lib/sections.ts); the sidebar and the palette list only their pages.
 // `selfhost` (1.5): a self-hosted or demo console, so its self-host-only pages (DevOps › Containers) are listed.
-export function Shell({ user, collector, alerts, book, shot, ext = EMPTY_EXT, sections, selfhost = false, version = null, children }: { user: { email: string; role: Role; hasPassword?: boolean }; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; book: AliasBook; shot: boolean; ext?: ClientExtension; sections?: SectionId[]; selfhost?: boolean; version?: ConsoleVersion | null; children: ReactNode }) {
+export function Shell({ user, collector, alerts, book, shot, ext = EMPTY_EXT, sections, selfhost = false, version = null, brand = { name: "Watchbell", hasLogo: false }, children }: { user: { email: string; role: Role; hasPassword?: boolean }; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; book: AliasBook; shot: boolean; ext?: ClientExtension; sections?: SectionId[]; selfhost?: boolean; version?: ConsoleVersion | null; brand?: { name: string; hasLogo: boolean }; children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -62,7 +62,7 @@ export function Shell({ user, collector, alerts, book, shot, ext = EMPTY_EXT, se
     <AliasProvider book={book} shot={shot}>
       <SourcesProvider>
         <div className={cn("grid min-h-screen grid-cols-1", !collapsed && "min-[1001px]:grid-cols-[248px_minmax(0,1fr)]")}>
-          {(!collapsed || mobileOpen) && <Sidebar role={user.role} ext={ext} sections={sections} selfhost={selfhost} version={version} collector={collector} alerts={alerts} mobileOpen={mobileOpen} onNavigate={() => setMobileOpen(false)} navRef={navRef} />}
+          {(!collapsed || mobileOpen) && <Sidebar role={user.role} ext={ext} sections={sections} selfhost={selfhost} version={version} brand={brand} collector={collector} alerts={alerts} mobileOpen={mobileOpen} onNavigate={() => setMobileOpen(false)} navRef={navRef} />}
           {mobileOpen && (
             <button type="button" aria-label="Close navigation" className="fixed inset-0 z-40 bg-black/45 min-[1001px]:hidden" onClick={() => setMobileOpen(false)} />
           )}

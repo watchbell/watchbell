@@ -7,6 +7,7 @@ import { z } from "zod";
 import { DEMO_UNAVAILABLE } from "@/lib/demo/simulate";
 import { isDemo } from "@/lib/mode";
 import { blockedHostname, isBlockedAddress } from "@/lib/net/public-host";
+import { mailFrom } from "@/lib/branding";
 import { MAX_RECIPIENTS, recipients } from "./hints";
 import type { SendResult } from "./telegram";
 
@@ -44,12 +45,26 @@ const header = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffe
 const oneLine = (s: string) => s.replace(/[\r\n]+/g, " ").slice(0, 200);
 
 // The whole message. The body is base64, so no line can start with a dot and nothing needs dot-stuffing.
-export function buildMessage(c: Pick<SmtpConfig, "from" | "to" | "host">, subject: string, text: string, now: Date): string {
-  const body = Buffer.from(text.replace(/\r?\n/g, "\r\n"), "utf8").toString("base64").replace(/.{1,76}/g, "$&\r\n");
+// Watchbell 1.7: the brand's sender name (the address stays the channel's) and one attachment (the monthly report PDF).
+export type MailExtra = { fromName?: string | null; attachment?: { filename: string; contentType: string; data: Uint8Array } };
+
+const b64 = (bytes: Uint8Array | Buffer) => Buffer.from(bytes).toString("base64").replace(/.{1,76}/g, "$&\r\n");
+const safeName = (s: string) => s.replace(/[^\w.-]/g, "_").slice(0, 100);
+
+export function buildMessage(c: Pick<SmtpConfig, "from" | "to" | "host">, subject: string, text: string, now: Date, extra: MailExtra = {}): string {
+  const textBody = b64(Buffer.from(text.replace(/\r?\n/g, "\r\n"), "utf8"));
+  const head = [
+    `From: ${mailFrom(extra.fromName ?? null, c.from.trim())}`, `To: ${recipients(c.to).map((a) => `<${a}>`).join(", ")}`, `Subject: ${header(oneLine(subject))}`, `Date: ${now.toUTCString()}`,
+    `Message-ID: <${randomUUID()}@watchbell>`, "MIME-Version: 1.0",
+  ];
+  if (!extra.attachment) return [...head, "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", textBody].join("\r\n");
+  const a = extra.attachment;
+  const boundary = `wb-${randomUUID()}`;
   return [
-    `From: Watchbell <${c.from.trim()}>`, `To: ${recipients(c.to).map((a) => `<${a}>`).join(", ")}`, `Subject: ${header(oneLine(subject))}`, `Date: ${now.toUTCString()}`,
-    `Message-ID: <${randomUUID()}@watchbell>`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64",
-    "", body,
+    ...head, `Content-Type: multipart/mixed; boundary="${boundary}"`, "",
+    `--${boundary}`, "Content-Type: text/plain; charset=utf-8", "Content-Transfer-Encoding: base64", "", textBody,
+    `--${boundary}`, `Content-Type: ${a.contentType}; name="${safeName(a.filename)}"`, "Content-Transfer-Encoding: base64", `Content-Disposition: attachment; filename="${safeName(a.filename)}"`, "", b64(a.data),
+    `--${boundary}--`, "",
   ].join("\r\n");
 }
 
@@ -115,7 +130,7 @@ class SmtpError extends Error {
   constructor(message: string, readonly kind: "config" | "transient") { super(message); }
 }
 
-export async function sendSmtp(c: SmtpConfig, subject: string, text: string, deps: Deps = {}): Promise<SendResult> {
+export async function sendSmtp(c: SmtpConfig, subject: string, text: string, deps: Deps = {}, extra: MailExtra = {}): Promise<SendResult> {
   if (isDemo()) return { ok: false, kind: "config", error: DEMO_UNAVAILABLE }; // the demo never sends anything
   if (Object.keys(smtpProblems(c)).length) return { ok: false, kind: "config", error: "The saved mail server settings aren't valid any more." };
   const host = c.host.trim().toLowerCase();
@@ -167,7 +182,7 @@ export async function sendSmtp(c: SmtpConfig, subject: string, text: string, dep
     }
     r.send("DATA");
     await expect([354], "the message");
-    socket.write(`${buildMessage(c, subject, text, new Date())}\r\n.\r\n`);
+    socket.write(`${buildMessage(c, subject, text, new Date(), extra)}\r\n.\r\n`);
     await expect([250], "the message");
     // The message is already accepted; wait briefly for the goodbye so the server sees a clean QUIT.
     r.send("QUIT");
