@@ -75,3 +75,69 @@ describe("buildReportModel", () => {
     expect(buildReportModel(two).days[1].tone).toBe("down");
   });
 });
+
+// Watchbell 1.7.1 (review M-1, M-2, M-3, M-5, M-6).
+describe("buildReportModel (1.7.1)", () => {
+  const clean = (over: Partial<ReportInput> = {}) => input({ sites: [{ ...input().sites[0], days: full() }], incidents: [], ...over });
+
+  it("cuts an open incident at the month end of the install zone", () => {
+    const m = buildReportModel(clean({
+      generatedAt: new Date("2026-11-05T00:00:00Z"),
+      incidents: [{ monitorId: "m1", kind: "down", startedAt: new Date("2026-10-31T16:00:00Z"), resolvedAt: null, endedBy: "open" }],
+    }));
+    expect(m.incidents[0].minutes).toBe(60);
+  });
+
+  it("slow incident spanning two days turns both amber, and only those", () => {
+    const m = buildReportModel(clean({
+      incidents: [{ monitorId: "m1", kind: "slow", startedAt: new Date("2026-10-12T16:30:00Z"), resolvedAt: new Date("2026-10-12T17:30:00Z"), endedBy: "resolved" }],
+    }));
+    expect(m.days[11].tone).toBe("warn");
+    expect(m.days[12].tone).toBe("warn");
+    expect(m.days[13].tone).toBe("ok");
+    expect(m.days[10].tone).toBe("ok");
+  });
+
+  it("a day that is down stays down when it also had a slow incident", () => {
+    const m = buildReportModel(input({
+      incidents: [{ monitorId: "m1", kind: "slow", startedAt: new Date("2026-10-23T03:00:00Z"), resolvedAt: new Date("2026-10-23T03:20:00Z"), endedBy: "resolved" }],
+    }));
+    expect(m.days[22].tone).toBe("down");
+  });
+
+  it("explains a bad day without an incident", () => {
+    const m = buildReportModel(clean({ sites: [{ ...input().sites[0], days: full({ "2026-10-09": 3 }) }] }));
+    expect(m.dayLines).toEqual([{ day: "2026-10-09", site: "Toko utama", tone: "warn", downMinutes: 3, slow: false }]);
+  });
+
+  it("day lines combine slow and down for one site, ordered by day", () => {
+    const m = buildReportModel(input({
+      incidents: [{ monitorId: "m1", kind: "slow", startedAt: new Date("2026-10-23T03:00:00Z"), resolvedAt: new Date("2026-10-23T03:20:00Z"), endedBy: "resolved" }],
+    }));
+    expect(m.dayLines).toEqual([
+      { day: "2026-10-09", site: "Toko utama", tone: "warn", downMinutes: 3, slow: false },
+      { day: "2026-10-23", site: "Toko utama", tone: "down", downMinutes: 22, slow: true },
+    ]);
+  });
+
+  it("a slow-only day is a line without down minutes", () => {
+    const m = buildReportModel(clean({
+      incidents: [{ monitorId: "m1", kind: "slow", startedAt: new Date("2026-10-19T03:00:00Z"), resolvedAt: new Date("2026-10-19T03:20:00Z"), endedBy: "resolved" }],
+    }));
+    expect(m.dayLines).toEqual([{ day: "2026-10-19", site: "Toko utama", tone: "warn", downMinutes: 0, slow: true }]);
+  });
+
+  it("lists the distinct check intervals", () => {
+    const s = input().sites[0];
+    const m = buildReportModel(input({ sites: [{ ...s, intervalS: 300 }, { ...s, monitorId: "m2", name: "B", intervalS: 60 }, { ...s, monitorId: "m3", name: "C", intervalS: 300 }] }));
+    expect(m.intervals).toEqual([60, 300]);
+  });
+
+  it("summary data-from is the earliest site start after the 1st", () => {
+    const s = input().sites[0];
+    const late = buildReportModel(input({ sites: [{ ...s, firstDay: "2026-10-20", days: full({}, "2026-10-20") }, { ...s, monitorId: "m2", name: "B", firstDay: "2026-10-12", days: full({}, "2026-10-12") }] }));
+    expect(late.summary.dataFrom).toBe("2026-10-12");
+    const onTime = buildReportModel(input({ sites: [{ ...s, firstDay: "2026-10-20" }, { ...s, monitorId: "m2", name: "B", firstDay: "2026-10-01" }] }));
+    expect(onTime.summary.dataFrom).toBeNull();
+  });
+});

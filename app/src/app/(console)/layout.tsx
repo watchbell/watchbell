@@ -53,7 +53,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     <>
       <TimeZoneSync zone={timeZone()} />
       {style && <style>{style}</style>}
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())} brand={{ name: displayName(brand), hasLogo: brand.hasLogo }}><UpdateBanner notice={notice} />{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())} brand={{ name: displayName(brand), hasLogo: brand.hasLogo, logoVersion: brand.logoVersion ?? null }}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

@@ -34,7 +34,7 @@ export type MemoryView = {
   now: { total: string; used: string; cache: string; swap: string | null };
   parts: string[]; max: number; bars: { key: string; title: string; values: number[] }[];
 };
-export type CommitView = { value: string; pct: number; tone?: "warn" | "err"; series: (number | null)[]; peak: string | null };
+export type CommitView = { value: string; pct: number; tone?: "warn" | "err"; series: (number | null)[]; peak: string | null; note: string | null };
 export type ComputePanel =
   | { kind: "none" }
   | { kind: "waiting"; note: string }
@@ -67,16 +67,31 @@ function memoryView(l: MetricsLatest, hours: ({ hour: Date } & HourRow)[], now: 
   };
 }
 
-// Warns from 85 % (Supabase marked 89 % WARNING on 13 Nov); past 100 % the server is overcommitted.
+// Warns from 85 % (Supabase marked 89 % WARNING on 13 Nov). Owner 13 Nov (1.7.1): past 100 % alone is still a
+// warning (overcommit is normal on small instances); Critical only when the server is really short of memory: swap
+// at half the RAM or more, or RAM 95 % used. The note says which, and what helps.
+const SWAP_CRITICAL = 0.5;
+const RAM_CRITICAL = 95;
+const MEMORY_HELP = "Use the pooler (port 6543), smaller connection pools, turn off unused services (Realtime, Data API), or Restart the project.";
+
 function commitView(l: MetricsLatest, hours: ({ hour: Date } & HourRow)[], now: Date): CommitView | null {
   const c = l.commit;
   if (!c) return null;
   const series = hourSeries(hours.map((h) => ({ ...h, commitPct: h.commitPct ?? null })), "commitPct", now);
   const peaks = hourSeries(hours.map((h) => ({ ...h, commitMax: h.commitMax ?? null })), "commitMax", now);
-  return {
-    value: `${memText(c.usedB)} of ${memText(c.limitB)}`, pct: c.pct,
-    tone: c.pct >= 100 ? "err" : c.pct >= 85 ? "warn" : undefined, series, peak: peakOf(peaks),
-  };
+  const m = l.mem;
+  const swapShort = !!m && m.swapB !== null && m.totalB > 0 && m.swapB >= SWAP_CRITICAL * m.totalB;
+  const ramShort = l.memPct !== null && l.memPct >= RAM_CRITICAL;
+  let tone: CommitView["tone"] = c.pct >= 85 ? "warn" : undefined;
+  let note: string | null = c.pct >= 100 ? "Overcommitted: normal on small instances while swap stays low." : null;
+  if (swapShort && m) {
+    tone = "err";
+    note = `Swap is ${memText(m.swapB as number)} of ${memText(m.totalB)} RAM: queries slow down. ${MEMORY_HELP}`;
+  } else if (ramShort) {
+    tone = "err";
+    note = `RAM is ${Math.round(l.memPct as number)}% used: the database may restart when it runs out. ${MEMORY_HELP}`;
+  }
+  return { value: `${memText(c.usedB)} of ${memText(c.limitB)}`, pct: c.pct, tone, series, peak: peakOf(peaks), note };
 }
 
 const tone = (p: number | null, warnAt: number): Gauge["tone"] => (p === null ? undefined : p >= 95 ? "err" : p >= warnAt ? "warn" : undefined);

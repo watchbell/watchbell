@@ -2,6 +2,31 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.7.1
+
+Clearer monthly reports, and a calmer memory warning.
+
+### Reports
+
+- Page 1 explains each bad day per website ("23 Oct · Shop · could not be opened for 22 minutes in total", or "slow"),
+  days that couldn't be opened first; the incidents themselves stay on page 2. A day with a slow spell is coloured as
+  one, also when it ran past midnight.
+- The report says which time zone its times are in, how often the websites are checked (their real interval), and from
+  which day the month's uptime counts when the data starts later. The response chart has day labels and says when it
+  shows only 5 of the websites.
+- Updates are counted from the deployments Watchbell still keeps until the daily summary has caught up, so a fresh
+  install or an upgrade never shows "0 updates" for a month that had some.
+- A month whose automatic send failed gets **Send again** and **I sent it myself** (owner); either closes the
+  ReportSendFailed alert.
+- A refused download (too many, a month no longer kept, a PDF that couldn't be made) says why on the page.
+- An incident still open at the month's end is cut at midnight in your time zone.
+
+### Branding and the console
+
+- The logo is served with its version in the address and cached by the CDN, so it costs no server time per page view.
+- Supabase › Compute: Memory commitment over 100 % is a warning (normal on small instances). It is Critical only when
+  swap reaches half the RAM or RAM is 95 % used, and the card says what helps.
+
 ## 1.7.0
 
 For people who look after websites for clients: a monthly report to hand over, under your own name.

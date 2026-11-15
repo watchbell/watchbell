@@ -72,8 +72,9 @@ describe("computePanel memory and commitment", () => {
     if (p.kind !== "ok") throw new Error("ok");
     expect(p.commit).toMatchObject({ value: "1.25 GB of 1.40 GB", pct: 89.3, tone: "warn", peak: "90% peak 24 h" });
     expect(p.commit?.series[23]).toBe(89);
+    // Owner 13 Nov (1.7.1): past the limit alone is a warning; Critical comes from swap or RAM (below).
     const over = panel({ commit: { usedB: 1.5 * GB, limitB: 1.4 * GB, pct: 107.1 } });
-    expect(over.kind === "ok" && over.commit?.tone).toBe("err");
+    expect(over.kind === "ok" && over.commit?.tone).toBe("warn");
     const fine = panel({ commit: { usedB: 0.5 * GB, limitB: 1.4 * GB, pct: 35.7 } });
     expect(fine.kind === "ok" && fine.commit?.tone).toBeUndefined();
   });
@@ -131,5 +132,36 @@ describe("usagePhrases (patrol)", () => {
     const m = usagePhrases(rows, compute, now);
     expect(Object.fromEntries(m)).toEqual({ "db-a": "CPU 12 %, RAM 41 %, disk 8 %, connections 9/60", "db-b": "Compute 12 % of 100 CU-h" });
     expect(JSON.stringify(Object.fromEntries(m))).not.toMatch(/quillpad|ticketer/);
+  });
+});
+
+// Owner 13 Nov (1.7.1): "Critical" only when the server is really short of memory: swap at half the RAM or more, or
+// RAM 95 % used. Overcommitted alone is normal on small instances and says so.
+describe("memory commitment tone (1.7.1)", () => {
+  const MB = 1024 ** 2;
+  const GB = 1024 ** 3;
+  const p = (pct: number, mem: { totalB: number; usedB: number; cacheB: number; swapB: number | null }, memPct = 70) => {
+    const out = computePanel({ latest: latest({ memPct, mem, commit: { usedB: (pct / 100) * GB, limitB: GB, pct } }), lastTryAt: at(2), lastOkAt: at(2), lastError: null, hours: [] }, now);
+    return out.kind === "ok" ? out.commit : null;
+  };
+
+  it("overcommitted with little swap is a warning that says it is normal", () => {
+    expect(p(122, { totalB: GB, usedB: 500 * MB, cacheB: 200 * MB, swapB: 100 * MB })).toMatchObject({ tone: "warn", note: "Overcommitted: normal on small instances while swap stays low." });
+  });
+
+  it("swap at half the RAM or more is critical, with what to do", () => {
+    const c = p(122, { totalB: 408 * MB, usedB: 300 * MB, cacheB: 50 * MB, swapB: 349 * MB });
+    expect(c?.tone).toBe("err");
+    expect(c?.note).toMatch(/^Swap is 349 MB of 408 MB RAM: queries slow down\./);
+    for (const s of ["6543", "pool", "unused", "Restart"]) expect(c?.note).toContain(s);
+  });
+
+  it("RAM 95 % used is critical whatever the commitment", () => {
+    expect(p(60, { totalB: GB, usedB: 900 * MB, cacheB: 50 * MB, swapB: 0 }, 96)?.tone).toBe("err");
+  });
+
+  it("warns from 85 % without a note, and says nothing below", () => {
+    expect(p(89, { totalB: GB, usedB: 500 * MB, cacheB: 200 * MB, swapB: 0 })).toMatchObject({ tone: "warn", note: null });
+    expect(p(50, { totalB: GB, usedB: 500 * MB, cacheB: 200 * MB, swapB: 0 })).toMatchObject({ tone: undefined, note: null });
   });
 });

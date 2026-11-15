@@ -3,7 +3,7 @@
 import { type ReactNode, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button, Card, fieldClass } from "@/components/kit";
-import { type Brand, logoFileProblem } from "@/lib/branding";
+import { type Brand, brandIconPath, logoFileProblem } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 import { removeBrandLogo, saveBranding } from "./branding-actions";
 
@@ -82,7 +82,7 @@ export function BrandingTab({ brand }: { brand: Brand }) {
         <FormRow id="br-logo" label="Logo" help="A square PNG, at most 512 × 512 px and 256 KB." error={errors.logo}>
           <div className="flex flex-wrap items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element -- a small stored PNG, served by /brand-icon */}
-            {brand.hasLogo && <img src="/brand-icon" alt="Current logo" width={32} height={32} className="size-8 rounded-md border border-line" />}
+            {brand.hasLogo && <img src={brandIconPath(brand.logoVersion)} alt="Current logo" width={32} height={32} className="size-8 rounded-md border border-line" />}
             <input id="br-logo" name="logo" type="file" accept="image/png" className="text-[12.5px]" />
             {brand.hasLogo && <Button type="button" size="sm" onClick={removeLogo} disabled={pending}>Remove logo</Button>}
           </div>

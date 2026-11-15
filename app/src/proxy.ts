@@ -64,8 +64,9 @@ async function route(request: NextRequest) {
   // U6: the public status page (/s/) is the same: no session work, so it stays cacheable and a crawler costs no Auth call.
   // Stage 9 slice 7: the Telegram webhook authenticates by its secret header alone, same treatment.
   // Stage 9 slice 4: /api/runner/ authenticates by the VM runner's own token alone, same treatment.
+  // 1.7.1 (review M-9): /brand-icon is public and cached at the CDN; no session work, so no Set-Cookie spoils that.
   const path = request.nextUrl.pathname;
-  if (path.startsWith("/api/ping/") || path.startsWith("/api/v1/") || path.startsWith("/api/runner/") || path.startsWith("/s/") || path === "/api/telegram/webhook") return NextResponse.next({ request });
+  if (path.startsWith("/api/ping/") || path.startsWith("/api/v1/") || path.startsWith("/api/runner/") || path.startsWith("/s/") || path === "/api/telegram/webhook" || path === "/brand-icon") return NextResponse.next({ request });
   // Self-host keeps its sessions in its own database (wp_session cookie); loaded only there, so cloud never imports it.
   const { response, userId } = m === "selfhost" ? await (await import("@/lib/local-auth/proxy")).updateSessionLocal(request) : await updateSession(request);
   return gate(request, response, !!userId);

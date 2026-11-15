@@ -3,6 +3,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db/client";
 import { settings } from "@/db/schema";
 import { BRAND_SETTING, type Brand, DEFAULT_BRAND, parseBrand } from "@/lib/branding";
+import { logoVersionOf } from "@/lib/branding-version";
 
 // Watchbell 1.7: the brand (one small ops.settings row, read by the layout on each render) and its logo (a separate
 // row, read only by the icon route, the PDF and emails).
@@ -13,10 +14,10 @@ export async function readBrand(): Promise<Brand> {
   return row ? parseBrand(row.value) : { ...DEFAULT_BRAND };
 }
 
-// The logo is kept as it is (hasLogo is written with it, never by the form).
+// The logo is kept as it is (hasLogo and its version are written with it, never by the form).
 export async function saveBrand(b: Brand): Promise<void> {
   const current = await readBrand();
-  const value = { ...b, hasLogo: current.hasLogo };
+  const value = { ...b, hasLogo: current.hasLogo, logoVersion: current.logoVersion };
   await db().insert(settings).values({ key: BRAND_SETTING, value }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: new Date() } });
 }
 
@@ -36,6 +37,6 @@ export async function saveBrandLogo(bytes: Uint8Array | null): Promise<void> {
     await db().delete(settings).where(inArray(settings.key, [LOGO_SETTING]));
   }
   const b = await readBrand();
-  const value = { ...b, hasLogo: bytes !== null };
+  const value = { ...b, hasLogo: bytes !== null, logoVersion: bytes ? logoVersionOf(bytes) : null };
   await db().insert(settings).values({ key: BRAND_SETTING, value }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: now } });
 }

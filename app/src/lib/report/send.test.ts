@@ -12,7 +12,7 @@ import type { ReportRow } from "@/lib/data/report-db";
 const h = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db/client", () => ({ db: () => h.db }));
 
-import { claimSend, dueReportSends, markSend, reportMail, runReportSends, type SendIo, settleStaleClaims } from "./send";
+import { claimSend, dueReportSends, markSend, markSentByOwner, reopenFailedSend, reportMail, runReportSends, type SendIo, sendReportNow, settleStaleClaims } from "./send";
 
 const Z = "Asia/Jakarta";
 let client: PGlite;
@@ -157,5 +157,64 @@ describe("reportMail (1.7)", () => {
     expect(reportMail(row(), "2026-10", brand, made, "resend", undefined, "https://ops.example.com").html).toContain('<img src="https://monitor.studio.example/brand-icon"');
     expect(reportMail(row(), "2026-10", { ...brand, publicUrl: null }, made, "resend", undefined, "https://ops.example.com").html).toContain('<img src="https://ops.example.com/brand-icon"');
     expect(reportMail(row(), "2026-10", { ...brand, hasLogo: false }, made, "resend", undefined, "https://ops.example.com").html).not.toContain("<img");
+  });
+});
+
+// Review M-7 (1.7.1): a PDF that fails to draw says so, instead of "the report no longer exists".
+describe("runReportSends: a PDF that can't be made (1.7.1)", () => {
+  const DAY1 = new Date("2026-10-31T20:00:00Z");
+  it("says the PDF couldn't be made, whether make throws or reports it", async () => {
+    const thrown = io({ list: async () => [row()], make: async () => { throw new Error("font missing"); } });
+    await runReportSends(DAY1, thrown);
+    expect(thrown.marks[0]).toEqual(["r1", "2026-10", { status: "retry", error: "The PDF couldn't be made." }]);
+    const told = io({ list: async () => [row()], make: async () => ({ error: "render-failed" as const }) });
+    await runReportSends(DAY1, told);
+    expect(told.marks[0]).toEqual(["r1", "2026-10", { status: "retry", error: "The PDF couldn't be made." }]);
+  });
+});
+
+// Review M-11 (1.7.1): a month that failed can be sent again by the owner, or marked as sent by hand.
+describe("Send again / I sent it myself (1.7.1)", () => {
+  const T = new Date("2026-11-05T03:00:00Z");
+  const failed = async (month: string) => {
+    expect(await claimSend(reportId, month, T)).toBe(true);
+    await markSend(reportId, month, { status: "failed", error: "The mail server refused." }, T);
+  };
+  const rowOf = async (month: string) => (await (h.db as ReturnType<typeof drizzle>).select().from(reportSends).where(eq(reportSends.month, month))).find((r) => r.reportId === reportId);
+
+  it("reopens only a failed month, and two resends racing mail the client once", async () => {
+    await failed("2026-07");
+    expect(await reopenFailedSend(reportId, "2026-07")).toBe(true);
+    expect(await reopenFailedSend(reportId, "2026-07")).toBe(false);
+    const mail = vi.fn(async () => ({ ok: true as const }));
+    const x = io({ mail, claim: claimSend, mark: markSend });
+    const outs = await Promise.all([sendReportNow(row({ id: reportId }), "2026-07", T, x), sendReportNow(row({ id: reportId }), "2026-07", T, x)]);
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(outs.map((o) => o.status).sort()).toEqual(["busy", "sent"]);
+    expect(await rowOf("2026-07")).toMatchObject({ status: "sent", lastError: null });
+  });
+
+  it("a resend whose mail fails leaves the month failed with the mail's reason", async () => {
+    await failed("2026-06");
+    expect(await reopenFailedSend(reportId, "2026-06")).toBe(true);
+    const x = io({ claim: claimSend, mark: markSend, mail: async () => ({ ok: false as const, kind: "transient" as const, error: "Timed out." }) });
+    expect(await sendReportNow(row({ id: reportId }), "2026-06", T, x)).toEqual({ status: "failed", error: "Timed out." });
+    expect(await rowOf("2026-06")).toMatchObject({ status: "failed", lastError: "Timed out." });
+  });
+
+  it("marks only a failed month as sent", async () => {
+    await failed("2026-05");
+    expect(await markSentByOwner(reportId, "2026-05", T)).toBe(true);
+    expect(await rowOf("2026-05")).toMatchObject({ status: "sent", lastError: null });
+    expect(await markSentByOwner(reportId, "2026-05", T)).toBe(false);
+    expect(await markSentByOwner(reportId, "2026-04", T)).toBe(false);
+  });
+});
+
+describe("reportMail logo address (1.7.1, review M-9)", () => {
+  it("asks for the logo's version", () => {
+    const made = { bytes: new Uint8Array([1]), filename: "a.pdf" };
+    const brand = { ...DEFAULT_BRAND, hasLogo: true, logoVersion: "0123456789ab", publicUrl: "https://monitor.studio.example" };
+    expect(reportMail(row(), "2026-10", brand, made, "resend").html).toContain('<img src="https://monitor.studio.example/brand-icon?v=0123456789ab"');
   });
 });

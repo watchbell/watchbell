@@ -55,7 +55,7 @@ export default async function PublicStatusPage({ params }: Props) {
   return (
     <main className="mx-auto flex max-w-[760px] flex-col gap-4 px-4 pb-12 pt-8">
       <header className="flex items-center gap-3">
-        <BrandMark name={displayName(brand)} hasLogo={brand.hasLogo} />
+        <BrandMark name={displayName(brand)} hasLogo={brand.hasLogo} logoVersion={brand.logoVersion} />
         <div className="min-w-0">
           {brand.name && <p className="m-0 text-[12.5px] font-medium text-ink-soft">{brand.name}</p>}
           <h1 className="text-[20px]">{v.title}</h1>

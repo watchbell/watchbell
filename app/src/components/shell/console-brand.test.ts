@@ -19,3 +19,9 @@ describe("the console's brand (1.7)", () => {
       .toEqual({ title: { default: "Studio Nusa", template: "%s · Studio Nusa" }, icons: { icon: "/brand-icon" } });
   });
 });
+
+describe("the console's brand (1.7.1, review M-9)", () => {
+  it("asks for the logo's version in the sidebar", () => {
+    expect(renderToStaticMarkup(h(ConsoleBrand, { name: "Studio Nusa", hasLogo: true, logoVersion: "0123456789ab" }))).toContain('src="/brand-icon?v=0123456789ab"');
+  });
+});

@@ -91,6 +91,7 @@ function Block({ b, owner }: { b: ComputeBlock; owner: boolean }) {
                     <Sparkline values={p.commit.series} width={160} height={28} fluid label="Memory commitment, hourly average over the last 24 hours" />
                   </div>
                   <div className={faint}>{p.commit.peak ?? "24 h"} · memory promised to processes, of the limit before the kernel refuses more</div>
+                  {p.commit.note && <p className={cn("mt-1 text-[12.5px]", p.commit.tone === "err" ? "text-err" : "text-ink-soft")}>{p.commit.note}</p>}
                 </div>
               )}
             </div>

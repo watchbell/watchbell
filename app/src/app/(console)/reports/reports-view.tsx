@@ -1,14 +1,15 @@
 "use client";
 
 import { IconFileText } from "@tabler/icons-react";
-import { type ReactNode, useState, useTransition } from "react";
+import { type MouseEvent, type ReactNode, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { Button, buttonClass, Card, EmptyState, fieldClass, Tag } from "@/components/kit";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import type { ReportRow } from "@/lib/data/report-db";
 import { cn } from "@/lib/utils";
-import { deleteReportAction, saveReportContent, saveReportDelivery, sendTestReport } from "./actions";
+import { deleteReportAction, markReportSent, resendReport, saveReportContent, saveReportDelivery, sendTestReport } from "./actions";
+import { fetchReportPdf, saveBlob } from "./download";
 
 // Watchbell 1.7 (spec §2.1–2.3): one card per client report. Viewers download; operators edit what it says, send a
 // test to themselves and add reports; owners also decide who gets it, automatic sending and the sender. The list never
@@ -68,13 +69,38 @@ function ReportCard({ r, months, role, onEdit, onDelivery }: { r: ReportRow; mon
   const [pending, start] = useTransition();
   const [deleting, setDeleting] = useState(false);
   const last = lastSendText(r);
+  const [downloading, setDownloading] = useState(false);
+  const pdfUrl = `/reports/${r.id}/pdf?month=${month}&lang=${lang}`;
+  // Review M-8 (1.7.1): fetched here, so a refused download says why (the link still works without script).
+  const download = async (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault();
+    if (downloading) return;
+    setDownloading(true);
+    const res = await fetchReportPdf(pdfUrl);
+    setDownloading(false);
+    if (res.ok) saveBlob(res.blob, res.filename);
+    else toast.error(res.error);
+  };
 
   const test = () => start(async () => {
     const res = await sendTestReport(r.id, month);
     if (res.ok) toast.success(res.message ?? "Test sent.");
     else toast.error(res.error);
   });
+  const [resending, setResending] = useState(false);
+  const failedMonth = role === "owner" && r.lastSend?.status === "failed" ? r.lastSend.month : null;
+  const markSent = () => start(async () => {
+    if (!failedMonth) return;
+    const res = await markReportSent(r.id, failedMonth);
+    if (res.ok) toast.success(res.message ?? "Marked as sent.");
+    else toast.error(res.error);
+  });
   // ConfirmDialog shows the result itself.
+  const resend = async () => {
+    if (!failedMonth) return { ok: false, message: "Nothing to send again." };
+    const res = await resendReport(r.id, failedMonth);
+    return res.ok ? { ok: true, message: res.message ?? "Sent." } : { ok: false, message: res.error };
+  };
   const remove = async () => {
     const res = await deleteReportAction(r.id);
     return res.ok ? { ok: true, message: res.message ?? "Report deleted." } : { ok: false, message: res.error };
@@ -89,6 +115,12 @@ function ReportCard({ r, months, role, onEdit, onDelivery }: { r: ReportRow; mon
         <div className="text-ink-soft">
           {sendLine(r)}{last && <> · <span className={cn(r.lastSend?.status === "failed" && "text-err")}>{last}</span></>}
         </div>
+        {failedMonth && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={() => setResending(true)} disabled={pending}>Send again</Button>
+            <Button size="sm" variant="ghost" onClick={markSent} disabled={pending}>I sent it myself</Button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="Month" className={cn(fieldClass, "w-auto")} value={month} onChange={(e) => setMonth(e.target.value)}>
             {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
@@ -98,7 +130,7 @@ function ReportCard({ r, months, role, onEdit, onDelivery }: { r: ReportRow; mon
             <option value="en">English</option>
           </select>
           {month && r.sites.length > 0
-            ? <a className={buttonClass({ variant: "primary", size: "sm" })} href={`/reports/${r.id}/pdf?month=${month}&lang=${lang}`} download>Download PDF</a>
+            ? <a className={cn(buttonClass({ variant: "primary", size: "sm" }), downloading && "pointer-events-none opacity-60")} href={pdfUrl} download onClick={download} aria-busy={downloading}>{downloading ? "Making PDF…" : "Download PDF"}</a>
             : <span className="text-ink-faint">Add a website to download a PDF.</span>}
           {role !== "viewer" && <Button size="sm" onClick={test} disabled={pending || !r.sites.length}>Send test</Button>}
           {role !== "viewer" && <Button size="sm" onClick={onEdit}>Edit</Button>}
@@ -106,6 +138,10 @@ function ReportCard({ r, months, role, onEdit, onDelivery }: { r: ReportRow; mon
           {role === "owner" && <Button size="sm" variant="ghost" onClick={() => setDeleting(true)} disabled={pending}>Delete</Button>}
         </div>
       </div>
+      {failedMonth && (
+        <ConfirmDialog open={resending} onOpenChange={setResending} title={`Email the ${monthLabel(failedMonth)} report to ${r.clientName} now?`}
+          body={`It goes to the client's ${r.recipients.length} address${r.recipients.length === 1 ? "" : "es"} under Delivery, with the PDF attached.`} cta="Send again" onConfirm={resend} />
+      )}
       {role === "owner" && (
         <ConfirmDialog open={deleting} onOpenChange={setDeleting} title={`Delete the report for ${r.clientName}?`}
           body="The report and its send history go. The monitoring data stays." cta="Delete" danger onConfirm={remove} />

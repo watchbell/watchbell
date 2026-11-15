@@ -37,6 +37,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if ("error" in made) {
     if (made.error === "not-found") return plain(404, "There's no such report.");
     if (made.error === "no-sites") return plain(422, "This report has no websites. Add one on the Reports page first.");
+    if (made.error === "render-failed") return plain(500, "The PDF couldn't be made. The error is in the server log.");
     return plain(422, "That month's data is no longer kept (Settings › Retention). Pick a newer month.");
   }
   return new Response(made.bytes as Uint8Array<ArrayBuffer>, {

@@ -150,3 +150,56 @@ describe("saving a report's websites (review I-5)", () => {
     expect(await getReport(id)).toMatchObject({ clientName: "Atomic", sites: [{ displayName: "Main" }] });
   });
 });
+
+// Watchbell 1.7.1 (owner's test, T-1): before the daily job has summarised a day, its deploys are counted from the
+// deployments still kept, so a fresh install or an upgrade never prints a silent "0 updates".
+describe("readReportInput: updates before the daily summary (1.7.1)", () => {
+  const db = () => h.db as ReturnType<typeof drizzle<typeof schema>>;
+  const saved = [{ day: "2026-10-02", ok: 4, failed: 0 }, { day: "2026-10-23", ok: 1, failed: 1 }, { day: "2026-11-02", ok: 3, failed: 0 }];
+  const deploy = (n: number, state: string, at: string) => ({ resourceId: ids.app, externalId: `dpl_${n}`, state, createdAtProvider: new Date(at) });
+  const restore = async () => {
+    await db().delete(schema.deployments);
+    await db().delete(deployDays);
+    await db().insert(deployDays).values(saved.map((s) => ({ resourceId: ids.app, ...s })));
+  };
+
+  it("counts updates from deployments when the daily summary is empty", async () => {
+    try {
+      await db().delete(deployDays);
+      await db().insert(schema.deployments).values([deploy(1, "READY", "2026-10-14T03:00:00Z"), deploy(2, "READY", "2026-10-14T05:00:00Z"), deploy(3, "ERROR", "2026-10-14T06:00:00Z"), deploy(4, "BUILDING", "2026-10-14T07:00:00Z")]);
+      const r = await readReportInput(ids.report, "2026-10", NOW, Z);
+      if ("error" in r) throw new Error(r.error);
+      expect(r.deploys.find((d) => d.monitorId === ids.m1)).toMatchObject({ ok: 2, failed: 1 });
+      expect(r.dataFrom.updates).toBe("2026-10-14");
+    } finally {
+      await restore();
+    }
+  });
+
+  it("adds the days after the newest summary from deployments, without counting a summarised day twice", async () => {
+    try {
+      await db().delete(deployDays);
+      await db().insert(deployDays).values({ resourceId: ids.app, day: "2026-10-14", ok: 1, failed: 0 });
+      await db().insert(schema.deployments).values([deploy(1, "READY", "2026-10-14T03:00:00Z"), deploy(2, "READY", "2026-10-20T03:00:00Z")]);
+      const r = await readReportInput(ids.report, "2026-10", NOW, Z);
+      if ("error" in r) throw new Error(r.error);
+      expect(r.deploys.find((d) => d.monitorId === ids.m1)).toMatchObject({ ok: 2, failed: 0 });
+      expect(r.dataFrom.updates).toBe("2026-10-14");
+    } finally {
+      await restore();
+    }
+  });
+
+  it("says from when updates count even when an old live deployment is still kept (final review)", async () => {
+    try {
+      await db().delete(deployDays);
+      await db().insert(schema.deployments).values([{ ...deploy(1, "READY", "2026-06-02T03:00:00Z"), isCurrent: true }, deploy(2, "READY", "2026-10-20T03:00:00Z"), deploy(3, "READY", "2026-10-21T03:00:00Z")]);
+      const r = await readReportInput(ids.report, "2026-10", NOW, Z);
+      if ("error" in r) throw new Error(r.error);
+      expect(r.deploys.find((d) => d.monitorId === ids.m1)).toMatchObject({ ok: 2, failed: 0 });
+      expect(r.dataFrom.updates).toBe("2026-10-14"); // 30 days of deployments kept before 13 Nov
+    } finally {
+      await restore();
+    }
+  });
+});

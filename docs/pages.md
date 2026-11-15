@@ -165,7 +165,7 @@ menu reads the project's service health (Auth, REST, Realtime, Storage, Database
 **Compute** under the table, per project with a metrics key (a Secret API key the owner adds): CPU, RAM, disk and
 connections now with 24 hourly averages, then **Memory** (used, cache + buffers and swap against total RAM, hour by
 hour) and **Memory commitment** (memory promised to processes, of the limit before the kernel refuses more; Warning
-from 85 %), as Supabase's Observability › Database shows them. Read from Supabase's Metrics API with each collector
+from 85 %, Critical only when swap reaches half the RAM or RAM is 95 % used, with what helps), as Supabase's Observability › Database shows them. Read from Supabase's Metrics API with each collector
 run: every 30 minutes on the cloud console, every 5 minutes self-hosted.
 
 **Neon.** Compute state, CU-hours, storage and transfer from the Neon API. Reading them doesn't wake the compute and
@@ -294,12 +294,13 @@ with a console API key; it runs against this Watchbell with that key's scopes an
 **Status page** (owner only). Opens the Status page tab of Settings (above).
 
 **Reports** (1.7, every member). A monthly two-page PDF per client, in Indonesian or English. Page 1 is the month as a
-calendar (each day all up, slow or a short outage, or down), the bad days in plain words, and uptime, response and
-updates; page 2 has response per day, updates, alerts, your note and what the numbers mean. A report names its websites
+calendar (each day all up, slow or a short outage, or down), each bad day per website in plain words, the time zone,
+and uptime, response and updates; page 2 has response per day, updates, alerts, your note and what the numbers mean. A report names its websites
 with names you type, never an address, error text or provider. Download any month the data still covers (Settings ›
 Retention), in either language. Owners can have it emailed on the 1st with the PDF attached, to up to 5 addresses,
 through the Email (SMTP) channel or Resend; a failed send is retried on the 2nd and 3rd, then the ReportSendFailed alert
-tells you. Operators edit what a report says and send a test to themselves; viewers download.
+tells you; on that month the owner can **Send again** or mark it **I sent it myself**. Operators edit what a report
+says and send a test to themselves; viewers download.
 
 ## Pages outside the menu
 

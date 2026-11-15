@@ -3,6 +3,7 @@ import { gte, max, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { deployDays } from "@/db/report-schema";
 import { deployments } from "@/db/schema";
+import { readRetentionDays } from "@/lib/data/settings-db";
 import { timeZone } from "@/lib/time";
 import { zoneDay } from "@/lib/zone-day";
 
@@ -42,7 +43,10 @@ export async function stepDeployDays(now: Date, zone: string = timeZone()): Prom
   const read = db().select({ resourceId: deployments.resourceId, state: deployments.state, createdAtProvider: deployments.createdAtProvider }).from(deployments);
   const rows = fromDay ? await read.where(gte(deployments.createdAtProvider, new Date(Date.parse(`${fromDay}T00:00:00Z`) - DAY_MS))) : await read;
   const today = zoneDay(now, zone);
-  const days = summarizeDeploys(rows, zone).filter((r) => (!fromDay || r.day >= fromDay) && r.day <= today);
+  // Final review (1.7.1): the live and previous production deployments are never deleted, so the first run starts
+  // where the deployments table is still complete (its retention), not at the oldest deployment it happens to keep.
+  const firstKept = fromDay ? null : zoneDay(new Date(now.getTime() - (await readRetentionDays()).deployments * DAY_MS), zone);
+  const days = summarizeDeploys(rows, zone).filter((r) => (fromDay ? r.day >= fromDay : r.day >= (firstKept as string)) && r.day <= today);
   if (!days.length) return;
   await db().insert(deployDays).values(days)
     .onConflictDoUpdate({ target: [deployDays.resourceId, deployDays.day], set: { ok: sql`excluded.ok`, failed: sql`excluded.failed` } });

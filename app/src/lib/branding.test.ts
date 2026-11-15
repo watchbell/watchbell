@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { png } from "./png-fixture";
-import { brandProblems, brandStyle, logoFileProblem, contrastRatio, DEFAULT_BRAND, displayName, logoProblem, parseBrandForm, senderFrom } from "./branding";
+import { brandIconPath, brandProblems, brandStyle, consoleMetadata, logoFileProblem, contrastRatio, DEFAULT_BRAND, displayName, logoProblem, parseBrand, parseBrandForm, senderFrom } from "./branding";
+import { logoVersionOf } from "./branding-version";
 
 const studio = { name: "Studio Nusa Monitoring", accent: "#0f766e", senderName: "Studio Nusa", publicUrl: "https://monitor.studionusa.id", poweredBy: true, hasLogo: true };
 
@@ -43,7 +44,7 @@ describe("branding (1.7)", () => {
   it("reads the settings form leniently: blank fields mean the default", () => {
     expect(parseBrandForm({ name: "  ", accent: "", senderName: "", publicUrl: "", poweredBy: "on" })).toEqual({ ok: true, value: { ...DEFAULT_BRAND } });
     const r = parseBrandForm({ name: "Studio Nusa Monitoring", accent: "#0F766E", senderName: "Studio Nusa", publicUrl: "https://monitor.studionusa.id/", poweredBy: undefined });
-    expect(r).toEqual({ ok: true, value: { name: "Studio Nusa Monitoring", accent: "#0f766e", senderName: "Studio Nusa", publicUrl: "https://monitor.studionusa.id", poweredBy: false, hasLogo: false } });
+    expect(r).toEqual({ ok: true, value: { name: "Studio Nusa Monitoring", accent: "#0f766e", senderName: "Studio Nusa", publicUrl: "https://monitor.studionusa.id", poweredBy: false, hasLogo: false, logoVersion: null } });
     expect(parseBrandForm({ accent: "#fde047" })).toMatchObject({ ok: false, fieldErrors: { accent: expect.any(String) } });
   });
 });
@@ -67,5 +68,22 @@ describe("logoFileProblem (1.7)", () => {
     expect(logoFileProblem({ size: 10_000, type: "image/jpeg" })).toBe("The logo must be a PNG file.");
     expect(logoFileProblem({ size: 10_000, type: "image/png" })).toBeNull();
     expect(logoFileProblem({ size: 0, type: "" })).toBeNull(); // no file chosen
+  });
+});
+
+// Review M-9 (1.7.1): the icon's address carries the logo's version, so the CDN can keep it and a new logo shows at once.
+describe("brand icon version (1.7.1)", () => {
+  it("is the first 12 hex characters of the PNG's SHA-256", () => {
+    expect(logoVersionOf(new TextEncoder().encode("abc"))).toBe("ba7816bf8f01");
+  });
+  it("puts the version in the icon's address", () => {
+    expect(brandIconPath("0123456789ab")).toBe("/brand-icon?v=0123456789ab");
+    expect(brandIconPath(null)).toBe("/brand-icon");
+    expect(consoleMetadata({ ...DEFAULT_BRAND, name: "Studio Nusa", hasLogo: true, logoVersion: "0123456789ab" }).icons).toEqual({ icon: "/brand-icon?v=0123456789ab" });
+  });
+  it("keeps only a well-formed version from the stored row", () => {
+    expect(parseBrand({ hasLogo: true, logoVersion: "0123456789ab" }).logoVersion).toBe("0123456789ab");
+    expect(parseBrand({ hasLogo: true, logoVersion: "../x" }).logoVersion).toBeNull();
+    expect(parseBrandForm({ name: "A" }).ok && DEFAULT_BRAND.logoVersion).toBeNull();
   });
 });

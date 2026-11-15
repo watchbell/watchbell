@@ -79,3 +79,12 @@ describe("the public status page with a brand (1.7)", () => {
     expect(html).not.toContain("/brand-icon");
   });
 });
+
+describe("the public status page logo (1.7.1, review M-9)", () => {
+  it("asks for the logo's version", async () => {
+    publicView.mockResolvedValue(page([row("Shop", "ok", "Operational")]));
+    brand.value = { ...brand.value, name: "Studio Nusa", hasLogo: true, poweredBy: true, logoVersion: "0123456789ab" } as typeof brand.value;
+    expect(await render()).toContain('src="/brand-icon?v=0123456789ab"');
+    brand.value = { ...brand.value, name: null, hasLogo: false, logoVersion: null } as typeof brand.value;
+  });
+});

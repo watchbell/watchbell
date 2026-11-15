@@ -66,6 +66,13 @@ describe("proxy", () => {
     expect(h.updateSession).not.toHaveBeenCalled();
   });
 
+  it("lets the brand icon through without session work, so the CDN can keep it (1.7.1, review M-9)", async () => {
+    const res = await proxy(req("/brand-icon?v=0123456789ab"));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(h.updateSession).not.toHaveBeenCalled();
+  });
+
   it("keeps the session check next to the status page", async () => {
     for (const path of ["/s", "/sx", "/s-acme", "/settings", "/status"]) {
       const res = await proxy(req(path));

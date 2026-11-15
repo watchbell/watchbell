@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { emailBody, formatDay, formatMonth, formatPct, incidentSentence, reportText } from "./i18n";
+import { chartShownText, dayLineSentence, emailBody, formatDay, formatMonth, formatPct, incidentSentence, meaningText, reportText, zoneText } from "./i18n";
+import type { DayLine } from "./model";
 
 const Z = "Asia/Jakarta";
 
@@ -47,5 +48,39 @@ describe("report wording (1.7, Indonesian and English)", () => {
     expect(en.text.startsWith("Hi Budi,")).toBe(true);
     expect(en.html).toContain("Hi Budi,");
     expect(emailBody("en", { clientName: "<b>x</b>", month: "2026-10", opening: "<script>", brand: "B", title: null }).html).not.toMatch(/<script>|<b>x/);
+  });
+});
+
+// Watchbell 1.7.1 (review M-3, M-4, M-5).
+describe("report wording (1.7.1)", () => {
+  const line = (over: Partial<DayLine> = {}): DayLine => ({ day: "2026-10-23", site: "Toko utama", tone: "down", downMinutes: 22, slow: false, ...over });
+
+  it("explains a bad day per site in plain words", () => {
+    expect(dayLineSentence(line(), "id")).toBe("23 Okt · Toko utama · tidak bisa dibuka total 22 menit");
+    expect(dayLineSentence(line(), "en")).toBe("23 Oct · Toko utama · could not be opened for 22 minutes in total");
+    expect(dayLineSentence(line({ day: "2026-10-19", site: "rws", tone: "warn", downMinutes: 0, slow: true }), "id")).toBe("19 Okt · rws · lambat");
+    expect(dayLineSentence(line({ day: "2026-10-19", site: "rws", tone: "warn", downMinutes: 0, slow: true }), "en")).toBe("19 Oct · rws · slow");
+    expect(dayLineSentence(line({ tone: "warn", downMinutes: 3, slow: true }), "id")).toBe("23 Okt · Toko utama · lambat, tidak bisa dibuka total 3 menit");
+    expect(dayLineSentence(line({ tone: "warn", downMinutes: 1, slow: false }), "en")).toBe("23 Oct · Toko utama · could not be opened for 1 minute in total");
+  });
+
+  it("names the real check interval in what the numbers mean", () => {
+    expect(meaningText("id", [60])).toContain("tiap 1 menit");
+    expect(meaningText("en", [60])).toContain("every minute");
+    expect(meaningText("en", [300])).toContain("every 5 minutes");
+    expect(meaningText("id", [60, 300])).toContain("tiap 1–5 menit");
+    expect(meaningText("en", [30, 300])).toContain("every 30 seconds–5 minutes");
+    expect(meaningText("en", [])).not.toContain("every minute");
+  });
+
+  it("says which time zone the times are in", () => {
+    const oct = new Date("2026-10-15T00:00:00Z");
+    expect(zoneText("Asia/Jakarta", "id", oct)).toBe("Waktu dalam WIB");
+    expect(zoneText("Asia/Jakarta", "en", oct)).toBe("Times in GMT+7");
+  });
+
+  it("says when the chart leaves websites out", () => {
+    expect(chartShownText(5, 20, "id")).toBe("5 dari 20 website ditampilkan");
+    expect(chartShownText(5, 20, "en")).toBe("5 of 20 websites shown");
   });
 });

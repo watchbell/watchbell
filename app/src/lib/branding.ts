@@ -9,9 +9,14 @@ export type Brand = {
   publicUrl: string | null;
   poweredBy: boolean;
   hasLogo: boolean;
+  logoVersion?: string | null; // 1.7.1: written with the logo (lib/branding-version.ts), never by the form
 };
 
-export const DEFAULT_BRAND: Brand = { name: null, accent: null, senderName: null, publicUrl: null, poweredBy: true, hasLogo: false };
+export const DEFAULT_BRAND: Brand = { name: null, accent: null, senderName: null, publicUrl: null, poweredBy: true, hasLogo: false, logoVersion: null };
+
+// Review M-9 (1.7.1): the icon's address with the logo's version (cached for good at the CDN; a new logo, a new address).
+export const LOGO_VERSION = /^[0-9a-f]{12}$/;
+export const brandIconPath = (logoVersion: string | null | undefined): string => (logoVersion ? `/brand-icon?v=${logoVersion}` : "/brand-icon");
 
 export const BRAND_SETTING = "branding";
 export const LOGO_MAX_BYTES = 256 * 1024;
@@ -93,6 +98,7 @@ export function parseBrandForm(f: Record<string, unknown>): { ok: true; value: B
     publicUrl: url ? url.replace(/\/+$/, "") : null,
     poweredBy: f.poweredBy === "on" || f.poweredBy === true || f.poweredBy === "true",
     hasLogo: false,
+    logoVersion: null,
   };
   const fieldErrors = brandProblems(value);
   return Object.keys(fieldErrors).length ? { ok: false, fieldErrors } : { ok: true, value };
@@ -105,6 +111,7 @@ export function parseBrand(v: unknown): Brand {
   const b: Brand = {
     name: text(o.name), accent: typeof o.accent === "string" && HEX.test(o.accent) ? o.accent : null, senderName: text(o.senderName),
     publicUrl: text(o.publicUrl), poweredBy: o.poweredBy !== false, hasLogo: o.hasLogo === true,
+    logoVersion: typeof o.logoVersion === "string" && LOGO_VERSION.test(o.logoVersion) ? o.logoVersion : null,
   };
   const bad = brandProblems(b);
   for (const k of Object.keys(bad)) (b as Record<string, unknown>)[k] = null;
@@ -122,7 +129,7 @@ export function brandStyle(b: Brand): string | null {
 // layout's "Watchbell" and its icon stay.
 export function consoleMetadata(b: Brand): { title?: { default: string; template: string }; icons?: { icon: string } } {
   if (!b.name) return {};
-  return { title: { default: b.name, template: `%s · ${b.name}` }, ...(b.hasLogo ? { icons: { icon: "/brand-icon" } } : {}) };
+  return { title: { default: b.name, template: `%s · ${b.name}` }, ...(b.hasLogo ? { icons: { icon: brandIconPath(b.logoVersion) } } : {}) };
 }
 
 // Review I-7: checked in the browser before upload (the server action never sees a body over Next's 1 MB limit, so a

@@ -11,3 +11,9 @@ describe("BrandMark (1.7)", () => {
     expect(bell).not.toContain("/brand-icon");
   });
 });
+
+describe("BrandMark (1.7.1)", () => {
+  it("asks for the logo's version, so the CDN copy is the current one", () => {
+    expect(renderToStaticMarkup(h(BrandMark, { name: "Studio Nusa", hasLogo: true, logoVersion: "0123456789ab" }))).toContain('<img src="/brand-icon?v=0123456789ab"');
+  });
+});

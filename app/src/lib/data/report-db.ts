@@ -1,8 +1,9 @@
 import "server-only";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, min, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, max, min, or } from "drizzle-orm";
 import { db } from "@/db/client";
 import { deployDays, reports, reportSends, reportSites } from "@/db/report-schema";
-import { alerts, monitors, resources, rollupsHourly } from "@/db/schema";
+import { alerts, deployments, monitors, resources, rollupsHourly } from "@/db/schema";
+import { summarizeDeploys } from "@/lib/collector/deploy-days";
 import { monitorDays } from "@/lib/data/metrics-db";
 import { readRetentionDays } from "@/lib/data/settings-db";
 import type { ReportSendFact } from "@/lib/alerts/facts";
@@ -28,6 +29,7 @@ const nextMonth = (month: string) => {
   const [y, m] = month.split("-").map(Number);
   return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
 };
+const nextDay = (day: string) => new Date(Date.parse(`${day}T00:00:00Z`) + DAY_MS).toISOString().slice(0, 10);
 const prevMonth = (month: string) => {
   const [y, m] = month.split("-").map(Number);
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, "0")}`;
@@ -91,7 +93,7 @@ export async function readReportInput(id: string, month: string, now: Date, zone
   const end = zoneMidnight(`${nextMonth(month)}-01`, zone);
   const monitorIds = report.sites.map((s) => s.monitorId);
 
-  const [mons, dayCounts, hours, alertRows, deployRows, [firstDeploy]] = await Promise.all([
+  const [mons, dayCounts, hours, alertRows, summaryRows, [summary]] = await Promise.all([
     db().select({ id: monitors.id, resourceId: monitors.resourceId, intervalS: monitors.intervalS }).from(monitors).where(inArray(monitors.id, monitorIds)),
     monitorDays(monitorIds, now, zone),
     db().select({ monitorId: rollupsHourly.monitorId, hour: rollupsHourly.hour, p50: rollupsHourly.p50Ms }).from(rollupsHourly)
@@ -99,8 +101,21 @@ export async function readReportInput(id: string, month: string, now: Date, zone
     db().select({ ruleKey: alerts.ruleKey, subject: alerts.subject, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt }).from(alerts)
       .where(and(inArray(alerts.ruleKey, ["MonitorDown", "HighLatency"]), inArray(alerts.subject, monitorIds), lt(alerts.startedAt, end), or(isNull(alerts.resolvedAt), gte(alerts.resolvedAt, start)))),
     db().select().from(deployDays).where(and(gte(deployDays.day, days[0]), lte(deployDays.day, days[days.length - 1]))),
-    db().select({ day: min(deployDays.day) }).from(deployDays),
+    db().select({ first: min(deployDays.day), last: max(deployDays.day) }).from(deployDays),
   ]);
+
+  // Owner's test (1.7.1, T-1): the daily job summarises a day only after it ran; the days after its newest summary
+  // (all of them on a fresh install or right after an upgrade) are counted from the deployments still kept.
+  const after = summary?.last ? zoneMidnight(nextDay(summary.last), zone) : null;
+  const [fresh, keep] = await Promise.all([
+    after && after >= end ? [] : db().select({ resourceId: deployments.resourceId, state: deployments.state, createdAtProvider: deployments.createdAtProvider }).from(deployments)
+      .where(and(gte(deployments.createdAtProvider, after && after > start ? after : start), lt(deployments.createdAtProvider, end))),
+    readRetentionDays(),
+  ]);
+  const deployRows = [...summaryRows, ...summarizeDeploys(fresh, zone).filter((d) => d.day >= days[0] && d.day <= days[days.length - 1] && (!summary?.last || d.day > summary.last))];
+  // Final review: updates count from the summary's first day, or (none yet) from where the deployments table is still
+  // complete. Never from the oldest deployment kept: the live one is never deleted, however old.
+  const firstDeployDay = summary?.first ?? zoneDay(new Date(now.getTime() - keep.deployments * DAY_MS), zone);
 
   // Response per day: the mean of the hours' p50 in the install's zone.
   const p50 = new Map<string, Map<string, number[]>>();
@@ -146,7 +161,7 @@ export async function readReportInput(id: string, month: string, now: Date, zone
       startedAt: a.startedAt < start ? start : a.startedAt, resolvedAt: a.resolvedAt, endedBy: a.resolvedAt ? ("resolved" as const) : ("open" as const),
     })),
     deploys,
-    dataFrom: { uptime: null, updates: firstDeploy?.day && firstDeploy.day > days[0] ? firstDeploy.day : null },
+    dataFrom: { uptime: null, updates: firstDeployDay && firstDeployDay > days[0] ? firstDeployDay : null },
   };
 }
 

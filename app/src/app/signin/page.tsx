@@ -32,7 +32,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
     <main className="grid min-h-screen place-items-center px-4 py-6">
       <div className="w-[400px] max-w-full rounded-xl border border-line bg-surface p-7">
         {style && <style>{style}</style>}
-        <BrandMark name={displayName(brand)} hasLogo={brand.hasLogo} className="mb-[18px]" />
+        <BrandMark name={displayName(brand)} hasLogo={brand.hasLogo} logoVersion={brand.logoVersion} className="mb-[18px]" />
         {error && errors[error] && <div className="mb-4"><Banner tone="warning" title={errors[error]} /></div>}
         {isDemo() ? (
           <DemoSignInForm next={nextPath} />

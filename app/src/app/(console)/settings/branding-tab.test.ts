@@ -24,3 +24,9 @@ describe("BrandingTab (1.7)", () => {
     expect(out).not.toContain("Remove logo");
   });
 });
+
+describe("BrandingTab logo preview (1.7.1, review M-9)", () => {
+  it("asks for the logo's version", () => {
+    expect(renderToStaticMarkup(h(BrandingTab, { brand: { ...DEFAULT_BRAND, hasLogo: true, logoVersion: "0123456789ab" } }))).toContain('src="/brand-icon?v=0123456789ab"');
+  });
+});

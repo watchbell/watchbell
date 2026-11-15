@@ -179,7 +179,7 @@ Database) dari Management API.
 **Compute** di bawah tabel, per project yang punya metrics key (Secret API key yang ditambahkan owner): CPU, RAM, disk,
 dan koneksi saat ini beserta 24 rata-rata per jam, lalu **Memory** (used, cache + buffers, dan swap dari total RAM, per
 jam) dan **Memory commitment** (memori yang dijanjikan ke proses, dari batas sebelum kernel menolak; Warning mulai
-85 %), seperti di Observability › Database Supabase. Dibaca dari Metrics API Supabase setiap kali collector jalan: tiap
+85 %, Critical hanya kalau swap sudah setengah RAM atau RAM terpakai 95 %, beserta saran yang membantu), seperti di Observability › Database Supabase. Dibaca dari Metrics API Supabase setiap kali collector jalan: tiap
 30 menit di konsol cloud, tiap 5 menit di self-host.
 
 **Neon.** Status compute, CU-hour, storage, dan transfer dari Neon API. Membaca data itu tidak membangunkan compute dan
@@ -314,13 +314,13 @@ tersebut.
 **Status page** (khusus owner). Membuka tab Status page di Settings (di atas).
 
 **Reports** (1.7, semua member). Laporan PDF dua halaman tiap bulan per klien, dalam bahasa Indonesia atau Inggris.
-Halaman 1 berisi kalender sebulan (tiap hari normal, lambat atau gangguan singkat, atau tidak bisa dibuka), hari
-bermasalah dalam kata-kata biasa, serta uptime, response, dan update; halaman 2 berisi response per hari, update,
+Halaman 1 berisi kalender sebulan (tiap hari normal, lambat atau gangguan singkat, atau tidak bisa dibuka), tiap hari
+bermasalah per website dalam kata-kata biasa, zona waktunya, serta uptime, response, dan update; halaman 2 berisi response per hari, update,
 peringatan, catatan Anda, dan arti angka-angkanya. Website di laporan memakai nama yang Anda ketik, tidak pernah alamat,
 teks error, atau nama provider. Unduh bulan mana pun yang datanya masih disimpan (Settings › Retention), dalam kedua
 bahasa. Owner bisa mengirimnya otomatis tiap tanggal 1 dengan PDF terlampir, ke maksimal 5 alamat, lewat channel Email
-(SMTP) atau Resend; pengiriman yang gagal dicoba lagi tanggal 2 dan 3, lalu alert ReportSendFailed memberi tahu Anda.
-Operator mengubah isi laporan dan mengirim tes ke dirinya sendiri; viewer mengunduh.
+(SMTP) atau Resend; pengiriman yang gagal dicoba lagi tanggal 2 dan 3, lalu alert ReportSendFailed memberi tahu Anda;
+untuk bulan itu owner bisa **Send again** atau menandai **I sent it myself**. Operator mengubah isi laporan dan mengirim tes ke dirinya sendiri; viewer mengunduh.
 
 ## Halaman di luar menu
 

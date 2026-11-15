@@ -66,3 +66,16 @@ describe("GET /reports/[id]/pdf (1.7)", () => {
     expect(h.render).not.toHaveBeenCalled();
   });
 });
+
+// Review M-7 (1.7.1).
+describe("GET /reports/[id]/pdf when the PDF can't be drawn", () => {
+  it("answers 500 with a plain reason, and logs the error without the recipients", async () => {
+    h.render.mockRejectedValue(new Error("font missing"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await call("?month=2026-10");
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("The PDF couldn't be made. The error is in the server log.");
+    expect(err.mock.calls.join(" ")).toContain("font missing");
+    err.mockRestore();
+  });
+});

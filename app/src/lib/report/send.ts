@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, isNull, lt, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { reportSends } from "@/db/report-schema";
-import { addressOf, type Brand, mailFrom } from "@/lib/branding";
+import { addressOf, type Brand, brandIconPath, mailFrom } from "@/lib/branding";
 import { readBrand } from "@/lib/data/branding-db";
 import { readChannel } from "@/lib/data/notify-db";
 import { listReports, type ReportRow } from "@/lib/data/report-db";
@@ -92,6 +92,7 @@ const MAKE_ERROR: Record<MakeError["error"], string> = {
   "not-found": "The report no longer exists.",
   "no-sites": "The report has no websites.",
   "month-too-old": "That month's data is no longer kept.",
+  "render-failed": "The PDF couldn't be made.",
 };
 
 // The report email: subject, opening and body in the report's language, signed with the brand, Powered by when on.
@@ -106,7 +107,7 @@ export function reportMail(
   const powered = brand.poweredBy ? reportText(r.lang).poweredBy : null;
   // The address is read only when there is a logo to show.
   const base = brand.hasLogo ? (brand.publicUrl ?? siteUrl ?? serverEnv().SITE_URL).replace(/\/+$/, "") : "";
-  const logo = brand.hasLogo ? `<p><img src="${base}/brand-icon" width="40" height="40" alt="" style="border-radius:6px"></p>` : "";
+  const logo = brand.hasLogo ? `<p><img src="${base}${brandIconPath(brand.logoVersion)}" width="40" height="40" alt="" style="border-radius:6px"></p>` : "";
   return {
     sender, to, subject: body.subject, fromName: brand.senderName,
     text: powered ? `${body.text}\n--\n${powered}\n` : body.text,
@@ -130,6 +131,42 @@ const defaultIo = (): SendIo => ({
   zone: timeZone(), list: listReports, claim: claimSend, settle: settleStaleClaims, make: makeReportPdf, mail: sendReportMail, brand: readBrand, mark: markSend,
 });
 
+// One report and month: claim it, make the PDF, mail it, record the outcome. `last`: a failure is final ("failed")
+// rather than a try the next run repeats. "busy": another run holds the claim, nothing was sent.
+export async function sendReportNow(
+  r: ReportRow, month: string, now: Date, io: SendIo = defaultIo(), last = true, brand?: Brand,
+): Promise<SendOutcome | { status: "busy" }> {
+  if (!(await io.claim(r.id, month, now))) return { status: "busy" };
+  const giveUp = (error: string): SendOutcome => ({ status: last ? "failed" : "retry", error });
+  const made = await io.make(r.id, month, now, io.zone).catch((): MakeError => ({ error: "render-failed" }));
+  if ("error" in made) {
+    const o = giveUp(MAKE_ERROR[made.error]);
+    await io.mark(r.id, month, o, now);
+    return o;
+  }
+  const res = await io.mail(reportMail(r, month, brand ?? (await io.brand()), made, r.sender as "smtp" | "resend")).catch((): SendResult => ({ ok: false, kind: "transient", error: "The mail couldn't be sent." }));
+  const o: SendOutcome = res.ok ? { status: "sent" } : giveUp(res.error);
+  await io.mark(r.id, month, o, now);
+  return o;
+}
+
+// Review M-11 (1.7.1): the owner sends a month that failed again. Only a failed month reopens (its claim freed), so the
+// send then takes the claim like any run, and a run racing it can't send twice.
+export async function reopenFailedSend(reportId: string, month: string): Promise<boolean> {
+  const rows = await db().update(reportSends).set({ status: "claimed", claimedAt: null })
+    .where(and(eq(reportSends.reportId, reportId), eq(reportSends.month, month), eq(reportSends.status, "failed")))
+    .returning({ reportId: reportSends.reportId });
+  return rows.length > 0;
+}
+
+// Review M-11 (1.7.1): "I sent it myself": a failed month is marked sent, so the ReportSendFailed alert resolves.
+export async function markSentByOwner(reportId: string, month: string, now: Date): Promise<boolean> {
+  const rows = await db().update(reportSends).set({ status: "sent", sentAt: now, lastError: null, claimedAt: null })
+    .where(and(eq(reportSends.reportId, reportId), eq(reportSends.month, month), eq(reportSends.status, "failed")))
+    .returning({ reportId: reportSends.reportId });
+  return rows.length > 0;
+}
+
 // `deadline` (ms since epoch): no new report starts after it; the rest wait for the next run (review I-3).
 export async function runReportSends(now: Date, io: SendIo = defaultIo(), deadline = Number.POSITIVE_INFINITY): Promise<{ sent: number; failed: number; left: number }> {
   const { month, day, due } = dueReportSends(now, io.zone);
@@ -145,22 +182,9 @@ export async function runReportSends(now: Date, io: SendIo = defaultIo(), deadli
       out.left = list.length - i;
       break;
     }
-    if (!(await io.claim(r.id, month, now))) continue;
-    const giveUp = (error: string): SendOutcome => ({ status: day >= LAST_RETRY_DAY ? "failed" : "retry", error });
-    const made = await io.make(r.id, month, now, io.zone).catch((): MakeError => ({ error: "not-found" }));
-    if ("error" in made) {
-      await io.mark(r.id, month, giveUp(MAKE_ERROR[made.error]), now);
-      out.failed++;
-      continue;
-    }
-    const res = await io.mail(reportMail(r, month, brand, made, r.sender as "smtp" | "resend")).catch((): SendResult => ({ ok: false, kind: "transient", error: "The mail couldn't be sent." }));
-    if (res.ok) {
-      await io.mark(r.id, month, { status: "sent" }, now);
-      out.sent++;
-    } else {
-      await io.mark(r.id, month, giveUp(res.error), now);
-      out.failed++;
-    }
+    const o = await sendReportNow(r, month, now, io, day >= LAST_RETRY_DAY, brand);
+    if (o.status === "sent") out.sent++;
+    else if (o.status !== "busy") out.failed++;
   }
   return out;
 }

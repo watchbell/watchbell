@@ -32,12 +32,14 @@ export async function seedReports(ctx: SeedCtx, apps: SeededApps, uptime: Seeded
 
   const http = uptime.monitors;
   if (!http.length) return;
+  // Review M-10 (1.7.1): fixed ids and the seed's clock, so a seed always gives the same rows.
   const [kopi, north] = await db.insert(reports).values([
     {
+      id: "00000000-0000-4000-8000-0000000000a1", createdAt: now, updatedAt: now,
       clientName: "Kopi Senja", lang: "id", recipients: ["pemilik@kopi-senja.example"], autoSend: true, sender: "resend",
       note: "Gambar toko dipindah ke penyimpanan yang lebih cepat; halaman produk sekarang lebih ringan.", emailOpening: "Halo Bu Rina,",
     },
-    { clientName: "Northwind Studio", lang: "en", recipients: ["ops@northwind.example"], autoSend: false, sender: null },
+    { id: "00000000-0000-4000-8000-0000000000a2", createdAt: now, updatedAt: now, clientName: "Northwind Studio", lang: "en", recipients: ["ops@northwind.example"], autoSend: false, sender: null },
   ]).returning({ id: reports.id });
   const names = ["Toko utama", "Toko online", "Admin"];
   await db.insert(reportSites).values([

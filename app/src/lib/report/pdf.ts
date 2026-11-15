@@ -3,7 +3,7 @@ import path from "node:path";
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, type PDFFont, type PDFImage, type PDFPage, rgb } from "pdf-lib";
 import { type Brand, displayName } from "@/lib/branding";
-import { type ReportLang, formatDay, formatMonth, formatPct, incidentSentence, minutes, moreText, reportText } from "./i18n";
+import { chartShownText, dayLineSentence, formatDay, formatMonth, formatPct, incidentSentence, meaningText, minutes, moreText, type ReportLang, reportText, zoneText } from "./i18n";
 import type { DayTone, ReportModel } from "./model";
 
 // Watchbell 1.7 (spec §2.4, design C): the monthly client report as a two-page A4 PDF, drawn with pdf-lib (no browser,
@@ -172,13 +172,17 @@ function sitesTable(c: Ctx, m: ReportModel, o: RenderOptions, top: number): numb
 function pageOne(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null) {
   const t = reportText(o.lang);
   let y = header(c, o, logo, 1);
-  text(c, `${t.preparedFor} ${o.clientName} · ${m.sites.length} ${t.sites}`, M, y, { size: 9.5, color: SOFT });
+  // Review M-5: the zone every time in the report is in (its name in the middle of the month).
+  text(c, `${t.preparedFor} ${o.clientName} · ${m.sites.length} ${t.sites} · ${zoneText(o.zone, o.lang, new Date(`${m.month}-15T12:00:00Z`))}`, M, y, { size: 9.5, color: SOFT });
   y = calendar(c, m, o, y - 22);
   text(c, t.incidents, M, y, { size: 11, font: c.bold });
   y -= 16;
-  if (!m.incidents.length) y = para(c, t.noIncidents, M, y, W - 2 * M, { color: SOFT });
-  // At most 6 here (all of them on page 2), leaving room for the numbers and at least a few websites.
-  y = lines(c, m.incidents.map((l) => incidentSentence(l, o.lang, o.zone)), y, BOTTOM + 150, o.lang, 6);
+  // Review M-3: page 1 explains the coloured days (per site); the incidents themselves are listed on page 2.
+  if (!m.dayLines.length) y = para(c, t.noIncidents, M, y, W - 2 * M, { color: SOFT });
+  // At most 6 here, leaving room for the numbers and at least a few websites.
+  // Days that couldn't be opened come first, so "and N more" only ever hides the milder ones; each group by date.
+  const ordered = [...m.dayLines.filter((l) => l.tone === "down"), ...m.dayLines.filter((l) => l.tone !== "down")];
+  y = lines(c, ordered.map((l) => dayLineSentence(l, o.lang)), y, BOTTOM + 150, o.lang, 6);
   y -= 8;
   const nums: [string, string][] = [
     [t.uptime, formatPct(m.summary.uptimePct, o.lang)],
@@ -190,6 +194,8 @@ function pageOne(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null
     const x = M + i * (bw + 8);
     c.page.drawRectangle({ x, y: y - 34, width: bw, height: 42, borderColor: RULE, borderWidth: 0.8 });
     text(c, label, x + 8, y - 4, { size: 8.5, color: SOFT });
+    // Review M-6: the month's uptime only counts from the first day anything was measured.
+    if (i === 0 && m.summary.dataFrom) text(c, `${t.dataFrom} ${formatDay(m.summary.dataFrom, o.lang)}`, x + bw - 8, y - 4, { size: 7.5, color: FAINT, right: true });
     text(c, value, x + 8, y - 24, { size: 15, font: c.mono });
   });
   y -= 60;
@@ -220,12 +226,23 @@ function responseChart(c: Ctx, m: ReportModel, o: RenderOptions, top: number): n
       prev = pt;
     });
   });
+  // Owner's test (T-2): day labels, so a line that starts mid-month reads as such.
+  const n = m.days.length;
+  for (const i of [0, 7, 14, 21, n - 1]) {
+    const label = String(i + 1);
+    text(c, label, M + (n > 1 ? (i / (n - 1)) * w : 0) - c.regular.widthOfTextAtSize(label, 7.5) / 2, y0 - 10, { size: 7.5, color: FAINT });
+  }
   let x = M;
-  const ly = y0 - 14;
+  let ly = y0 - 24;
   m.responseSeries.slice(0, SERIES.length).forEach((s, si) => {
     c.page.drawRectangle({ x, y: ly + 2, width: 10, height: 2.5, color: hex(si === 0 && o.brand.accent ? o.brand.accent : SERIES[si]) });
     x += 14 + text(c, s.name, x + 14, ly, { size: 8.5, color: SOFT }) + 12;
   });
+  // Review M-4: the chart draws a few lines only; say how many of the websites it shows.
+  if (m.responseSeries.length > SERIES.length) {
+    ly -= 13;
+    text(c, chartShownText(SERIES.length, m.responseSeries.length, o.lang), M, ly, { size: 8.5, color: SOFT });
+  }
   return para(c, t.lowerIsBetter, M, ly - 14, w, { size: 8.5, color: FAINT }) - 6;
 }
 
@@ -263,7 +280,7 @@ function pageTwo(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null
   }
   y -= 8;
   text(c, t.whatNumbersMean, M, y, { size: 11, font: c.bold });
-  para(c, t.meaning, M, y - 16, W - 2 * M, { size: 9, color: SOFT });
+  para(c, meaningText(o.lang, m.intervals), M, y - 16, W - 2 * M, { size: 9, color: SOFT });
   footer(c, o);
 }
 

@@ -36,6 +36,7 @@ import { computePanel } from "@/lib/view/usage";
 import { readBrand } from "@/lib/data/branding-db";
 import { listReports } from "@/lib/data/report-db";
 import { makeReportPdf } from "@/lib/report/make";
+import { deployDays, reports, reportSends, reportSites } from "@/db/report-schema";
 import { seedDemoDb } from "./index";
 
 type Drizzle = ReturnType<typeof drizzle<typeof schema>>;
@@ -264,6 +265,11 @@ describe("demo dataset: every console section has data", () => {
       settings: await d.select().from(settings).where(sql`key <> 'advisor.latest'`).orderBy(asc(settings.key)), // the first view computes it
       proposals: rowsOf(await d.execute(sql`select * from ops.action_proposals order by id`)),
       usage: rowsOf(await d.execute(sql`select at, model, tokens_in, tokens_out, latency_ms, status from ops.ai_usage order by at, id`)),
+      // 1.7.1 (review M-10): the report rows too.
+      reports: await d.select().from(reports).orderBy(asc(reports.id)),
+      reportSites: await d.select().from(reportSites).orderBy(asc(reportSites.reportId), asc(reportSites.position)),
+      reportSends: await d.select().from(reportSends).orderBy(asc(reportSends.reportId), asc(reportSends.month)),
+      deployDays: await d.select().from(deployDays).orderBy(asc(deployDays.resourceId), asc(deployDays.day)),
     });
     expect(await dump(again)).toEqual(await dump(a));
   }, 60_000);

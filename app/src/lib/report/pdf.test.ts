@@ -75,3 +75,41 @@ describe("renderReportPdf with a busy month", () => {
     expect(all).toContain("Powered by Watchbell"); // the footer is still drawn on both pages
   });
 });
+
+// Watchbell 1.7.1 (review M-3, M-4, M-5, M-6; owner's test T-2).
+describe("renderReportPdf (1.7.1)", () => {
+  it("page 1 explains the bad days and the time zone; incidents stay on page 2", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts(), trace);
+    const all = trace.join("\n");
+    expect(all).toContain("Waktu dalam WIB");
+    expect(all).toContain("23 Okt · Toko utama · tidak bisa dibuka total 22 menit");
+    expect(trace.filter((s) => s.includes("tidak bisa dibuka selama 22 menit"))).toHaveLength(1);
+    expect(all).toContain("tiap 1 menit");
+  });
+
+  it("the uptime box says when the data starts", async () => {
+    const late = input();
+    late.sites[0] = { ...late.sites[0], firstDay: "2026-10-12", days: new Map([...late.sites[0].days].filter(([d]) => d >= "2026-10-12")) };
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(late), opts(), trace);
+    expect(trace).toContain("data mulai 12 Okt 2026");
+  });
+
+  it("labels the chart's days and says when it leaves websites out", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input(20)), opts({ lang: "en" }), trace);
+    expect(trace).toContain("5 of 20 websites shown");
+    for (const d of ["1", "8", "15", "22", "31"]) expect(trace.filter((s) => s === d).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("page 1 lists the days that couldn't be opened first, so the cap never hides them", async () => {
+    const busy = input();
+    busy.incidents = ["03", "05", "07", "11", "13", "15", "17"].map((d) => ({ monitorId: "https://kopisejahtera.id/m0", kind: "slow" as const, startedAt: new Date(`2026-10-${d}T03:00:00Z`), resolvedAt: new Date(`2026-10-${d}T03:20:00Z`), endedBy: "resolved" as const }));
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(busy), opts(), trace);
+    const i = trace.indexOf("23 Okt · Toko utama · tidak bisa dibuka total 22 menit");
+    expect(i).toBeGreaterThan(-1);
+    expect(i).toBeLessThan(trace.indexOf("3 Okt · Toko utama · lambat"));
+  });
+});

@@ -10,7 +10,7 @@ const report = { id: ID, clientName: "PT Kopi Sejahtera", title: null, lang: "id
 const h = vi.hoisted(() => ({
   requireActionMember: vi.fn(), refresh: vi.fn(), recordAction: vi.fn(), limit: vi.fn(),
   createReport: vi.fn(), updateReportContent: vi.fn(), updateReportDelivery: vi.fn(), deleteReport: vi.fn(), getReport: vi.fn(), reportMonths: vi.fn(),
-  makeReportPdf: vi.fn(), sendReportMail: vi.fn(), readBrand: vi.fn(),
+  makeReportPdf: vi.fn(), sendReportMail: vi.fn(), readBrand: vi.fn(), reopenFailedSend: vi.fn(), sendReportNow: vi.fn(), markSentByOwner: vi.fn(), markSend: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("next/cache", () => ({ refresh: h.refresh, revalidatePath: vi.fn() }));
@@ -20,11 +20,11 @@ vi.mock("@/lib/data/report-db", () => ({
   createReport: h.createReport, updateReportContent: h.updateReportContent, updateReportDelivery: h.updateReportDelivery, deleteReport: h.deleteReport, getReport: h.getReport, reportMonths: h.reportMonths,
 }));
 vi.mock("@/lib/report/make", () => ({ makeReportPdf: h.makeReportPdf }));
-vi.mock("@/lib/report/send", async (orig) => ({ ...(await orig<typeof import("@/lib/report/send")>()), sendReportMail: h.sendReportMail }));
+vi.mock("@/lib/report/send", async (orig) => ({ ...(await orig<typeof import("@/lib/report/send")>()), sendReportMail: h.sendReportMail, reopenFailedSend: h.reopenFailedSend, sendReportNow: h.sendReportNow, markSentByOwner: h.markSentByOwner, markSend: h.markSend }));
 vi.mock("@/lib/data/branding-db", () => ({ readBrand: h.readBrand }));
 vi.mock("@/lib/time", () => ({ timeZone: () => "Asia/Jakarta" }));
 
-import { deleteReportAction, saveReportContent, saveReportDelivery, sendTestReport } from "./actions";
+import { deleteReportAction, markReportSent, resendReport, saveReportContent, saveReportDelivery, sendTestReport } from "./actions";
 
 const content = { clientName: "PT Kopi Sejahtera", lang: "id", sites: [{ monitorId: M1, displayName: "Toko" }] };
 
@@ -87,5 +87,53 @@ describe("Reports actions (1.7)", () => {
   it("refuses a test for a month that isn't offered", async () => {
     expect(await sendTestReport(ID, "2025-01")).toMatchObject({ ok: false });
     expect(h.sendReportMail).not.toHaveBeenCalled();
+  });
+});
+
+// Review M-11 (1.7.1).
+describe("Send again / I sent it myself (1.7.1)", () => {
+  it("are the owner's: an operator gets the owner message", async () => {
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect((await resendReport(ID, "2026-10")).ok).toBe(false);
+    expect((await markReportSent(ID, "2026-10")).ok).toBe(false);
+    expect(h.reopenFailedSend).not.toHaveBeenCalled();
+    expect(h.markSentByOwner).not.toHaveBeenCalled();
+  });
+
+  it("Send again refuses a month that didn't fail, and sends one that did", async () => {
+    h.reopenFailedSend.mockResolvedValue(false);
+    expect(await resendReport(ID, "2026-10")).toEqual({ ok: false, error: "Only a month that failed can be sent again." });
+    expect(h.sendReportNow).not.toHaveBeenCalled();
+    h.reopenFailedSend.mockResolvedValue(true);
+    h.sendReportNow.mockResolvedValue({ status: "sent" });
+    expect(await resendReport(ID, "2026-10")).toMatchObject({ ok: true });
+    expect(h.recordAction.mock.calls.at(-1)?.[0].message).toBe("Report sent again: PT Kopi Sejahtera (2026-10)");
+    expect(JSON.stringify(h.recordAction.mock.calls)).not.toContain("kopi.example");
+  });
+
+  it("Send again says why it didn't go", async () => {
+    h.reopenFailedSend.mockResolvedValue(true);
+    h.sendReportNow.mockResolvedValue({ status: "failed", error: "Timed out." });
+    expect(await resendReport(ID, "2026-10")).toEqual({ ok: false, error: "Not sent: Timed out." });
+  });
+
+  it("I sent it myself marks a failed month and names the client in the audit line", async () => {
+    h.markSentByOwner.mockResolvedValue(true);
+    expect(await markReportSent(ID, "2026-10")).toMatchObject({ ok: true });
+    expect(h.recordAction.mock.calls.at(-1)?.[0].message).toBe("Report marked as sent: PT Kopi Sejahtera (2026-10)");
+    h.markSentByOwner.mockResolvedValue(false);
+    expect(await markReportSent(ID, "2026-10")).toEqual({ ok: false, error: "Only a month that failed can be marked as sent." });
+  });
+});
+
+// Final review: a Send again that breaks part-way never leaves the month "claimed" (the alert would close and nothing
+// would retry it): it is marked failed as "may have been sent", so the owner checks with the client.
+describe("Send again that breaks part-way (1.7.1)", () => {
+  it("marks the month failed with the unknown-outcome reason", async () => {
+    h.reopenFailedSend.mockResolvedValue(true);
+    h.sendReportNow.mockRejectedValue(new Error("connection reset"));
+    const r = await resendReport(ID, "2026-10");
+    expect(r).toEqual({ ok: false, error: "The send stopped part-way and may have been sent. Check with the client before sending it again." });
+    expect(h.markSend).toHaveBeenCalledWith(ID, "2026-10", { status: "failed", error: expect.stringMatching(/may have been sent/) }, expect.any(Date));
   });
 });

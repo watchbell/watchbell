@@ -2,7 +2,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./actions", () => ({ saveReportContent: vi.fn(), saveReportDelivery: vi.fn(), deleteReportAction: vi.fn(), sendTestReport: vi.fn() }));
+vi.mock("./actions", () => ({ saveReportContent: vi.fn(), saveReportDelivery: vi.fn(), deleteReportAction: vi.fn(), sendTestReport: vi.fn(), resendReport: vi.fn(), markReportSent: vi.fn() }));
 
 import { ReportsView } from "./reports-view";
 
@@ -43,5 +43,19 @@ describe("ReportsView (1.7)", () => {
     const out = render("owner", { reports: [] });
     expect(out).toContain("No reports yet");
     expect(out).toContain("New report");
+  });
+});
+
+// Review M-11 (1.7.1).
+describe("ReportsView: a month that failed (1.7.1)", () => {
+  const failed = { ...report, lastSend: { month: "2026-10", status: "failed" as const, sentAt: null, lastError: "The mail server refused." } };
+  it("gives the owner Send again and I sent it myself", () => {
+    const out = render("owner", { reports: [failed] });
+    expect(out).toContain("Send again");
+    expect(out).toContain("I sent it myself");
+  });
+  it("gives an operator neither, and nobody the buttons for a sent month", () => {
+    expect(render("operator", { reports: [failed] })).not.toContain("Send again");
+    expect(render("owner")).not.toContain("Send again");
   });
 });

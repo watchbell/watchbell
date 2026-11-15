@@ -1,4 +1,4 @@
-import type { IncidentLine } from "./model";
+import type { DayLine, IncidentLine } from "./model";
 
 // Watchbell 1.7 (spec §2.6): the report and its email in Indonesian or English. Fixed text shipped with Watchbell; the
 // owner types only the title, client name, note and email opening. A third language = one more object here.
@@ -24,7 +24,7 @@ const ID = {
   updatesFailed: "update gagal, versi sebelumnya tetap berjalan",
   noteFrom: "Catatan dari",
   whatNumbersMean: "Arti angka-angka ini",
-  meaning: "Uptime: bagian pemeriksaan (tiap menit, dari server pemantau) yang dijawab dengan baik. Response: seberapa cepat website mulai menjawab, diukur dari server pemantau; termasuk jaringan dan waktu server menyiapkan halaman.",
+  meaning: "Uptime: bagian pemeriksaan ({every}dari server pemantau) yang dijawab dengan baik. Response: seberapa cepat website mulai menjawab, diukur dari server pemantau; termasuk jaringan dan waktu server menyiapkan halaman.",
   dataFrom: "data mulai",
   legendOk: "semua normal",
   legendWarn: "lambat / gangguan singkat",
@@ -56,7 +56,7 @@ const EN: typeof ID = {
   updatesFailed: "update failed, the previous version stayed live",
   noteFrom: "Note from",
   whatNumbersMean: "What the numbers mean",
-  meaning: "Uptime: the share of checks (every minute, from our monitor) that got a good answer. Response: how fast a site starts answering, measured from the monitor; it includes the network and the time the server needs to prepare the page.",
+  meaning: "Uptime: the share of checks ({every}from our monitor) that got a good answer. Response: how fast a site starts answering, measured from the monitor; it includes the network and the time the server needs to prepare the page.",
   dataFrom: "data from",
   legendOk: "all up",
   legendWarn: "slow / short outage",
@@ -121,3 +121,52 @@ export function emailBody(lang: ReportLang, o: { clientName: string; month: stri
   const html = `<p>${esc(opening)}</p><p>${esc(body)}</p><p>${esc(sign).replace("\n", "<br>")}</p>`;
   return { subject: `${title} · ${month} · ${o.clientName}`, text, html };
 }
+
+// ---- 1.7.1 ----
+
+const shortDay = (day: string, lang: ReportLang) =>
+  new Intl.DateTimeFormat(locale(lang), { day: "numeric", month: "short", timeZone: "UTC" }).format(utcDay(day)).replace(/\./g, "");
+
+// Review M-3: one bad day of one site, e.g. "23 Okt · Toko utama · tidak bisa dibuka total 22 menit".
+export function dayLineSentence(l: DayLine, lang: ReportLang): string {
+  const parts: string[] = [];
+  if (l.slow) parts.push(lang === "id" ? "lambat" : "slow");
+  if (l.downMinutes > 0) parts.push(lang === "id" ? `tidak bisa dibuka total ${minutes(l.downMinutes, lang)}` : `could not be opened for ${minutes(l.downMinutes, lang)} in total`);
+  return `${shortDay(l.day, lang)} · ${l.site} · ${parts.join(", ")}`;
+}
+
+// An interval as a number and a unit: minutes when it divides evenly, seconds otherwise.
+function span(s: number, lang: ReportLang): { n: number; unit: string } {
+  if (s % 60 === 0) return { n: s / 60, unit: lang === "id" ? "menit" : "minute" };
+  return { n: s, unit: lang === "id" ? "detik" : "second" };
+}
+const plural = (unit: string, n: number, lang: ReportLang) => (lang === "en" && n !== 1 ? `${unit}s` : unit);
+
+// Review M-5: how often the report's sites are checked, from their real intervals ("tiap 1–5 menit", "every minute").
+export function everyText(intervalsS: number[], lang: ReportLang): string | null {
+  if (!intervalsS.length) return null;
+  const lo = span(Math.min(...intervalsS), lang);
+  const hi = span(Math.max(...intervalsS), lang);
+  const word = lang === "id" ? "tiap" : "every";
+  if (lo.n === hi.n && lo.unit === hi.unit) {
+    if (lang === "en" && lo.n === 1 && lo.unit === "minute") return "every minute";
+    return `${word} ${lo.n} ${plural(lo.unit, lo.n, lang)}`;
+  }
+  if (lo.unit === hi.unit) return `${word} ${lo.n}–${hi.n} ${plural(hi.unit, hi.n, lang)}`;
+  return `${word} ${lo.n} ${plural(lo.unit, lo.n, lang)}–${hi.n} ${plural(hi.unit, hi.n, lang)}`;
+}
+
+export function meaningText(lang: ReportLang, intervalsS: number[]): string {
+  const every = everyText(intervalsS, lang);
+  return reportText(lang).meaning.replace("{every}", every ? `${every}, ` : "");
+}
+
+// Review M-5: the zone the report's times are in, as the language writes it ("WIB" / "GMT+7").
+export function zoneText(zone: string, lang: ReportLang, at: Date): string {
+  const name = new Intl.DateTimeFormat(locale(lang), { timeZone: zone, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? zone;
+  return lang === "id" ? `Waktu dalam ${name}` : `Times in ${name}`;
+}
+
+// Review M-4: the response chart draws a few lines only.
+export const chartShownText = (shown: number, total: number, lang: ReportLang) =>
+  lang === "id" ? `${shown} dari ${total} website ditampilkan` : `${shown} of ${total} websites shown`;
