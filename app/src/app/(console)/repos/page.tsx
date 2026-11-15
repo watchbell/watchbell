@@ -4,6 +4,9 @@ import { buttonClass, Card, EmptyState, PageHeader } from "@/components/kit";
 import { requirePageMember } from "@/lib/auth";
 import { listRepoItems } from "@/lib/data/repos-db";
 import { RepoList } from "./repo-list";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { canAct } from "@/lib/view/labels";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // GitHub → Repositories (owner 16 Oct: "just show the projects", clickable, leading to the project). Read-only: the
 // repositories the GitHub sync stored (Connections), their linked apps, open advisories from the dependency scan and the
@@ -12,7 +15,8 @@ import { RepoList } from "./repo-list";
 export default async function ReposPage() {
   const member = await requirePageMember();
   const now = new Date();
-  const list = await listRepoItems();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
+  const list = await listRepoItems(wsc.id);
   const owner = member.role === "owner";
   return (
     <>
@@ -21,6 +25,7 @@ export default async function ReposPage() {
         title="Repositories"
         sub="The repositories the GitHub token can read. Open one for its README, files, commits and checks. Read-only."
       />
+      {canAct(member.role) && <MoveToWorkspace kind="repo" items={list.items.map((r) => ({ id: r.id, name: r.fullName }))} workspaces={wsc.list} current={wsc.id} />}
       <Card flush>
         {list.items.length === 0 ? (
           <EmptyState

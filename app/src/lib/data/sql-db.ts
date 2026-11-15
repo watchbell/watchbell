@@ -135,14 +135,15 @@ export type SqlTarget = {
 
 // Every watched Supabase and Neon database, with whether it has SQL access (no secret column is selected) and, for
 // Neon, the compute state the wake prompt uses.
-export async function sqlTargets(): Promise<SqlTarget[]> {
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function sqlTargets(ws: string | null = null): Promise<SqlTarget[]> {
   const rows = await db().select({
     id: resources.id, kind: resources.kind, data: snapshots.data, state: snapshots.state,
     role: sqlConnections.roleName, endpointId: sqlConnections.endpointId, verifiedAt: sqlConnections.verifiedAt, lastRunAt: sqlConnections.lastRunAt,
   }).from(resources)
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
     .leftJoin(sqlConnections, eq(sqlConnections.resourceId, resources.id))
-    .where(and(inArray(resources.kind, SQL_KINDS), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(inArray(resources.kind, SQL_KINDS), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .limit(200);
   const book = await aliasBook();
   return rows.filter((r) => isSqlKind(r.kind)).map((r) => {

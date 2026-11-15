@@ -19,19 +19,20 @@ export type ZoneView = { id: string; name: string; accountId?: string; accountLa
 
 const LIMIT = 200; // R8
 
-async function watchedZones() {
+async function watchedZones(ws: string | null = null) {
   return db().select({ r: resources, s: snapshots, label: accounts.label }).from(resources)
     .innerJoin(accounts, eq(accounts.id, resources.accountId))
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
-    .where(and(eq(resources.kind, "zone"), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(eq(resources.kind, "zone"), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(asc(resources.name)).limit(LIMIT);
 }
 
 // Every domain of a watched app, with the facts of the Cloudflare zone it sits in.
-export async function listDomains(): Promise<DomainView[]> {
+// 1.8: `ws` = the workspace shown (null = every workspace), for Domains and DNS records alike.
+export async function listDomains(ws: string | null = null): Promise<DomainView[]> {
   const doms = await db().select({ r: resources, s: snapshots }).from(resources)
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
-    .where(and(eq(resources.kind, "domain"), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(eq(resources.kind, "domain"), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(asc(resources.name)).limit(LIMIT);
   if (!doms.length) return [];
   const appIds = [...new Set(doms.map((d) => d.r.parentId).filter((x): x is string => !!x))];
@@ -55,12 +56,12 @@ export async function listDomains(): Promise<DomainView[]> {
   });
 }
 
-export async function listZoneOptions(): Promise<{ id: string; name: string }[]> {
-  return (await watchedZones()).map((z) => ({ id: z.r.id, name: z.r.name }));
+export async function listZoneOptions(ws: string | null = null): Promise<{ id: string; name: string }[]> {
+  return (await watchedZones(ws)).map((z) => ({ id: z.r.id, name: z.r.name }));
 }
 
-export async function getZoneView(id: string | null): Promise<ZoneView | null> {
-  const zones = await watchedZones();
+export async function getZoneView(id: string | null, ws: string | null = null): Promise<ZoneView | null> {
+  const zones = await watchedZones(ws);
   const z = (id ? zones.find((x) => x.r.id === id) : null) ?? zones[0];
   if (!z) return null;
   const facts = factsOf(z.s?.data);

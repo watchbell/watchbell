@@ -106,7 +106,7 @@ export async function listShownFiring(): Promise<FiringRow[]> {
 
 // What resolved in the last 7 days, at most 50 (S7).
 export async function listResolved(now: Date) {
-  const rows = await db().select({ id: alerts.id, ruleKey: alerts.ruleKey, severity: alerts.severity, title: alerts.title, resourceId: alerts.resourceId, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt })
+  const rows = await db().select({ id: alerts.id, ruleKey: alerts.ruleKey, subject: alerts.subject, severity: alerts.severity, title: alerts.title, resourceId: alerts.resourceId, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt })
     .from(alerts).where(and(isNotNull(alerts.resolvedAt), gte(alerts.resolvedAt, new Date(now.getTime() - 7 * 86_400_000))))
     .orderBy(desc(alerts.resolvedAt)).limit(50);
   return rows.flatMap((r) => (r.resolvedAt ? [{ ...r, resolvedAt: r.resolvedAt }] : []));

@@ -28,6 +28,9 @@ import { type ComputeBlock, ComputeCard } from "./compute-panel";
 import { CreateButton } from "@/components/create/create-dialog";
 import { PendingCreates } from "@/components/create/pending-creates";
 import { ActiveRowMenu, KeepActiveBoxes, type PauseChoice, RestoreButton } from "./row-actions";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // The SQL access dialog's automatic setup (slice 2b) runs as a server action of this page: two API calls, then up to
 // three save-time checks a few seconds apart.
@@ -37,10 +40,11 @@ const faint = "text-[12px] text-ink-faint";
 
 export default async function SupabasePage({ searchParams }: { searchParams: Promise<{ create?: string }> }) {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const { create } = await searchParams;
   const now = new Date();
   const act = canAct(member.role);
-  const [rows, inputs, book] = await Promise.all([listDatabases("supabase_project"), supabaseSlotInputs(), aliasBook()]);
+  const [rows, inputs, book] = await Promise.all([listDatabases("supabase_project", wsc.id), supabaseSlotInputs(), aliasBook()]);
   const view = supabaseRows(rows, now, book);
   const slots = slotCards(inputs);
   const storage = storageTotal(view);
@@ -72,6 +76,7 @@ export default async function SupabasePage({ searchParams }: { searchParams: Pro
         more="Database size is read once a day, and only while a project is already active. Keep active (owners, per project) warns from day 5 without API traffic and sends one keep-alive query a day. Auto-restore brings a paused project back only when its account has a free slot."
         actions={member.role === "owner" ? <><Link href="/connections" className={buttonClass()}>Manage accounts</Link><CreateButton type="supabase_project" target="" targetName="Supabase" label="New project" /></> : undefined}
       />
+      {act && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {/* Stage 6 create requests: new projects waiting for the owner's approval. */}
       <PendingCreates member={member} types={["supabase_project"]} focus={create ?? null} />
       {slots.length > 0 && (

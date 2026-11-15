@@ -14,6 +14,7 @@ import { rel } from "@/lib/view/format";
 import { FirestoreConsole, type FirestoreTarget } from "./firestore-console";
 import { SqlAccessButtons } from "./sql-access-dialog";
 import { type ConsoleTarget, SqlConsole } from "./sql-console";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // Stage 9 slice 2: Databases → SQL console (owner only). Postgres (Supabase, Neon) through the owner's read-only role,
 // and a Firestore query builder through the Firebase account's viewer service account. The page receives aliases and
@@ -29,7 +30,8 @@ export default async function SqlPage() {
   const gate = await pageGate("owner");
   if (!gate.ok) return <NoAccess role={gate.member.role} />;
   const now = new Date();
-  const [targets, fsRows, book] = await Promise.all([sqlTargets(), listDatabases("firestore"), aliasBook()]);
+  const ws = (await currentWorkspace()).id; // 1.8: the workspace shown
+  const [targets, fsRows, book] = await Promise.all([sqlTargets(ws), listDatabases("firestore", ws), aliasBook()]);
   const connected: ConsoleTarget[] = targets.filter((t) => t.connected && !t.paused).map((t) => ({ id: t.id, alias: t.alias, provider: t.provider, wake: t.wake }));
   const fs: FirestoreTarget[] = firebaseRows(fsRows, book).map((v) => ({ id: v.id, alias: v.alias, readsToday: "note" in v.ops ? null : v.ops.reads?.n ?? null }));
   return (

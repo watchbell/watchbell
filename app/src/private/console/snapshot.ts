@@ -8,6 +8,8 @@ import { aliasBook, listDatabases } from "@/lib/data/cached";
 import { listEvents } from "@/lib/data/events-db";
 import { listStoredLogs } from "@/lib/data/logs-db";
 import { listMonitors } from "@/lib/data/monitors-db";
+import { alertWorkspaceIds, listWorkspaces } from "@/lib/data/workspace-db";
+import { filterByWorkspace } from "@/lib/workspace/alerts";
 import { DB_KINDS } from "@/lib/links";
 import type { State } from "@/lib/status";
 import { type AliasBook, dbAlias, hideAlert, hideEvent, hideRec } from "@/lib/view/display-name";
@@ -29,9 +31,9 @@ export const SNAPSHOT_SECTIONS: readonly SnapshotSection[] = ["apps", "monitors"
 
 export type SnapshotMonitor = {
   app: string; path: string; kind: "http" | "heartbeat"; state: "up" | "degraded" | "down" | "paused" | "unknown";
-  lastStatus: number | null; latencyMs: number | null; uptime30d: number | null; lastCheckedAt: string | null;
+  lastStatus: number | null; latencyMs: number | null; uptime30d: number | null; lastCheckedAt: string | null; workspace?: string;
 };
-export type SnapshotAlert = { title: string; severity: string; app: string | null; since: string; message: string };
+export type SnapshotAlert = { title: string; severity: string; app: string | null; since: string; message: string; workspace?: string };
 export type SnapshotEvent = { at: string; type: string; kind: string; reason: string | null; count: number; source: string; message: string; detail: string | null };
 export type SnapshotLog = { at: string; level: string; app: string; method: string | null; path: string | null; status: number | null; message: string };
 export type SnapshotDatabase = { name: string; provider: string; state: string; since: string | null; usedBy: string[] };
@@ -47,10 +49,17 @@ const round2 = (n: number | null): number | null => (n === null ? null : Math.ro
 
 // The per-request reads. Keyed by a primitive (the instant in ms), because React's cache compares arguments by identity.
 const bookOnce = cache(() => aliasBook());
-const appsAt = cache((ms: number) => listApps(new Date(ms)));
-const monitorsAt = cache((ms: number) => listMonitors(new Date(ms)));
+// 1.8: `ws` = one workspace (?workspace= on the API), null = every workspace.
+const appsAt = cache((ms: number, ws: string | null = null) => (ws ? listApps(new Date(ms), undefined, ws) : listApps(new Date(ms))));
+const monitorsAt = cache((ms: number, ws: string | null = null) => (ws ? listMonitors(new Date(ms), ws) : listMonitors(new Date(ms))));
 // Without a turned-off section's alerts, like the bell (1.2 review minor 5).
 const firingOnce = cache(() => listShownFiring());
+// 1.8: the workspace names, only when there are several (a single-workspace install's answers don't change).
+const wsNamesOnce = cache(async (): Promise<Map<string, string>> => {
+  const list = await listWorkspaces().catch(() => []);
+  return list.length > 1 ? new Map(list.map((w) => [w.id, w.name])) : new Map();
+});
+const named = (names: Map<string, string>, id: string | null | undefined) => (id && names.has(id) ? { workspace: names.get(id) as string } : {});
 const recsAt = cache((ms: number) => listRecommendations(new Date(ms)));
 
 const APP_STATE: Partial<Record<State, SnapshotApp["state"]>> = { ok: "running", warn: "degraded", err: "down", build: "building", paused: "paused", maint: "paused" };
@@ -79,40 +88,43 @@ const monitorState = (m: { state: State; paused: boolean; ownerPaused: boolean }
 
 // ---- sections ----------------------------------------------------------------------------------------------------
 
-const appsSection = cache(async (ms: number): Promise<SnapshotApp[]> => {
+const appsSection = cache(async (ms: number, ws: string | null = null): Promise<SnapshotApp[]> => {
   const now = new Date(ms);
-  const [apps, book] = await Promise.all([appsAt(ms), bookOnce()]);
-  return apps.filter((a) => !a.gone).map((a) => toSnapApp(a, book, now));
+  const [apps, book, names] = await Promise.all([appsAt(ms, ws), bookOnce(), wsNamesOnce()]);
+  return apps.filter((a) => !a.gone).map((a) => ({ ...toSnapApp(a, book, now), ...named(names, a.workspaceId) }));
 });
-export const snapApps = (now: Date): Promise<SnapshotApp[]> => appsSection(now.getTime());
+export const snapApps = (now: Date, ws: string | null = null): Promise<SnapshotApp[]> => appsSection(now.getTime(), ws);
 
-const monitorsSection = cache(async (ms: number): Promise<ConsoleSnapshot["monitors"]> => {
-  const [rows, book] = await Promise.all([monitorsAt(ms), bookOnce()]);
+const monitorsSection = cache(async (ms: number, ws: string | null = null): Promise<ConsoleSnapshot["monitors"]> => {
+  const [rows, book, names] = await Promise.all([monitorsAt(ms, ws), bookOnce(), wsNamesOnce()]);
   const items: SnapshotMonitor[] = rows.filter((m) => !m.appGone).map((m) => ({
     app: m.appName, path: scrubText(m.path, book), kind: m.kind, state: monitorState(m), lastStatus: m.lastStatus, latencyMs: m.lastLatencyMs,
-    uptime30d: round2(m.uptime30), lastCheckedAt: m.lastCheckedAt?.toISOString() ?? null,
+    uptime30d: round2(m.uptime30), lastCheckedAt: m.lastCheckedAt?.toISOString() ?? null, ...named(names, m.workspaceId),
   }));
   const count = (s: SnapshotMonitor["state"]) => items.filter((m) => m.state === s).length;
   // The counts cover every monitor; the list only the ones that need a look (not up), to keep the answer small.
   return { up: count("up"), degraded: count("degraded"), down: count("down"), paused: count("paused"), items: items.filter((m) => m.state !== "up") };
 });
-export const snapMonitors = (now: Date): Promise<ConsoleSnapshot["monitors"]> => monitorsSection(now.getTime());
+export const snapMonitors = (now: Date, ws: string | null = null): Promise<ConsoleSnapshot["monitors"]> => monitorsSection(now.getTime(), ws);
 
-const alertsSection = cache(async (): Promise<ConsoleSnapshot["alerts"]> => {
-  const [rows, book] = await Promise.all([firingOnce(), bookOnce()]);
+const alertsSection = cache(async (ws: string | null = null): Promise<ConsoleSnapshot["alerts"]> => {
+  const [all, book, names] = await Promise.all([firingOnce(), bookOnce(), wsNamesOnce()]);
+  // 1.8: one workspace's alerts (and the install's own) when asked; each names its workspace when there are several.
+  const wsOf = ws || names.size ? await alertWorkspaceIds(all) : new Map<string, string>();
+  const rows = filterByWorkspace(all, wsOf, ws).shown;
   const items: SnapshotAlert[] = rows.slice(0, ALERT_ITEMS).map((r) => {
     const a = hideAlert(r, book);
     return {
       title: scrubText(a.title, book), severity: r.severity, app: r.resourceKind === "app" ? r.resourceName : null,
-      since: r.startedAt.toISOString(), message: scrubText(a.message, book),
+      since: r.startedAt.toISOString(), message: scrubText(a.message, book), ...named(names, wsOf.get(r.id)),
     };
   });
   return { open: rows.length, critical: rows.filter((r) => r.severity === "critical").length, items };
 });
-export const snapAlerts = (): Promise<ConsoleSnapshot["alerts"]> => alertsSection();
+export const snapAlerts = (ws: string | null = null): Promise<ConsoleSnapshot["alerts"]> => alertsSection(ws);
 
 const advisorSection = cache(async (ms: number): Promise<SnapshotAdvice[]> => {
-  const [recs, apps, book] = await Promise.all([recsAt(ms), appsAt(ms), bookOnce()]);
+  const [recs, apps, book] = await Promise.all([recsAt(ms), appsAt(ms, null), bookOnce()]);
   const nameOf = new Map(apps.map((a) => [a.id, a.name]));
   return recs.map((r: Rec) => {
     const h = hideRec(r, book);
@@ -157,12 +169,13 @@ export async function snapDatabases(): Promise<SnapshotDatabase[]> {
 
 // ---- the snapshot ------------------------------------------------------------------------------------------------
 
-export async function consoleSnapshot(now: Date, include: readonly SnapshotSection[] = SNAPSHOT_SECTIONS): Promise<ConsoleSnapshot> {
+// 1.8: `ws` = one workspace (the API's ?workspace=), null = every workspace.
+export async function consoleSnapshot(now: Date, include: readonly SnapshotSection[] = SNAPSHOT_SECTIONS, ws: string | null = null): Promise<ConsoleSnapshot> {
   const want = new Set(include);
   const [apps, monitors, alerts, advisor] = await Promise.all([
-    want.has("apps") ? snapApps(now) : Promise.resolve([]),
-    want.has("monitors") ? snapMonitors(now) : Promise.resolve({ up: 0, degraded: 0, down: 0, paused: 0 }),
-    want.has("alerts") ? snapAlerts() : Promise.resolve({ open: 0, critical: 0 }),
+    want.has("apps") ? snapApps(now, ws) : Promise.resolve([]),
+    want.has("monitors") ? snapMonitors(now, ws) : Promise.resolve({ up: 0, degraded: 0, down: 0, paused: 0 }),
+    want.has("alerts") ? snapAlerts(ws) : Promise.resolve({ open: 0, critical: 0 }),
     want.has("advisor") ? snapAdvisor(now) : Promise.resolve(undefined),
   ]);
   return { generatedAt: now.toISOString(), apps, monitors, alerts, ...(advisor ? { advisor } : {}) };
@@ -172,7 +185,7 @@ export async function consoleSnapshot(now: Date, include: readonly SnapshotSecti
 export async function resolveApp(key: string, now: Date): Promise<AppSummary | null> {
   const k = key.trim().toLowerCase();
   if (!k) return null;
-  const apps = await appsAt(now.getTime());
+  const apps = await appsAt(now.getTime(), null);
   return apps.find((a) => !a.gone && (a.id.toLowerCase() === k || a.name.toLowerCase() === k)) ?? null;
 }
 

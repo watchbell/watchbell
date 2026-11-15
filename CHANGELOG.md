@@ -2,6 +2,28 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.0
+
+Workspaces: one console for several clients, each looked at on its own.
+
+### Workspaces
+
+- A workspace is a group per client ("Kopi Senja", "Northwind", "Personal"): its apps, databases, domains, monitors,
+  alerts, deployments, events, repositories, monthly reports and status page. After the upgrade everything is in
+  **Personal** and the console looks as before. See [docs/pages.md](docs/pages.md#workspaces).
+- The sidebar header switches workspace (a per-browser choice; nothing is written to the database). **All workspaces**
+  lists each client with its worst state, so you see at a glance which one has a problem.
+- **Move to workspace…** on Applications, Uptime, Domains, the database pages and Repositories moves things with all
+  their history; a domain or a monitor moves its app. New apps, databases and domains land in the default workspace
+  and are listed as "new, not sorted" until you move them or leave them there.
+- One status page per workspace, each with its own address; reports belong to a workspace; a maintenance window can
+  quiet one workspace.
+- The bell still counts every workspace; the Alerts page shows the chosen one and says how many are open elsewhere.
+  With several workspaces, alert notices and the daily digest start with the workspace's name.
+- Everyone who can sign in sees every workspace with their usual role (workspaces group things; they don't hide
+  them). Settings › Workspaces (owner) creates, renames, orders and deletes them; deleting moves everything to the
+  default workspace.
+
 ## 1.7.1
 
 Clearer monthly reports, and a calmer memory warning.

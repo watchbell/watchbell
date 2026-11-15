@@ -3,6 +3,7 @@ import { fakeDb, limitOf } from "./fake-db";
 
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
+vi.mock("./workspace-db", () => ({ listWorkspaces: async () => [] }));
 
 import { paletteSource } from "./palette-db";
 
@@ -54,7 +55,7 @@ describe("paletteSource", () => {
 
   it("skips the monitor query when nothing is watched", async () => {
     const f = use([[]]);
-    expect(await paletteSource()).toEqual({ apps: [], monitors: [], domains: [] });
+    expect(await paletteSource()).toEqual({ apps: [], monitors: [], domains: [], workspaces: [] });
     expect(f.queries).toHaveLength(2);
   });
 

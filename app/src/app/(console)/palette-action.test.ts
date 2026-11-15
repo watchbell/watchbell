@@ -4,6 +4,7 @@ import { AuthError } from "@/lib/action";
 const h = vi.hoisted(() => ({ requireActionMember: vi.fn(), paletteSource: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("@/lib/data/palette-db", () => ({ paletteSource: h.paletteSource }));
+vi.mock("@/lib/workspace/current", () => ({ currentWorkspace: async () => ({ id: "w-kopi", list: [] }) }));
 
 import { loadPaletteSource } from "./palette-action";
 
@@ -19,6 +20,7 @@ describe("loadPaletteSource", () => {
     h.paletteSource.mockResolvedValue(src);
     expect(await loadPaletteSource()).toEqual({ ok: true, data: src });
     expect(h.requireActionMember).toHaveBeenCalledWith("viewer");
+    expect(h.paletteSource).toHaveBeenCalledWith("w-kopi"); // 1.8: the chosen workspace's apps
   });
 
   it("reads nothing for a signed-out caller", async () => {

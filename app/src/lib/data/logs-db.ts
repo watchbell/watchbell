@@ -109,10 +109,10 @@ export async function taskLogs(now: Date, deadline: number, errors: string[]): P
 
 export type LogLine = { id: string; at: Date; level: string; app: string; method: string | null; path: string | null; status: number | null; message: string };
 
-export async function listStoredLogs(now: Date, opts: { appId?: string; sinceMs?: number } = {}): Promise<LogLine[]> {
+export async function listStoredLogs(now: Date, opts: { appId?: string; sinceMs?: number; ws?: string | null } = {}): Promise<LogLine[]> {
   const since = new Date(now.getTime() - (opts.sinceMs ?? 7 * 24 * HOUR));
   const rows = await db().select({ l: storedLogs, app: resources.name }).from(storedLogs).innerJoin(resources, eq(resources.id, storedLogs.resourceId))
-    .where(and(gte(storedLogs.at, since), ...(opts.appId ? [eq(storedLogs.resourceId, opts.appId)] : [])))
+    .where(and(gte(storedLogs.at, since), ...(opts.appId ? [eq(storedLogs.resourceId, opts.appId)] : []), ...(opts.ws ? [eq(resources.workspaceId, opts.ws)] : [])))
     .orderBy(desc(storedLogs.at)).limit(500);
   return rows.map(({ l, app }) => ({ id: l.rowId, at: l.at, level: l.level, app, method: l.requestMethod, path: l.requestPath, status: l.statusCode, message: l.message })).reverse();
 }

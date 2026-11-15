@@ -8,11 +8,13 @@ import { hideEvent } from "@/lib/view/display-name";
 import { eventTime } from "@/lib/view/format";
 import { EVENT_TYPE_LABEL } from "@/lib/view/labels";
 import { EventFeed, type FeedEvent } from "./event-feed";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 export default async function EventsPage() {
   await requirePageMember();
   const now = new Date();
-  const [rows, book] = await Promise.all([listEvents(), aliasBook()]);
+  const ws = (await currentWorkspace()).id; // 1.8: the workspace shown (install events show everywhere)
+  const [rows, book] = await Promise.all([listEvents(undefined, { ws }), aliasBook()]);
   // Privacy: a database's events by its alias, no names or emails in the text, stored rows included.
   const events: FeedEvent[] = rows.map((r) => hideEvent(r, book)).map((e) => ({
     id: e.id, iso: (e.lastAt ?? e.at).toISOString(), time: eventTime(e.lastAt ?? e.at, now), kind: e.kind, type: e.type,

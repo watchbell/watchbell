@@ -1,5 +1,5 @@
 import { boolean, integer, jsonb, primaryKey, text, timestamp, uuid } from "drizzle-orm/pg-core";
-import { monitors, ops, resources } from "./schema";
+import { DEFAULT_WORKSPACE, monitors, ops, resources, workspaces } from "./schema";
 
 // Watchbell 1.7 (docs/superpowers/specs/2026-11-13-watchbell-1-7-reports-branding-design.md): the monthly client report.
 // drizzle.config.ts reads this file too; RLS, grants and value checks are in drizzle/0063_reports_lockdown.sql.
@@ -12,6 +12,8 @@ const stamps = {
 // One report = one client. Recipients and auto-send are the owner's to change; the rest operators may edit.
 export const reports = ops.table("reports", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // 1.8: the workspace (client) the report belongs to.
+  workspaceId: uuid("workspace_id").notNull().default(DEFAULT_WORKSPACE).references(() => workspaces.id),
   clientName: text("client_name").notNull(),
   title: text("title"),
   lang: text("lang").$type<"id" | "en">().notNull().default("en"),

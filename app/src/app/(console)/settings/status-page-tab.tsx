@@ -34,7 +34,8 @@ function FormRow({ id, label, help, error, children }: { id?: string; label: str
   );
 }
 
-export function StatusPageTab({ settings, siteUrl }: { settings: StatusPageSettings; siteUrl: string }) {
+// 1.8: `workspaceName` — whose page this is (one page per workspace); null with a single workspace.
+export function StatusPageTab({ settings, siteUrl, workspaceName = null }: { settings: StatusPageSettings; siteUrl: string; workspaceName?: string | null }) {
   const saved = settings.page;
   const [published, setPublished] = useState(saved?.published ?? false);
   const [slug, setSlug] = useState(saved?.slug ?? "");
@@ -74,7 +75,7 @@ export function StatusPageTab({ settings, siteUrl }: { settings: StatusPageSetti
 
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Public status page">
+      <Card title={workspaceName ? `Public status page of ${workspaceName}` : "Public status page"}>
         <FormRow
           id="sp-published"
           label="Status page"
@@ -133,7 +134,7 @@ export function StatusPageTab({ settings, siteUrl }: { settings: StatusPageSetti
                     <td className={td}>
                       <span className="inline-flex items-center gap-[7px]">
                         <ResourceBadge kind="mon" />
-                        <span><Masked kind="app" real={r.appName} /><span className="text-ink-faint">{r.kind === "heartbeat" ? ` · ${r.path}` : r.path}</span></span>
+                        <span><Masked kind="app" real={r.appName} /><span className="text-ink-faint">{r.kind === "heartbeat" ? ` · ${r.path}` : r.path}</span>{r.elsewhere && <span className="ml-1.5 text-ink-faint">(in another workspace)</span>}</span>
                         {r.kind === "heartbeat" && <Tag>Heartbeat</Tag>}
                       </span>
                     </td>

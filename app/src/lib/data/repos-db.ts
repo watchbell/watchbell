@@ -46,12 +46,13 @@ async function appsFor(repoIds: string[] | null): Promise<Map<string, LinkedApp[
 export type RepoList = { connected: boolean; items: RepoListItem[]; languageNote: string | null };
 
 // The list page: every live synced repository, newest push first.
-export async function listRepoItems(): Promise<RepoList> {
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function listRepoItems(ws: string | null = null): Promise<RepoList> {
   const account = await firstAccount();
   const rows = await db().select({
     id: githubRepos.id, accountId: githubRepos.accountId, fullName: githubRepos.fullName, private: githubRepos.private, archived: githubRepos.archived,
     defaultBranch: githubRepos.defaultBranch, pushedAt: githubRepos.pushedAt, actions: githubRepos.actions,
-  }).from(githubRepos).where(isNull(githubRepos.goneAt)).orderBy(desc(githubRepos.pushedAt)).limit(MAX_REPOS);
+  }).from(githubRepos).where(and(isNull(githubRepos.goneAt), ws ? eq(githubRepos.workspaceId, ws) : undefined)).orderBy(desc(githubRepos.pushedAt)).limit(MAX_REPOS);
   if (!rows.length) return { connected: account !== null, items: [], languageNote: null };
   const [apps, counts, scanned] = await Promise.all([
     appsFor(null),

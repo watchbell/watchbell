@@ -60,7 +60,7 @@ describe("cached readers (perf P3)", () => {
     const at = new Date("2026-10-13T01:00:00Z");
     h.listDatabases.mockResolvedValue([{ id: "d1", stateSince: at, collectedAt: null, usedBy: [] }]);
     const rows = await cached.listDatabases("neon_project");
-    expect(h.listDatabases).toHaveBeenCalledWith("neon_project");
+    expect(h.listDatabases).toHaveBeenCalledWith("neon_project", null); // 1.8: and the workspace (null = all)
     expect(rows[0].stateSince).toBeInstanceOf(Date);
     expect(rows[0].stateSince?.getTime()).toBe(at.getTime());
     expect(rows[0].collectedAt).toBeNull();
@@ -69,7 +69,7 @@ describe("cached readers (perf P3)", () => {
   it("passes the zone id through, so it is part of the cache key", async () => {
     h.getZoneView.mockResolvedValue(null);
     await cached.getZoneView("123e4567-e89b-42d3-a456-426614174000");
-    expect(h.getZoneView).toHaveBeenCalledWith("123e4567-e89b-42d3-a456-426614174000");
+    expect(h.getZoneView).toHaveBeenCalledWith("123e4567-e89b-42d3-a456-426614174000", null); // 1.8: and the workspace (null = all)
   });
 
   it("caches the stored provider rows, not the page text: 'checked 2 min ago' is worked out per request", async () => {
@@ -93,11 +93,11 @@ describe("cached readers outside cloud (selfhost runs them from its own schedule
     h.listDatabases.mockResolvedValue([{ id: "d1", stateSince: at }]);
     const rows = await cached.listDatabases("neon_project");
     expect(h.cacheCalls).toBe(0);
-    expect(h.listDatabases).toHaveBeenCalledWith("neon_project");
+    expect(h.listDatabases).toHaveBeenCalledWith("neon_project", null); // 1.8: and the workspace (null = all)
     expect(rows[0].stateSince).toBe(at);
     h.getZoneView.mockResolvedValue(null);
     await cached.getZoneView("z1");
-    expect(h.getZoneView).toHaveBeenCalledWith("z1");
+    expect(h.getZoneView).toHaveBeenCalledWith("z1", null);
     expect(h.cacheCalls).toBe(0);
   });
 });

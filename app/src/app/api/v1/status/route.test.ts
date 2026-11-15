@@ -5,6 +5,7 @@ const h = vi.hoisted(() => ({ auth: vi.fn(), snapshot: vi.fn(), appDetail: vi.fn
 vi.mock("@/private/ai/usage", () => ({ recordApiCall: h.recordApiCall }));
 vi.mock("@/private/auth/api-key", () => ({ authenticateApiKey: h.auth }));
 vi.mock("@/private/console/snapshot", () => ({ consoleSnapshot: h.snapshot, appDetail: h.appDetail }));
+vi.mock("@/lib/data/workspace-db", () => ({ listWorkspaces: async () => [{ id: "00000000-0000-4000-8000-0000000000a1", name: "Kopi Senja", position: 0 }] }));
 
 import { GET } from "./route";
 import { GET as GET_APP } from "./apps/[app]/route";
@@ -40,13 +41,13 @@ describe("GET /api/v1/status", () => {
     expect(r.headers.get("cache-control")).toBe("no-store");
     const body = await r.json();
     expect(Object.keys(body)).toEqual(["generatedAt", "apps", "monitors", "alerts", "advisor"]);
-    expect(h.snapshot).toHaveBeenCalledWith(expect.any(Date), ["apps", "monitors", "alerts", "advisor"]);
+    expect(h.snapshot).toHaveBeenCalledWith(expect.any(Date), ["apps", "monitors", "alerts", "advisor"], null); // 1.8: every workspace
   });
 
   it("returns only the sections in include", async () => {
     const r = await GET(req("?include=alerts,apps"));
     expect(Object.keys(await r.json())).toEqual(["generatedAt", "apps", "alerts"]);
-    expect(h.snapshot).toHaveBeenCalledWith(expect.any(Date), ["apps", "alerts"]);
+    expect(h.snapshot).toHaveBeenCalledWith(expect.any(Date), ["apps", "alerts"], null);
   });
 
   it("rejects an unknown section with 400 and reads nothing", async () => {
@@ -108,5 +109,18 @@ describe("usage recording (stage 5c: Agents and Logs count REST calls)", () => {
     h.auth.mockResolvedValue({ ok: false, response: apiError("invalid_api_key", "no", 401) });
     await GET(req());
     expect(h.recordApiCall).not.toHaveBeenCalled();
+  });
+});
+
+// Watchbell 1.8 (spec §5, API): ?workspace=<id> narrows the answer to one workspace; no parameter, every workspace.
+describe("GET /api/v1/status?workspace=", () => {
+  it("reads one workspace, every one without the parameter, and refuses an unknown one", async () => {
+    expect((await GET(req("?workspace=00000000-0000-4000-8000-0000000000a1"))).status).toBe(200);
+    expect(h.snapshot.mock.calls[0][2]).toBe("00000000-0000-4000-8000-0000000000a1");
+    await GET(req());
+    expect(h.snapshot.mock.calls[1][2] ?? null).toBeNull();
+    const bad = await GET(req("?workspace=nope"));
+    expect(bad.status).toBe(400);
+    expect(JSON.stringify(await bad.json())).toContain("unknown workspace");
   });
 });

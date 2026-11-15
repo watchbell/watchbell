@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import { HourBars, Sparkline, UptimeBars } from "@/components/charts";
 import { NoDeployments, NoMonitors } from "@/components/empty-states";
 import { Banner, Card, PageHeader } from "@/components/kit";
+import { WorkspaceChip } from "@/components/workspace-chip";
+import { currentWorkspace } from "@/lib/workspace/current";
 import { AutoRefresh } from "@/components/live";
 import { Masked } from "@/components/alias";
 import { Recommendations } from "@/components/recommendations";
@@ -86,7 +88,7 @@ export default async function AppPage({ params, searchParams }: { params: Promis
   // for an id that isn't a watched app the extra reads come back empty and the page is a 404 as before.
   // The Advisor's items for this app (a side card: left out if its row can't be read). Started with the reads below.
   const recsRead = listRecommendations(now, id).catch(() => null);
-  const [app, metrics, deploys, prodDeploys, eol, domains, options, book, repoView, depsView, offSections] = await Promise.all([
+  const [app, metrics, deploys, prodDeploys, eol, domains, options, book, repoView, depsView, offSections, wsChoice] = await Promise.all([
     getApp(id, now),
     appMetrics(id, now),
     listDeployments({ appId: id }),
@@ -101,6 +103,7 @@ export default async function AppPage({ params, searchParams }: { params: Promis
     appDepsView(id).catch(() => null),
     // DevOps off: no GitHub reads, so the Dependencies card says why it isn't scanned (cached with the layout's read).
     pausedSections(),
+    currentWorkspace(), // 1.8: the app's workspace, named next to the title
   ]);
   if (!app) notFound();
   const stored = await recsRead;
@@ -141,7 +144,7 @@ export default async function AppPage({ params, searchParams }: { params: Promis
       <AutoRefresh at={now.getTime()} />
       <PageHeader
         crumbs={[{ label: "Applications", href: "/apps" }, { label: app.name }]}
-        badge={<ResourceBadge kind="app" />}
+        badge={<><ResourceBadge kind="app" /><WorkspaceChip name={wsChoice.list.length > 1 ? (wsChoice.list.find((w) => w.id === app.workspaceId)?.name ?? null) : null} /></>}
         title={app.name}
         actions={<><WhyStatus state={s.state} label={s.label} problems={problems} nowMs={now.getTime()} aiSlot={whyAi} />{openIn.length > 0 && <RowMenu button label="Open in" items={openIn.map((x) => (x === "---" ? x : { label: x.label, href: x.href }))} />}{act && <AppActions app={{ id: app.id, name: app.name, siteUrl, paused, monitorCount: app.monitors.length }} owner={member.role === "owner"} current={refOf(targets.currentId)} previous={refOf(targets.previousId)} rolledBack={staged !== null} />}</>}
       />

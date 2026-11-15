@@ -1,5 +1,5 @@
 import "server-only";
-import { desc, eq, ne, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { events, resources } from "@/db/schema";
 import { eventSource } from "@/lib/events/reasons";
@@ -19,10 +19,11 @@ const latest = sql`coalesce(${events.lastAt}, ${events.at})`;
 // collector's own (system) or the console's.
 // `excludeActions` leaves out what the owner did in the console (Refresh now, Check now): Overview's few recent events
 // are for changes the collector noticed, and the Events page shows both (M4).
-export async function listEvents(limit: number = PAGE_ROWS.events, opts: { excludeActions?: boolean } = {}): Promise<EventRow[]> {
+// 1.8: opts.ws = the workspace shown; an event about no resource (the install's own) shows in every workspace.
+export async function listEvents(limit: number = PAGE_ROWS.events, opts: { excludeActions?: boolean; ws?: string | null } = {}): Promise<EventRow[]> {
   const rows = await db().select({ e: events, name: resources.name }).from(events)
     .leftJoin(resources, eq(resources.id, events.resourceId))
-    .where(opts.excludeActions ? ne(events.type, "action") : undefined)
+    .where(and(opts.excludeActions ? ne(events.type, "action") : undefined, opts.ws ? or(isNull(events.resourceId), eq(resources.workspaceId, opts.ws)) : undefined))
     .orderBy(desc(latest)).limit(clampLimit(limit));
   return rows.map(({ e, name }) => ({
     id: e.id, at: e.at, lastAt: e.lastAt ?? null, count: e.count ?? 1, reason: e.reason ?? null, type: e.type, kind: e.kind,

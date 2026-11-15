@@ -203,3 +203,18 @@ describe("readReportInput: updates before the daily summary (1.7.1)", () => {
     }
   });
 });
+
+// Watchbell 1.8 (spec §5): reports belong to a workspace; the page lists the workspace's, a new one lands in it, and
+// its website picker lists the workspace's monitors. The monthly send still reads every report.
+describe("reports per workspace (1.8)", () => {
+  const db = () => h.db as ReturnType<typeof drizzle<typeof schema>>;
+  it("lists, creates and picks per workspace", async () => {
+    const [w] = await db().insert(schema.workspaces).values({ name: "Report Client", position: 9 }).returning();
+    const id = await createReport({ clientName: "Client X", title: null, lang: "en", note: null, emailOpening: null, sites: [{ monitorId: ids.m1, displayName: "Shop", position: 0 }] }, w.id);
+    expect((await listReports(w.id)).map((r) => r.id)).toEqual([id]);
+    expect((await listReports(null)).length).toBeGreaterThan(1);
+    expect((await listReports()).some((r) => r.id === id)).toBe(true);
+    expect(await reportMonitorOptions(w.id)).toEqual([]);
+    expect((await reportMonitorOptions(null)).length).toBeGreaterThan(0);
+  });
+});

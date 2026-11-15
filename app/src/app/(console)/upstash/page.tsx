@@ -6,12 +6,17 @@ import { AutoRefresh } from "@/components/live";
 import { requirePageMember } from "@/lib/auth";
 import { aliasBook, listDatabases } from "@/lib/data/cached";
 import { upstashViews } from "@/lib/view/extra-dbs";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { canAct } from "@/lib/view/labels";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Stage 8: watched Upstash Redis databases, read hourly from the Upstash Developer API (lib/collector/extra-db-tasks.ts).
 export default async function UpstashPage() {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const now = new Date();
-  const [rows, book] = await Promise.all([listDatabases("upstash_redis"), aliasBook()]);
+  const [rows, book] = await Promise.all([listDatabases("upstash_redis", wsc.id), aliasBook()]);
   const views = upstashViews(rows, now, book);
   return (
     <>
@@ -22,6 +27,7 @@ export default async function UpstashPage() {
         sub="Region, commands and bandwidth this month and data size from the Upstash Developer API, read hourly with a read-only key. Watchbell never connects to Redis itself."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}
       />
+      {canAct(member.role) && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {views.some((v) => v.stale) && (
         <Banner tone="info" title="Upstash API isn't responding">Showing the last data we got. The collector retries every hour.</Banner>
       )}

@@ -18,6 +18,7 @@ import { sectionState } from "@/lib/data/sections-db";
 import { isDemo, mode } from "@/lib/mode";
 import { timeZone } from "@/lib/time";
 import { EMPTY_BOOK, SHOT_COOKIE } from "@/lib/view/display-name";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // Watchbell 1.7: the browser tab names the brand (nothing changes without one).
 export async function generateMetadata(): Promise<Metadata> {
@@ -35,12 +36,14 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // Screenshot mode is a per-browser cookie (components/alias.tsx), read here so the page is masked from the first paint.
   // Watchbell 1.2: the sections that are on (lib/sections.ts); unreadable means every section, so nothing disappears.
   // 1.2.3: self-hosted, the owner sees a newer npm version or What's new after an update (null otherwise).
-  const [last, staleMs, alerts, book, jar, sections, notice, brand] = await Promise.all([
+  const [last, staleMs, alerts, book, jar, sections, notice, brand, ws] = await Promise.all([
     lastCollectorRunAt().catch(() => null), collectorStaleLimit().catch(() => undefined), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies(),
     sectionState().then((s) => s.on).catch(() => undefined),
     member.role === "owner" ? readUpdateNotice().catch(() => null) : null,
     // Watchbell 1.7: the owner's brand (Settings › Branding) in the sidebar and the accent colour.
     readBrand().catch(() => DEFAULT_BRAND),
+    // Watchbell 1.8: the workspace shown (a cookie) and the list for the switcher; the pages share this read.
+    currentWorkspace().catch(() => ({ id: null, list: [] })),
   ]);
   const style = brandStyle(brand);
   const shot = jar.get(SHOT_COOKIE)?.value === "1";
@@ -53,7 +56,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
     <>
       <TimeZoneSync zone={timeZone()} />
       {style && <style>{style}</style>}
-      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())} brand={{ name: displayName(brand), hasLogo: brand.hasLogo, logoVersion: brand.logoVersion ?? null }}><UpdateBanner notice={notice} />{children}</Shell>
+      <Shell user={user} collector={{ lastRunAt: last?.toISOString() ?? null, now: now.getTime(), demo: isDemo(), staleMs }} alerts={alerts} book={book} shot={shot} ext={ext} sections={sections} selfhost={mode() !== "cloud"} version={consoleVersion(runningVersion(), outboundLinks())} brand={{ name: displayName(brand), hasLogo: brand.hasLogo, logoVersion: brand.logoVersion ?? null }} workspace={{ list: ws.list.map((w) => ({ id: w.id, name: w.name })), current: ws.id }}><UpdateBanner notice={notice} />{children}</Shell>
     </>
   );
 }

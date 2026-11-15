@@ -3,6 +3,7 @@ import { recordApiCall } from "@/private/ai/usage";
 import { authenticateApiKey } from "@/private/auth/api-key";
 import { parseInclude, selectSections } from "@/private/console/include";
 import { consoleSnapshot } from "@/private/console/snapshot";
+import { listWorkspaces } from "@/lib/data/workspace-db";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
@@ -19,11 +20,15 @@ export async function GET(req: Request): Promise<Response> {
 }
 
 async function answer(req: Request): Promise<Response> {
-  const parsed = parseInclude(new URL(req.url).searchParams.get("include"));
+  const params = new URL(req.url).searchParams;
+  const parsed = parseInclude(params.get("include"));
   if (!parsed.ok) return apiError("invalid_request", parsed.error, 400);
   try {
+    // 1.8: ?workspace=<id> narrows the answer to one workspace (Settings › Workspaces lists the ids); absent, every one.
+    const ws = params.get("workspace");
+    if (ws !== null && !(await listWorkspaces()).some((w) => w.id === ws)) return apiError("invalid_request", "unknown workspace", 400);
     const now = new Date();
-    return apiJson(selectSections(await consoleSnapshot(now, parsed.include), parsed.include));
+    return apiJson(selectSections(await consoleSnapshot(now, parsed.include, ws), parsed.include));
   } catch (e) {
     console.warn("status failed:", e instanceof Error ? e.name : "error");
     return apiError("upstream_error", "The console couldn't read its data. Try again.", 502);

@@ -81,6 +81,19 @@ export async function taskCloudflare(now: Date, deadline: number, errors: string
   }
 }
 
+// Watchbell 1.8 (spec §5): an app's domain is in the app's workspace, inserted there and following it when the domain
+// moves to another app. The only collector write of workspace_id (lib/workspace/landing.test.ts).
+type DomainApp = { id: string; externalId: string; workspaceId: string };
+export function domainInsert(app: DomainApp, d: { name: string; redirect: string | null; verified: boolean }, accountId: string, now: Date) {
+  return {
+    accountId, kind: "domain" as const, externalId: d.name, name: d.name, parentId: app.id, monitored: true, workspaceId: app.workspaceId,
+    meta: { redirect: d.redirect, verified: d.verified, projectId: app.externalId }, lastSeenAt: now,
+  };
+}
+export function domainConflictSet(app: DomainApp, now: Date) {
+  return { parentId: app.id, workspaceId: app.workspaceId, monitored: true, goneAt: null, lastSeenAt: now, updatedAt: now, meta: sqlExcludedMeta };
+}
+
 export async function taskDomains(now: Date, deadline: number, errors: string[]): Promise<void> {
   for (const { acc, token } of await tokensFor("vercel")) {
     if (!token) continue; // taskVercel already reports an unreadable Vercel credential every minute
@@ -107,12 +120,9 @@ export async function taskDomains(now: Date, deadline: number, errors: string[])
       await saveAppDomains(app.id, app.name, app.meta, list.data);
       const keep = list.data.filter((d) => !d.gitBranch); // preview-branch domains aren't production
       const rows = keep.length
-        ? await db().insert(resources).values(keep.map((d) => ({
-          accountId: acc.id, kind: "domain" as const, externalId: d.name, name: d.name, parentId: app.id, monitored: true,
-          meta: { redirect: d.redirect, verified: d.verified, projectId: app.externalId }, lastSeenAt: now,
-        }))).onConflictDoUpdate({
+        ? await db().insert(resources).values(keep.map((d) => domainInsert(app, d, acc.id, now))).onConflictDoUpdate({
           target: [resources.accountId, resources.kind, resources.externalId],
-          set: { parentId: app.id, monitored: true, goneAt: null, lastSeenAt: now, updatedAt: now, meta: sqlExcludedMeta },
+          set: domainConflictSet(app, now),
         }).returning({ id: resources.id, name: resources.name })
         : [];
       await db().update(resources).set({ goneAt: now, updatedAt: now }).where(and(

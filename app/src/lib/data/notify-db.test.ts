@@ -20,6 +20,9 @@ vi.mock("@/lib/notify/resend", () => ({ sendEmail: h.sendEmail }));
 vi.mock("./alerts-db", () => ({ readMessageTemplates: h.readTemplates }));
 // Watchbell 1.7: the brand names the sender (its own reader, so no queued read either).
 const brand = vi.hoisted(() => ({ senderName: null as string | null, publicUrl: null as string | null }));
+// 1.8: one workspace unless a test says otherwise (then alert titles carry "[<workspace>] ").
+const ws = vi.hoisted(() => ({ names: new Map<string, string>(), count: 1 }));
+vi.mock("./workspace-db", () => ({ alertWorkspaceNames: async () => ({ count: ws.count, nameOf: ws.names }) }));
 vi.mock("./branding-db", () => ({ readBrand: async () => ({ name: null, accent: null, senderName: brand.senderName, publicUrl: brand.publicUrl, poweredBy: true, hasLogo: false }) }));
 
 import { deliverPending, digestData, rememberTelegramThread, sendRuleTest, sendTest, taskDigest, TELEGRAM_THREADS_KEY, telegramThread, THREAD_KEEP_MS } from "./notify-db";
@@ -42,6 +45,8 @@ const deadline = () => Date.now() + 20_000;
 const alertWrites = (f: ReturnType<typeof use>) => f.writes.filter((w) => w.table === alerts);
 
 beforeEach(() => {
+  ws.names = new Map();
+  ws.count = 1;
   h.current = null;
   sec.paused = new Set();
   h.readAliasBook.mockReset();
@@ -111,6 +116,22 @@ describe("notifications never name a database or show an email (privacy)", () =>
     const d = await digestData(NOW);
     expect(d.firing.map((a) => [a.title, a.message])).toEqual([["db-b", "Supabase project db-b is paused."]]);
     expect(d.resolved.map((r) => r.title)).toEqual(["db-a"]);
+  });
+
+  it("the digest names each alert's workspace when there are several (1.8)", async () => {
+    const answer = (calls: { method: string; args: unknown[] }[]) => {
+      if (calls.find((c) => c.method === "from")?.args[0] !== alerts) return [];
+      const cols = Object.keys((calls.find((c) => c.method === "select")?.args[0] ?? {}) as object);
+      if (cols.includes("message")) return [{ id: "f1", ruleKey: "MonitorDown", subject: "m", severity: "critical", title: "shop /", message: "HTTP 502", resourceId: "app1", startedAt: NOW }];
+      if (cols.includes("resolvedAt")) return [{ id: "r1", ruleKey: "MonitorDown", subject: "m", title: "blog /", resourceId: "app2", startedAt: NOW, resolvedAt: NOW }];
+      return [{ n: 1 }];
+    };
+    h.current = fakeDb(Array.from({ length: 10 }, () => answer));
+    ws.count = 2;
+    ws.names = new Map([["f1", "Kopi Senja"], ["r1", "Northwind"]]);
+    const d = await digestData(NOW);
+    expect(d.firing.map((a) => a.title)).toEqual(["[Kopi Senja] shop /"]);
+    expect(d.resolved.map((r) => r.title)).toEqual(["[Northwind] blog /"]);
   });
 });
 
@@ -605,5 +626,23 @@ describe("email subject (1.2.3)", () => {
     const body = mailBody(text);
     expect(body).toBe("Watchbell: 1 aktif · 17:16 WIB\n\nMUNCUL · info · Test · Pesan tes\nKalau pesan ini kebaca, alert udah nyampe ke sini.\nkarena DatabasePaused · db-a and ops_app\n\nhttps://ops.example.com/alerts");
     expect(body.match(/https:\/\//g)).toHaveLength(1);
+  });
+});
+
+// Watchbell 1.8 (spec §5): with several workspaces, a notice names the alert's workspace; with one, nothing changes.
+describe("deliverPending with workspaces (1.8)", () => {
+  it("starts the title with [<workspace>] when there are several, and leaves it alone with one", async () => {
+    use([[{ a: alert({ id: "w1", resourceId: "app1" }), channels: ["telegram"] }]]);
+    ws.count = 2;
+    ws.names = new Map([["w1", "Kopi Senja"]]);
+    const send = vi.fn().mockResolvedValue(ok);
+    await deliverPending(NOW, deadline(), { sender: { send, configured: new Set(["telegram"]) } });
+    expect(send.mock.calls[0][1]).toContain("[Kopi Senja] orbit-blog /");
+
+    use([[{ a: alert({ id: "w2", resourceId: "app1" }), channels: ["telegram"] }]]);
+    ws.count = 1;
+    const again = vi.fn().mockResolvedValue(ok);
+    await deliverPending(NOW, deadline(), { sender: { send: again, configured: new Set(["telegram"]) } });
+    expect(again.mock.calls[0][1]).not.toContain("[");
   });
 });

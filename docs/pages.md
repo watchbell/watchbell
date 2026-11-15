@@ -25,6 +25,7 @@ touched for 30 minutes refreshes every 4 minutes at most.
 - [Database](#database)
 - [DevOps](#devops)
 - [Manage](#manage)
+- [Workspaces](#workspaces)
 - [Pages outside the menu](#pages-outside-the-menu)
 
 ## Home
@@ -301,6 +302,32 @@ Retention), in either language. Owners can have it emailed on the 1st with the P
 through the Email (SMTP) channel or Resend; a failed send is retried on the 2nd and 3rd, then the ReportSendFailed alert
 tells you; on that month the owner can **Send again** or mark it **I sent it myself**. Operators edit what a report
 says and send a test to themselves; viewers download.
+
+## Workspaces
+
+A workspace groups one client's things: apps, databases, domains, monitors (with their checks, uptime and alerts),
+deployments, events, repositories, monthly reports and the status page. An install starts with one, **Personal**;
+nothing changes until you add another (Settings › Workspaces, owner).
+
+- **Switching.** The sidebar header names the workspace shown; open it to pick another or **All workspaces**. The choice
+  is kept per browser. The pages about apps, databases and alerts show the chosen workspace; Connections, Settings,
+  members, Backups and the machine pages stay the install's.
+- **All workspaces** (`/workspaces`): each workspace with its worst state, apps, monitors down, open alerts and last
+  deploy; **Open** switches to it. Alerts about the install itself (the collector, backups, this machine) are named once
+  at the top.
+- **Moving.** **Move to workspace…** on Applications, Uptime, Domains, the database pages and Repositories (operators
+  and owners). An app moves with its domains, monitors and history; a domain or monitor moves its app; a repository
+  linked to the app follows unless an app in another workspace uses it too.
+- **New things** land in the default workspace (Settings › Workspaces). Those first seen in the last 14 days are listed
+  as "new, not sorted" on Overview, Applications and All workspaces until moved or left where they are.
+- **Status page and reports.** One status page per workspace, each at its own `/s/<address>`; Settings › Status page
+  edits the chosen workspace's (the default one under All workspaces). Reports belong to a workspace too.
+- **Maintenance.** A window can cover one workspace ("This workspace") or all of them.
+- **Alerts.** The bell counts every workspace. The Alerts page shows the chosen workspace's alerts and the install's
+  own, and says how many are open elsewhere. With several workspaces, notices and the digest start with
+  `[workspace]`. The API's `GET /api/v1/status?workspace=<id>` reads one workspace.
+- **Who sees what.** Workspaces group things; they don't hide them: every member sees every workspace with their usual
+  role.
 
 ## Pages outside the menu
 

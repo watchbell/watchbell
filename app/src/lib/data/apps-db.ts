@@ -22,6 +22,7 @@ import { toSecurityRow } from "./security-db";
 
 export type AppSummary = {
   id: string; name: string; gone: boolean; state: State; stateSince: Date | null; domain: string;
+  workspaceId?: string; // 1.8: the workspace the app is in
   framework: string | null; productionBranch: string | null; createdAt: Date | null; teamName: string | null;
   // 1.2.2 (D15): what the live production deployment was really built from (the collector's meta.productionSource).
   productionSource?: ProductionSource | null;
@@ -47,12 +48,13 @@ const str = (v: unknown) => (typeof v === "string" && v ? v : null);
 
 // Watched apps (a gone one too, so a vanished project still shows), with everything the app tables need: monitors,
 // the latest production deployment, 30-day uptime, 24 h response and the Next.js security row. At most 200 apps and 200 monitors (R8).
-export async function listApps(now: Date, onlyId?: string): Promise<AppSummary[]> {
+// 1.8: `ws` = the workspace shown (null = every workspace); one app by id (its page) ignores it.
+export async function listApps(now: Date, onlyId?: string, ws: string | null = null): Promise<AppSummary[]> {
   const apps = await db().select({ r: resources, s: snapshots, sec: appSecurity, accStatus: accounts.status }).from(resources)
     .leftJoin(accounts, eq(accounts.id, resources.accountId))
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
     .leftJoin(appSecurity, eq(appSecurity.resourceId, resources.id))
-    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), onlyId ? eq(resources.id, onlyId) : undefined))
+    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), onlyId ? eq(resources.id, onlyId) : ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(resources.name).limit(PAGE_ROWS.apps);
   if (!apps.length) return [];
   const ids = apps.map((a) => a.r.id);
@@ -92,7 +94,7 @@ export async function listApps(now: Date, onlyId?: string): Promise<AppSummary[]
     const created = str(r.meta.createdAt);
     const dep = latest.find((d) => d.resourceId === r.id);
     return {
-      id: r.id, name: r.name, gone: r.goneAt !== null, state: s?.state ?? "unknown", stateSince: s?.stateSince ?? null,
+      id: r.id, name: r.name, workspaceId: r.workspaceId, gone: r.goneAt !== null, state: s?.state ?? "unknown", stateSince: s?.stateSince ?? null,
       // 1.2.1: the domain production is served on (Sync / the domains task), else the first monitor's host as before.
       domain: storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url)),
       domainLines: appDomainLines(r.meta, flags.get(r.id) ?? {}, storedDomains(r.meta)?.primaryDomain ?? appDomain(r.name, own.map((m) => m.url))),

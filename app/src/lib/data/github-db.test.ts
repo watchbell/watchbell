@@ -5,6 +5,7 @@ import { fakeDb, payloadOf } from "@/lib/data/fake-db";
 
 const key = Buffer.alloc(32, 4).toString("base64");
 const h = vi.hoisted(() => ({ current: null as null | { db: () => unknown } }));
+vi.mock("./workspace-db", () => ({ repoFollowsApp: async () => false }));
 vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).db() }));
 vi.mock("@/lib/env", () => ({ serverEnv: () => ({ OPS_ENCRYPTION_KEY: key }) }));
 

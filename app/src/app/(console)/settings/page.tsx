@@ -13,13 +13,18 @@ import { CollectorTab } from "./collector-tab";
 import { RetentionTab } from "./retention-tab";
 import { StatusPageTab } from "./status-page-tab";
 import { UsersTab } from "./users-tab";
+import { WorkspacesTab } from "./workspaces-tab";
+import { defaultWorkspaceId, listWorkspaces } from "@/lib/data/workspace-db";
+import { workspaceForEditing } from "@/lib/workspace/current";
 
-const TAB_KEYS = ["collector", "budget", "users", "retention", "status-page", "branding"];
+const TAB_KEYS = ["collector", "budget", "users", "workspaces", "retention", "status-page", "branding"];
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const gate = await pageGate("owner");
   if (!gate.ok) return <NoAccess role={gate.member.role} />;
-  const [{ tab }, statusPage, brand] = await Promise.all([searchParams, statusPageSettings(), readBrand()]);
+  // 1.8: the Status page tab edits the page of the workspace shown (the default one under All workspaces).
+  const editing = await workspaceForEditing();
+  const [{ tab }, statusPage, brand, workspaces, defaultWs] = await Promise.all([searchParams, statusPageSettings(editing), readBrand(), listWorkspaces(), defaultWorkspaceId()]);
   const extra = extensions.settingsTabs ?? [];
   // The GitHub Actions lockfile card is a core tab of its own, unless the VM runner is registered (private edition,
   // registry r1): its Runner tab, the first extension tab, shows the card beside the runner.
@@ -34,6 +39,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <TabsTrigger value="collector">Collector</TabsTrigger>
           <TabsTrigger value="budget">Free tier budget</TabsTrigger>
           <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="workspaces">Workspaces</TabsTrigger>
           <TabsTrigger value="retention">Retention</TabsTrigger>
           <TabsTrigger value="status-page">Status page</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
@@ -43,8 +49,9 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <TabsContent value="collector" className="mt-4"><CollectorTab /></TabsContent>
         <TabsContent value="budget" className="mt-4"><BudgetTab /></TabsContent>
         <TabsContent value="users" className="mt-4"><UsersTab actorId={gate.member.id} /></TabsContent>
+        <TabsContent value="workspaces" className="mt-4"><WorkspacesTab list={workspaces} defaultId={defaultWs} /></TabsContent>
         <TabsContent value="retention" className="mt-4"><RetentionTab /></TabsContent>
-        <TabsContent value="status-page" className="mt-4"><StatusPageTab settings={statusPage} siteUrl={serverEnv().SITE_URL} /></TabsContent>
+        <TabsContent value="status-page" className="mt-4"><StatusPageTab settings={statusPage} siteUrl={serverEnv().SITE_URL} workspaceName={workspaces.length > 1 ? (workspaces.find((w) => w.id === editing)?.name ?? null) : null} /></TabsContent>
         <TabsContent value="branding" className="mt-4"><BrandingTab brand={brand} /></TabsContent>
         {lockfileTab && <TabsContent value="lockfile" className="mt-4"><ActionsLockfileCard /></TabsContent>}
         {extra.map(({ key, Tab }) => <TabsContent key={key} value={key} className="mt-4"><Tab /></TabsContent>)}

@@ -7,12 +7,17 @@ import { requirePageMember } from "@/lib/auth";
 import { aliasBook, listDatabases } from "@/lib/data/cached";
 import { TURSO_FREE } from "@/lib/databases/extra";
 import { tursoViews } from "@/lib/view/extra-dbs";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { canAct } from "@/lib/view/labels";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Stage 8: watched Turso databases, read hourly from the Turso Platform API (lib/collector/extra-db-tasks.ts).
 export default async function TursoPage() {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const now = new Date();
-  const [rows, book] = await Promise.all([listDatabases("turso_database"), aliasBook()]);
+  const [rows, book] = await Promise.all([listDatabases("turso_database", wsc.id), aliasBook()]);
   const views = tursoViews(rows, now, book);
   return (
     <>
@@ -23,6 +28,7 @@ export default async function TursoPage() {
         sub="Databases, rows read and written and storage this month from the Turso Platform API, read hourly. The free limits are per organization, so the meters show the organization's total."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}
       />
+      {canAct(member.role) && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {views.some((v) => v.stale) && (
         <Banner tone="info" title="Turso API isn't responding">Showing the last data we got. The collector retries every hour.</Banner>
       )}

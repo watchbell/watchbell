@@ -12,6 +12,8 @@ export type PaletteSource = {
   monitors: { id: string; appId: string; appName: string; path: string }[];
   // Watched domains (what the Domains page lists); absent from an older payload.
   domains?: { id: string; name: string }[];
+  // 1.8: the workspaces, to open one ("Go to workspace Kopi Senja"); absent from an older payload.
+  workspaces?: { id: string; name: string }[];
 };
 
 // 0 = the text starts with the query, 1 = a word of it does ("data" in "Free databases"), 2 = it appears inside, null = no match.
@@ -83,5 +85,9 @@ export function buildItems(role: Role, source: PaletteSource | null, ext: Client
   // The Domains page has no per-row link, so a domain opens that page. The real name is the label, so searching matches it;
   // screenshot mode masks it in the dialog like any app (command-palette.tsx).
   const domains = (source.domains ?? []).map((d): PaletteItem => ({ id: `domain:${d.id}`, label: d.name, hint: "Domain", href: "/domains", icon: "world" }));
-  return [...all, ...apps, ...domains, ...monitors];
+  // 1.8: a workspace opens through /workspaces/open, which sets the cookie (a page can't) and goes to Overview.
+  const ws = source.workspaces && source.workspaces.length > 1
+    ? source.workspaces.map((w): PaletteItem => ({ id: `workspace:${w.id}`, label: `Go to workspace ${w.name}`, hint: "Workspace", href: `/workspaces/open?id=${w.id}`, icon: "dashboard" }))
+    : [];
+  return [...all, ...ws, ...apps, ...domains, ...monitors];
 }

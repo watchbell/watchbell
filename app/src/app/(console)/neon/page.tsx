@@ -20,16 +20,20 @@ import { SqlAccessButtons } from "../sql/sql-access-dialog";
 import { WakeButton } from "./wake-button";
 import { CreateButton } from "@/components/create/create-dialog";
 import { PendingCreates } from "@/components/create/pending-creates";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 const metric = "text-[26px] font-semibold tracking-tight";
 const small = "ml-1 text-[13px] font-normal text-ink-soft";
 
 export default async function NeonPage({ searchParams }: { searchParams: Promise<{ create?: string }> }) {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const { create } = await searchParams;
   const now = new Date();
   const act = canAct(member.role);
-  const [rows, book] = await Promise.all([listDatabases("neon_project"), aliasBook()]);
+  const [rows, book] = await Promise.all([listDatabases("neon_project", wsc.id), aliasBook()]);
   const blocks = neonBlocks(rows, now, book);
   const owner = member.role === "owner";
   const sqlIds = owner ? await sqlConnectedIds(blocks.map((b) => b.id)) : new Set<string>();
@@ -43,6 +47,7 @@ export default async function NeonPage({ searchParams }: { searchParams: Promise
         sub="Compute state, CU-hours, storage and transfer from the Neon API. Reading them doesn't wake the compute, and the console never connects to the database."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}
       />
+      {act && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {/* Stage 6 create requests: new branches waiting for the owner's approval. */}
       <PendingCreates member={member} types={["neon_branch"]} focus={create ?? null} />
       {stale.length > 0 && (

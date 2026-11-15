@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { monitors, resources, statusPageMonitors, statusPages } from "@/db/schema";
 import { pathOf } from "@/lib/collector/deploy-sync";
@@ -89,16 +89,20 @@ export async function publicMonitorIds(): Promise<Set<string>> {
 // Settings → Status page (owner only). The console's own view: real app names are fine here.
 export type StatusPageSettings = {
   page: { slug: string; title: string; announcement: string | null; published: boolean } | null;
-  monitors: { id: string; appName: string; path: string; kind: "http" | "heartbeat"; shown: boolean; displayName: string }[];
+  // 1.8: `elsewhere` — a monitor of another workspace that is still on this page (kept until the page is edited).
+  monitors: { id: string; appName: string; path: string; kind: "http" | "heartbeat"; shown: boolean; displayName: string; elsewhere?: boolean }[];
 };
 
-export async function statusPageSettings(): Promise<StatusPageSettings> {
+// 1.8 (spec §5): one page per workspace; the picker lists that workspace's monitors, plus any monitor of another
+// workspace still on the page (marked `elsewhere`).
+export async function statusPageSettings(ws: string): Promise<StatusPageSettings> {
+  const monitorRow = { id: monitors.id, appName: resources.name, url: monitors.url, kind: monitors.kind, name: monitors.name, ws: resources.workspaceId };
   const [[page], mons] = await Promise.all([
     db().select({ id: statusPages.id, slug: statusPages.slug, title: statusPages.title, announcement: statusPages.announcement, published: statusPages.published })
-      .from(statusPages).orderBy(asc(statusPages.createdAt)).limit(1),
-    db().select({ id: monitors.id, appName: resources.name, url: monitors.url, kind: monitors.kind, name: monitors.name }).from(monitors)
+      .from(statusPages).where(eq(statusPages.workspaceId, ws)).limit(1),
+    db().select(monitorRow).from(monitors)
       .innerJoin(resources, eq(resources.id, monitors.resourceId))
-      .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt)))
+      .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt), eq(resources.workspaceId, ws)))
       .orderBy(resources.name, desc(monitors.kind), monitors.url).limit(PAGE_ROWS.monitors),
   ]);
   const onPage = page
@@ -106,10 +110,15 @@ export async function statusPageSettings(): Promise<StatusPageSettings> {
       .from(statusPageMonitors).where(eq(statusPageMonitors.pageId, page.id)).orderBy(asc(statusPageMonitors.position)).limit(MAX_ON_PAGE)
     : [];
   const shown = new Map(onPage.map((p) => [p.monitorId, p]));
-  const rows = mons.map((m) => {
+  const missing = onPage.map((p) => p.monitorId).filter((id) => !mons.some((m) => m.id === id));
+  const others = missing.length ? await db().select(monitorRow).from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId)).where(inArray(monitors.id, missing)) : [];
+  const rows = [...mons, ...others].map((m) => {
     const hb = m.kind === "heartbeat";
     const p = shown.get(m.id);
-    return { id: m.id, appName: m.appName, path: hb ? (m.name ?? "heartbeat") : pathOf(m.url), kind: hb ? "heartbeat" as const : "http" as const, shown: !!p, displayName: p?.displayName ?? "" };
+    return {
+      id: m.id, appName: m.appName, path: hb ? (m.name ?? "heartbeat") : pathOf(m.url), kind: hb ? "heartbeat" as const : "http" as const, shown: !!p, displayName: p?.displayName ?? "",
+      ...(m.ws !== ws ? { elsewhere: true } : {}),
+    };
   });
   // The page's monitors first, in their order; then the rest as the Uptime page lists them.
   const pos = (id: string) => shown.get(id)?.position ?? Number.MAX_SAFE_INTEGER;
@@ -121,11 +130,14 @@ export type SaveDone = { ok: true; message: string; audit: Audit; oldSlug: strin
 
 const MISSING: SaveDone = { ok: false, error: "A monitor on the list no longer exists. Reload and try again." };
 
-// B5: one page. It and its monitors are replaced in one transaction, under a lock so two saves can't create two pages.
-export async function saveStatusPage(v: StatusPageValue): Promise<SaveDone> {
+// B5: one page per workspace (1.8). It and its monitors are replaced in one transaction, under a lock so two saves
+// can't create two pages.
+export async function saveStatusPage(v: StatusPageValue, ws: string): Promise<SaveDone> {
   return db().transaction(async (tx): Promise<SaveDone> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('ops.status_pages'))`);
-    const [existing] = await tx.select({ id: statusPages.id, slug: statusPages.slug }).from(statusPages).orderBy(asc(statusPages.createdAt)).limit(1);
+    const [existing] = await tx.select({ id: statusPages.id, slug: statusPages.slug }).from(statusPages).where(eq(statusPages.workspaceId, ws)).limit(1);
+    const [taken] = await tx.select({ id: statusPages.id }).from(statusPages).where(and(eq(statusPages.slug, v.slug), ne(statusPages.workspaceId, ws))).limit(1);
+    if (taken) return { ok: false, error: "Another workspace's status page uses that address. Pick another one." };
     const ids = v.monitors.map((m) => m.monitorId);
     if (ids.length) {
       const found = await tx.select({ id: monitors.id }).from(monitors).where(inArray(monitors.id, ids)).limit(MAX_ON_PAGE);
@@ -137,7 +149,7 @@ export async function saveStatusPage(v: StatusPageValue): Promise<SaveDone> {
       await tx.update(statusPages).set({ ...fields, updatedAt: new Date() }).where(eq(statusPages.id, existing.id));
       pageId = existing.id;
     } else {
-      const [created] = await tx.insert(statusPages).values(fields).returning({ id: statusPages.id });
+      const [created] = await tx.insert(statusPages).values({ ...fields, workspaceId: ws }).returning({ id: statusPages.id });
       pageId = created.id;
     }
     await tx.delete(statusPageMonitors).where(eq(statusPageMonitors.pageId, pageId));

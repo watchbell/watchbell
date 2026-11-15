@@ -9,7 +9,7 @@ describe("report tables (1.7)", () => {
   it("has the columns the plan names", () => {
     expect(getTableName(reports)).toBe("reports");
     expect(Object.keys(getTableColumns(reports)).sort()).toEqual(
-      ["autoSend", "clientName", "createdAt", "emailOpening", "id", "lang", "note", "recipients", "sender", "title", "updatedAt"],
+      ["autoSend", "clientName", "createdAt", "emailOpening", "id", "lang", "note", "recipients", "sender", "title", "updatedAt", "workspaceId"],
     );
     expect(Object.keys(getTableColumns(reportSites)).sort()).toEqual(["displayName", "monitorId", "position", "reportId"]);
     expect(Object.keys(getTableColumns(reportSends)).sort()).toEqual(["attempts", "claimedAt", "lastError", "month", "reportId", "sentAt", "status"]);

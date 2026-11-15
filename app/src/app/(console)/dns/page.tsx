@@ -23,6 +23,8 @@ import { ZonePicker } from "./zone-picker";
 import { zoneParam } from "./zone-param";
 import { CreateButton } from "@/components/create/create-dialog";
 import { PendingCreates } from "@/components/create/pending-creates";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 const KV = "grid grid-cols-[170px_minmax(0,1fr)] gap-x-4 gap-y-2.5 max-[720px]:grid-cols-1 max-[720px]:gap-y-1 [&_dd]:min-w-0 [&_dd]:[overflow-wrap:anywhere] [&_dt]:text-ink-soft";
 const faint = "text-ink-faint";
@@ -31,10 +33,12 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
   const member = await requirePageMember();
   const { zone, create } = await searchParams;
   const now = new Date();
-  const options = await listZoneOptions();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown, and where a zone can move
+  const ws = wsc.id;
+  const options = await listZoneOptions(ws);
   // Only a watched zone's id reaches the cached read (review m3): any other ?zone= value reads the first zone under the
   // one shared "null" key, so a made-up id can't add cache entries.
-  const z = await getZoneView(zoneParam(zone, options));
+  const z = await getZoneView(zoneParam(zone, options), ws);
   const act = canAct(member.role);
   if (!z) {
     return (
@@ -43,7 +47,9 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
         <Card>
           <EmptyState icon={IconSitemap} title="No Cloudflare zone watched yet"
             action={member.role === "owner" ? <Link className={buttonClass({ size: "sm" })} href="/connections">Open connections</Link> : undefined}>
-            Connect Cloudflare and tick its zones in Sync. Zones are read every hour.
+            {wsc.list.length > 1 && ws
+              ? "No Cloudflare zone in this workspace yet. Open the workspace that has it (or All workspaces) and move it here from DNS records."
+              : "Connect Cloudflare and tick its zones in Sync. Zones are read every hour."}
           </EmptyState>
         </Card>
       </>
@@ -72,6 +78,7 @@ export default async function DnsPage({ searchParams }: { searchParams: Promise<
         more="Owners can switch a record between proxied and DNS only, or edit an A, AAAA, CNAME or TXT record, after a review that shows the old and new value. New records are added only through a request an owner approves (Add record)."
         actions={<>{options.length > 1 && <ZonePicker zones={options} current={z.id} />}<AccountChip name={z.accountLabel} />{owner && <CreateButton type="dns_record" target={z.id} targetName={z.name} label="Add record" />}</>}
       />
+      {act && <MoveToWorkspace kind="resource" items={options.map((o) => ({ id: o.id, name: o.name }))} workspaces={wsc.list} current={wsc.id} />}
       {/* Stage 6 create requests: the DNS records waiting for the owner's approval. */}
       <PendingCreates member={member} types={["dns_record"]} focus={create ?? null} />
       <Card title="Zone" meta={<><Src kind="api" /><Src kind="api">RDAP</Src></>}>

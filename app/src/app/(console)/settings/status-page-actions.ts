@@ -8,6 +8,7 @@ import { saveStatusPage } from "@/lib/data/public-status-db";
 import { parseStatusPageForm } from "@/lib/public-status";
 import { LIMITS, minutesText } from "@/lib/rate-limit";
 import { limit } from "@/lib/rate-limit-db";
+import { workspaceForEditing } from "@/lib/workspace/current";
 
 // U6: what the public status page shows is the owner's choice alone (like the rest of Settings). The save shares the
 // monitors' write limit, leaves an "action" event with the acting user, and refreshes the cached public page at once
@@ -22,7 +23,7 @@ export async function saveStatusPageSettings(form: unknown): Promise<ActionResul
     if (!p.ok) return { ok: false, error: "Check the highlighted fields.", fieldErrors: p.fieldErrors };
     const quota = await limit(LIMITS.monitorWrite, member.id);
     if (!quota.allowed) return { ok: false, error: `Too many changes. Try again in ${minutesText(quota.retryAfter)}.` };
-    const r = await saveStatusPage(p.value);
+    const r = await saveStatusPage(p.value, await workspaceForEditing()); // 1.8: the workspace shown (or the default)
     if (!r.ok) return { ok: false, error: r.error };
     try {
       await recordAction({ kind: "ok", ...r.audit, actorUserId: member.userId });

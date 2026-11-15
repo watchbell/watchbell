@@ -7,6 +7,7 @@ import { listDeployments } from "@/lib/data/deployments-db";
 import { extensions } from "@/lib/extensions";
 import { canAct, DEP_STATE_OPTIONS } from "@/lib/view/labels";
 import { DEPLOY_HEAD, deploymentRows } from "./deployment-rows";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // 1.3: Explain with AI (a server action of this page) waits on the AI provider; same budget as the app page.
 export const maxDuration = 60;
@@ -14,7 +15,7 @@ export const maxDuration = 60;
 export default async function DeploymentsPage() {
   const member = await requirePageMember();
   const now = new Date();
-  const list = await listDeployments();
+  const list = await listDeployments({ ws: (await currentWorkspace()).id }); // 1.8
   return (
     <>
       <AutoRefresh at={now.getTime()} />

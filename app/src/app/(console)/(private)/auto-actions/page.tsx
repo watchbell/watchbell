@@ -15,6 +15,7 @@ import { listProposals, readProposal } from "@/private/actions/proposals-db";
 import { ACTION_KINDS, readAutoRun } from "@/private/actions/proposals-settings";
 import type { Proposal } from "@/private/actions/proposals-types";
 import { proposalsView, statusState } from "@/private/actions/proposals-view";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // Auto-actions (open source v1, task 4): the console's own page for the actions proposed for firing alerts, so they
 // don't need the Virtual Office. Waiting ones are approved or rejected here (the same decide path as the office and the
@@ -32,7 +33,7 @@ export default async function AutoActionsPage({ searchParams }: { searchParams: 
   const now = new Date();
   const { proposal } = await searchParams;
   const focusId = isProposalId(proposal) ? proposal : null;
-  const [list, autoRun] = await Promise.all([listProposals(now, HISTORY_LIMIT), readAutoRun()]);
+  const [list, autoRun] = await Promise.all([listProposals(now, HISTORY_LIMIT, (await currentWorkspace()).id), readAutoRun()]); // 1.8: the workspace shown
   const extra = focusId && !list.some((p) => p.id === focusId) ? await readProposal(focusId) : null;
   const { pending, history, focus } = proposalsView(extra ? [...list, extra] : list, focusId);
   const autoOn = ACTION_KINDS.filter((k) => autoRun[k]).length;

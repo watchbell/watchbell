@@ -6,6 +6,7 @@ import { listStoredLogs } from "@/lib/data/logs-db";
 import { appOptions } from "@/lib/data/monitors-db";
 import { toWire } from "@/lib/view/logs";
 import { LogViewer } from "./log-viewer";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // The live read asks Vercel's request logs once per app (up to 8 s, a few pages) inside this page's server action.
 export const maxDuration = 30;
@@ -14,7 +15,8 @@ export default async function LogsPage() {
   const { ok, member } = await pageGate("operator");
   if (!ok) return <NoAccess role={member.role} />;
   const now = new Date();
-  const [apps, stored] = await Promise.all([appOptions(), listStoredLogs(now)]);
+  const ws = (await currentWorkspace()).id; // 1.8: the workspace shown
+  const [apps, stored] = await Promise.all([appOptions(ws), listStoredLogs(now, { ws })]);
   const appList = apps.map((a) => ({ id: a.id, name: a.name }));
   // No AutoRefresh here: the live tab polls itself and the stored tab is a 7-day view. The live tab starts empty and
   // reads when it opens.

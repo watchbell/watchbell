@@ -68,7 +68,7 @@ describe("createWindow", () => {
     });
     expect(f.executes()).toBe(1);
     const ins = f.writes.find((w) => w.kind === "insert" && w.table === maintenanceWindows)!;
-    expect(payloadOf(ins.calls)).toEqual({ scope: "app", resourceId: APP, monitorId: null, startsAt: start, durationMin: 60, weekly: false, note: "DNS move", createdBy: "user-1" });
+    expect(payloadOf(ins.calls)).toEqual({ scope: "app", resourceId: APP, monitorId: null, workspaceId: null, startsAt: start, durationMin: 60, weekly: false, note: "DNS move", createdBy: "user-1" });
   });
   it("refuses the 21st window", async () => {
     const f = use([[{ n: 20 }]]);

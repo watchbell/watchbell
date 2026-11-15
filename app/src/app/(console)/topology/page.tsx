@@ -11,6 +11,7 @@ import { topologyColumns } from "@/lib/data/topology-db";
 import { cn } from "@/lib/utils";
 import { STATE_WORD } from "@/lib/view/labels";
 import { GAP_X, GAP_Y, HEAD_H, layoutTopology, NODE_H, NODE_W, type TopoNode } from "@/lib/view/topology";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 const HEADS = ["Domains", "Applications", "Databases"];
 const KV = "grid grid-cols-[110px_minmax(0,1fr)] gap-x-4 gap-y-2.5 text-[13px] max-[720px]:grid-cols-1 max-[720px]:gap-y-1 [&_dd]:min-w-0 [&_dd]:[overflow-wrap:anywhere] [&_dt]:text-ink-soft";
@@ -33,7 +34,7 @@ export default async function TopologyPage({ searchParams }: { searchParams: Pro
   await requirePageMember();
   const { node } = await searchParams;
   const now = new Date();
-  const cols = await topologyColumns(now, await aliasBook());
+  const cols = await topologyColumns(now, await aliasBook(), (await currentWorkspace()).id); // 1.8
   const all = cols.flat();
   const selected = all.find((n) => n.key === node) ?? null;
   const l = layoutTopology(cols, selected?.key ?? null);

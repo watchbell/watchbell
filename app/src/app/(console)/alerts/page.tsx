@@ -15,17 +15,27 @@ import { canAct } from "@/lib/view/labels";
 import { ChannelsCard } from "./channels-card";
 import { FiringTable, ResolvedTable } from "./firing-table";
 import { RulesTable } from "./rules-table";
+import { alertWorkspaceIds } from "@/lib/data/workspace-db";
+import { filterByWorkspace, workspacePrefix } from "@/lib/workspace/alerts";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 export default async function AlertsPage() {
   const member = await requirePageMember();
   const now = new Date();
   // Watchbell 1.2: the alerts of a section the owner turned off are paused and left out here until it is on again.
   const paused = await pausedSections();
-  const [stored, storedResolved, rules, channels, book, langs, templates] = await Promise.all([listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs(), readMessageTemplates()]);
+  const [allFiring, allResolved, rules, channels, book, langs, templates, ws] = await Promise.all([listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs(), readMessageTemplates(), currentWorkspace()]);
+  // Watchbell 1.8: the chosen workspace's alerts and the install's own (at most 200 open, filtered here so the count
+  // under the list and the bell's always add up); with All workspaces each alert names its workspace.
+  const wsOf = await alertWorkspaceIds([...allFiring, ...allResolved]);
+  const { shown: stored, elsewhere } = filterByWorkspace(allFiring, wsOf, ws.id);
+  const { shown: storedResolved } = filterByWorkspace(allResolved, wsOf, ws.id);
+  const labelled = ws.id === null && ws.list.length > 1;
+  const label = (id: string) => (labelled ? workspacePrefix(ws.list.find((w) => w.id === wsOf.get(id))?.name ?? "Install", ws.list.length) : "");
   const pausedNames = SECTION_IDS.filter((id) => paused.has(id)).map((id) => SECTIONS[id].label);
   // Privacy: databases by alias and no emails in titles, messages and causes, stored rows included.
-  const firing = stored.map((a) => ({ ...hideAlert(a, book), search: [a.title, a.message].join(" ") }));
-  const resolved = storedResolved.map((a) => ({ ...a, title: hideAlert({ ...a, message: "", causedBy: null }, book).title }));
+  const firing = stored.map((a) => { const shown = hideAlert(a, book); return { ...shown, title: label(a.id) + shown.title, search: [a.title, a.message].join(" ") }; });
+  const resolved = storedResolved.map((a) => ({ ...a, title: label(a.id) + hideAlert({ ...a, message: "", causedBy: null }, book).title }));
   const owner = member.role === "owner";
   return (
     <>
@@ -49,6 +59,9 @@ export default async function AlertsPage() {
             </Banner>
           )}
           <Card flush><FiringTable rows={firing} now={now} act={canAct(member.role)} /></Card>
+          {elsewhere > 0 && (
+            <p className="text-[13px] text-ink-soft"><Link href="/workspaces">{elsewhere} more open in other workspaces</Link></p>
+          )}
           {resolved.length > 0 && (
             <Card title="Resolved in the last 7 days" flush><ResolvedTable rows={resolved} now={now} /></Card>
           )}

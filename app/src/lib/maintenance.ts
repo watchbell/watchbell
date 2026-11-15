@@ -6,7 +6,8 @@ import { isUuid } from "@/lib/ids";
 import type { State } from "@/lib/status";
 import { addLocalDays, clock, dayMonth, fromLocalInput, zonedParts } from "@/lib/time";
 
-export type Window = { id: string; scope: "all" | "app" | "monitor"; appId: string | null; monitorId: string | null; startsAt: Date; durationMin: number; weekly: boolean; note: string | null };
+// 1.8: scope "workspace" quiets one workspace; `appIds` are its apps, filled in when the windows are read.
+export type Window = { id: string; scope: "all" | "app" | "monitor" | "workspace"; appId: string | null; workspaceId?: string | null; appIds?: string[]; monitorId: string | null; startsAt: Date; durationMin: number; weekly: boolean; note: string | null };
 export type Target = { monitorId: string; appId: string };
 export const MAX_WINDOWS = 20;
 export const DURATIONS_MIN = [30, 60, 90, 180, 360] as const;
@@ -55,7 +56,8 @@ export function nextOccurrence(w: Window, now: Date): { start: Date; end: Date }
 }
 
 export function covers(w: Window, t: Target): boolean {
-  return w.scope === "all" || (w.scope === "app" && w.appId === t.appId) || (w.scope === "monitor" && w.monitorId === t.monitorId);
+  return w.scope === "all" || (w.scope === "app" && w.appId === t.appId) || (w.scope === "monitor" && w.monitorId === t.monitorId)
+    || (w.scope === "workspace" && !!t.appId && (w.appIds ?? []).includes(t.appId));
 }
 
 // The window a monitor is inside right now. When two overlap, the one that ends last, so "until HH:MM" is true.
@@ -79,6 +81,7 @@ export function maintenanceSet(ws: Window[], monitors: { id: string; appId: stri
   for (const w of live) {
     if (w.scope === "app" && w.appId) out.add(w.appId);
     if (w.scope === "all") for (const a of appIds) out.add(a);
+    if (w.scope === "workspace") for (const a of appIds) if ((w.appIds ?? []).includes(a)) out.add(a);
   }
   for (const m of monitors) {
     for (const w of live) {
@@ -101,7 +104,7 @@ export type WindowForm = { scope?: unknown; targetId?: unknown; start?: unknown;
 // The dialog's fields. `start` is a datetime-local value ("2026-10-13T22:00"), read in the configured zone.
 export function parseWindowForm(f: WindowForm): { ok: true; value: Omit<Window, "id"> } | { ok: false; fieldErrors: Record<string, string> } {
   const errors: Record<string, string> = {};
-  const scope = f.scope === "all" || f.scope === "app" || f.scope === "monitor" ? f.scope : null;
+  const scope = f.scope === "all" || f.scope === "app" || f.scope === "monitor" || f.scope === "workspace" ? f.scope : null;
   if (!scope) errors.scope = "Pick what it applies to.";
   const raw = typeof f.start === "string" ? f.start : "";
   // A date that doesn't exist (31 Feb) is refused, not rolled over.
@@ -110,10 +113,10 @@ export function parseWindowForm(f: WindowForm): { ok: true; value: Omit<Window, 
   const durationMin = Number(f.durationMin);
   if (!(DURATIONS_MIN as readonly number[]).includes(durationMin)) errors.durationMin = "Pick how long it lasts.";
   const target = typeof f.targetId === "string" ? f.targetId : "";
-  if (scope && scope !== "all" && !isUuid(target)) errors.targetId = scope === "app" ? "Pick an application." : "Pick a monitor.";
+  if (scope && scope !== "all" && !isUuid(target)) errors.targetId = scope === "app" ? "Pick an application." : scope === "workspace" ? "Pick a workspace." : "Pick a monitor.";
   if (Object.keys(errors).length || !scope || !startsAt) return { ok: false, fieldErrors: errors };
   const note = (typeof f.note === "string" ? f.note : "").trim().slice(0, NOTE_MAX) || null;
-  return { ok: true, value: { scope, appId: scope === "app" ? target : null, monitorId: scope === "monitor" ? target : null, startsAt, durationMin, weekly: f.weekly === true, note } };
+  return { ok: true, value: { scope, appId: scope === "app" ? target : null, monitorId: scope === "monitor" ? target : null, ...(scope === "workspace" ? { workspaceId: target } : {}), startsAt, durationMin, weekly: f.weekly === true, note } };
 }
 
 // The dialog's Lasts options: "30 min", "1 h", "1 h 30 min", "3 h", "6 h".
@@ -124,13 +127,13 @@ export function durationText(min: number): string {
 }
 
 // The dialog's Applies to is one select: "all", "app:<id>" or "monitor:<id>".
-export function targetValue(w: Pick<Window, "scope" | "appId" | "monitorId">): string {
-  return w.scope === "all" ? "all" : w.scope === "app" ? `app:${w.appId}` : `monitor:${w.monitorId}`;
+export function targetValue(w: Pick<Window, "scope" | "appId" | "monitorId" | "workspaceId">): string {
+  return w.scope === "all" ? "all" : w.scope === "app" ? `app:${w.appId}` : w.scope === "workspace" ? `workspace:${w.workspaceId}` : `monitor:${w.monitorId}`;
 }
 
 export function splitTarget(v: string): { scope: string; targetId: string } {
   if (v === "all") return { scope: "all", targetId: "" };
-  const m = /^(app|monitor):(.+)$/.exec(v);
+  const m = /^(app|monitor|workspace):(.+)$/.exec(v);
   return m ? { scope: m[1], targetId: m[2] } : { scope: "", targetId: "" };
 }
 

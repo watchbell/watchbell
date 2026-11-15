@@ -1,8 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
-import { maintenanceWindows, monitors, resources } from "@/db/schema";
+import { maintenanceWindows, monitors, resources, workspaces } from "@/db/schema";
 import { pathOf } from "@/lib/collector/deploy-sync";
 import { MAX_WINDOWS, occurrence, type Window } from "@/lib/maintenance";
 import type { Audit } from "./monitors-db";
@@ -20,7 +20,7 @@ const GONE: WindowDone = { ok: false, error: "That maintenance window no longer 
 const TOO_MANY: WindowDone = { ok: false, error: `You can have at most ${MAX_WINDOWS} maintenance windows. Delete one first.` };
 
 const toWindow = (r: typeof maintenanceWindows.$inferSelect): Window => ({
-  id: r.id, scope: r.scope, appId: r.resourceId, monitorId: r.monitorId, startsAt: r.startsAt, durationMin: r.durationMin, weekly: r.weekly, note: r.note,
+  id: r.id, scope: r.scope, appId: r.resourceId, workspaceId: r.workspaceId, monitorId: r.monitorId, startsAt: r.startsAt, durationMin: r.durationMin, weekly: r.weekly, note: r.note,
 });
 
 // "web/api/health", or "web · backup job" for a heartbeat (its url is "heartbeat:<slug>").
@@ -34,7 +34,16 @@ const notEnded = sql<boolean>`(${maintenanceWindows.weekly} or ${maintenanceWind
 export async function listRawWindows(): Promise<Window[]> {
   const rows = await db().select().from(maintenanceWindows).where(notEnded)
     .orderBy(asc(maintenanceWindows.startsAt), asc(maintenanceWindows.id)).limit(MAX_WINDOWS);
-  return rows.map(toWindow);
+  return withWorkspaceApps(rows.map(toWindow));
+}
+
+// 1.8: a window for one workspace covers that workspace's apps; they are listed on the window (Window.appIds) so the
+// checks (covers, maintenanceSet) need no workspace of their own. One extra query, only when such a window exists.
+async function withWorkspaceApps(ws: Window[]): Promise<Window[]> {
+  const ids = [...new Set(ws.filter((w) => w.scope === "workspace" && w.workspaceId).map((w) => w.workspaceId as string))];
+  if (!ids.length) return ws;
+  const apps = await db().select({ id: resources.id, ws: resources.workspaceId }).from(resources).where(and(eq(resources.kind, "app"), inArray(resources.workspaceId, ids)));
+  return ws.map((w) => (w.scope === "workspace" ? { ...w, appIds: apps.filter((a) => a.ws === w.workspaceId).map((a) => a.id) } : w));
 }
 
 export async function activeWindows(now: Date): Promise<Window[]> {
@@ -46,21 +55,25 @@ const monApp = alias(resources, "mon_app");
 function selectNamed() {
   return db().select({
     w: maintenanceWindows, appName: resources.name, monApp: monApp.name, monAppId: monitors.resourceId, monUrl: monitors.url, monKind: monitors.kind, monName: monitors.name,
+    wsName: workspaces.name,
   }).from(maintenanceWindows)
     .leftJoin(resources, eq(resources.id, maintenanceWindows.resourceId))
+    .leftJoin(workspaces, eq(workspaces.id, maintenanceWindows.workspaceId))
     .leftJoin(monitors, eq(monitors.id, maintenanceWindows.monitorId))
     .leftJoin(monApp, eq(monApp.id, monitors.resourceId));
 }
 type Named = Awaited<ReturnType<typeof selectNamed>>[number];
 
 const targetOf = (r: Named): string =>
-  r.w.scope === "all" ? "All monitors" : r.w.scope === "app" ? r.appName ?? "Removed app" : monitorName({ appName: r.monApp, url: r.monUrl, kind: r.monKind, name: r.monName });
+  r.w.scope === "all" ? "All monitors" : r.w.scope === "workspace" ? `All of ${r.wsName ?? "a removed workspace"}` : r.w.scope === "app" ? r.appName ?? "Removed app" : monitorName({ appName: r.monApp, url: r.monUrl, kind: r.monKind, name: r.monName });
 
 // Uptime → Maintenance windows, with what each applies to: every window that can still apply (at most MAX_WINDOWS),
 // then the latest ended ones, shown by start.
 export async function listWindows(): Promise<WindowRow[]> {
   const rows = await selectNamed().orderBy(sql`${notEnded} desc`, desc(maintenanceWindows.startsAt), desc(maintenanceWindows.id)).limit(MAX_WINDOWS * 2);
-  return rows.map((r) => ({ ...toWindow(r.w), target: targetOf(r) }))
+  const named = rows.map((r) => ({ ...toWindow(r.w), target: targetOf(r) }));
+  // 1.8: with the apps of a workspace window, so the Uptime page shows its monitors in maintenance.
+  return (await withWorkspaceApps(named) as WindowRow[])
     .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
@@ -69,6 +82,10 @@ type Conn = Pick<ReturnType<typeof db>, "select" | "insert" | "update" | "delete
 // What the window applies to, for the audit entry, or an error when the app or monitor no longer exists.
 async function target(c: Conn, v: Omit<Window, "id">): Promise<{ name: string; resourceId: string | null } | { error: string }> {
   if (v.scope === "all") return { name: "All monitors", resourceId: null };
+  if (v.scope === "workspace") {
+    const [w] = await c.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, v.workspaceId ?? "00000000-0000-0000-0000-000000000000")).limit(1);
+    return w ? { name: `All of ${w.name}`, resourceId: null } : { error: "That workspace no longer exists." };
+  }
   if (v.scope === "app") {
     const [app] = await c.select({ id: resources.id, name: resources.name }).from(resources)
       .where(and(eq(resources.id, v.appId ?? ""), eq(resources.kind, "app"))).limit(1);
@@ -81,6 +98,7 @@ async function target(c: Conn, v: Omit<Window, "id">): Promise<{ name: string; r
 
 const columns = (v: Omit<Window, "id">) => ({
   scope: v.scope, resourceId: v.scope === "app" ? v.appId : null, monitorId: v.scope === "monitor" ? v.monitorId : null,
+  workspaceId: v.scope === "workspace" ? v.workspaceId ?? null : null,
   startsAt: v.startsAt, durationMin: v.durationMin, weekly: v.weekly, note: v.note,
 });
 

@@ -10,7 +10,8 @@ import { durationText, DURATIONS_MIN, ENDED, hasEnded, NOTE_MAX, parseWindowForm
 import { toLocalInput, zoneSentence } from "@/lib/time";
 import { addWindow, editWindow } from "../maintenance-actions";
 
-export type TargetOptions = { apps: { id: string; name: string }[]; monitors: { id: string; label: string }[] };
+// 1.8: `workspace` — the workspace shown, when there are several ("This workspace"; "All monitors" then reads "All workspaces").
+export type TargetOptions = { apps: { id: string; name: string }[]; monitors: { id: string; label: string }[]; workspace?: { id: string; name: string } | null; many?: boolean };
 export type EditableWindow = Window & { target: string };
 
 type Props =
@@ -74,10 +75,10 @@ export function MaintenanceDialog(props: Props) {
     });
   }
 
-  const { apps, monitors } = props.options;
+  const { apps, monitors, workspace = null, many = false } = props.options;
   // A window on an app or monitor that is no longer in the lists (its app was unwatched) keeps its own option.
   const current = props.mode === "edit" ? targetValue(props.win) : null;
-  const listed = current === "all" || apps.some((a) => `app:${a.id}` === current) || monitors.some((m) => `monitor:${m.id}` === current);
+  const listed = current === "all" || (!!workspace && current === `workspace:${workspace.id}`) || apps.some((a) => `app:${a.id}` === current) || monitors.some((m) => `monitor:${m.id}` === current);
   const targetError = errors.scope ?? errors.targetId;
 
   return (
@@ -96,7 +97,8 @@ export function MaintenanceDialog(props: Props) {
           <div className="px-[18px] pt-2">
             <Field id="mw-scope" label="Applies to" error={targetError}>
               <select id="mw-scope" className={fieldClass} value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })}>
-                <option value="all">All monitors</option>
+                <option value="all">{many ? "All workspaces" : "All monitors"}</option>
+                {workspace && <option value={`workspace:${workspace.id}`}>This workspace ({workspace.name})</option>}
                 {props.mode === "edit" && !listed && current && <option value={current}>{props.win.target}</option>}
                 {apps.length > 0 && (
                   <optgroup label="Application">

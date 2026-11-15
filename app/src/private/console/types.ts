@@ -7,6 +7,7 @@ export type SnapshotApp = {
   database: string | null;
   lastDeploy: string | null;
   problems: { kind: string; where: string; what: string; fix: string | null }[];
+  workspace?: string; // 1.8: with several workspaces, the app's
 };
 
 export type ConsoleSnapshot = {

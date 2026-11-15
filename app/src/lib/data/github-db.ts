@@ -1,6 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
+import { repoFollowsApp } from "./workspace-db";
 import { accounts, appRepos, githubRepos, type RepoRun, resources, settings } from "@/db/schema";
 import { credentialProblem, statusAfterTest } from "@/lib/accounts";
 import { openOrNull } from "@/lib/crypto";
@@ -90,6 +91,7 @@ export async function syncGithub(accountId: string | undefined, deadline: number
   for (const l of fresh) {
     await db().insert(appRepos).values({ appId: l.appId, repoId: l.repoId, source: "vercel" })
       .onConflictDoUpdate({ target: appRepos.appId, set: { repoId: l.repoId, source: "vercel", updatedAt: new Date() }, setWhere: ne(appRepos.source, "manual") });
+    await repoFollowsApp(l.repoId, l.appId); // 1.8: a newly linked repo joins its app's workspace
   }
 
   // GitHub Actions status of the linked repositories of this account (Actions read).
@@ -192,6 +194,7 @@ export async function linkAppRepo(appId: string, repoId: string | null, actorUse
   if (!repo) return { ok: false, error: "That repository is no longer shared with the GitHub token. Sync GitHub and try again." };
   await db().insert(appRepos).values({ appId, repoId, source: "manual", linkedBy: actorUserId })
     .onConflictDoUpdate({ target: appRepos.appId, set: { repoId, source: "manual", linkedBy: actorUserId, updatedAt: new Date() } });
+  await repoFollowsApp(repoId, appId); // 1.8: the repo joins its app's workspace (unless apps elsewhere use it)
   return { ok: true, message: `${app.name} is linked to ${repo.fullName}.`, app: app.name, repo: repo.fullName };
 }
 

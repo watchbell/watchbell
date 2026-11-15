@@ -185,3 +185,19 @@ describe("hasEnded (review M4)", () => {
     expect(hasEnded(w({ weekly: true }), new Date("2027-01-01T00:00:00Z"))).toBe(false);
   });
 });
+
+// Watchbell 1.8 (spec §5): a window for one workspace quiets the apps in it (the data layer lists them as appIds).
+describe("a window for one workspace (1.8)", () => {
+  const ws = w({ scope: "workspace", appId: null, workspaceId: "ws-kopi", appIds: ["a1", "a2"] });
+  it("covers the workspace's apps and their monitors, nothing else", () => {
+    expect(covers(ws, { monitorId: "m1", appId: "a1" })).toBe(true);
+    expect(covers(ws, { monitorId: "m9", appId: "a9" })).toBe(false);
+    expect([...maintenanceSet([ws], [{ id: "m1", appId: "a1" }], new Date("2026-10-12T18:30:00Z"), ["a1", "a2", "a9"])].sort()).toEqual(["a1", "a2", "m1"]);
+  });
+
+  it("is read from the dialog as workspace:<id>", () => {
+    const r = parseWindowForm({ scope: "workspace", targetId: "00000000-0000-4000-8000-0000000000a1", start: "2026-10-13T22:00", durationMin: 60, weekly: false });
+    expect(r.ok && r.value).toMatchObject({ scope: "workspace", workspaceId: "00000000-0000-4000-8000-0000000000a1", appId: null, monitorId: null });
+    expect(targetValue({ scope: "workspace", appId: null, monitorId: null, workspaceId: "ws-kopi" })).toBe("workspace:ws-kopi");
+  });
+});

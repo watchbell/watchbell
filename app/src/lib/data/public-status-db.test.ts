@@ -130,10 +130,10 @@ describe("statusPageSettings", () => {
   it("lists every monitor of a watched app with what the page shows for it", async () => {
     use([
       [{ id: PAGE, slug: "acme", title: "T", announcement: "A", published: true }],
-      [{ id: M1, appName: "web", url: "https://web.example.com/", kind: "http", name: null }, { id: M2, appName: "web", url: "heartbeat:backup", kind: "heartbeat", name: "backup" }],
+      [{ id: M1, appName: "web", url: "https://web.example.com/", kind: "http", name: null, ws: "w1" }, { id: M2, appName: "web", url: "heartbeat:backup", kind: "heartbeat", name: "backup", ws: "w1" }],
       [{ monitorId: M2, displayName: "Backups", position: 0 }],
     ]);
-    expect(await statusPageSettings()).toEqual({
+    expect(await statusPageSettings("w1")).toEqual({
       page: { slug: "acme", title: "T", announcement: "A", published: true },
       monitors: [
         { id: M2, appName: "web", path: "backup", kind: "heartbeat", shown: true, displayName: "Backups" },
@@ -143,7 +143,7 @@ describe("statusPageSettings", () => {
   });
   it("has no page before the first save", async () => {
     use([[], []]);
-    expect(await statusPageSettings()).toEqual({ page: null, monitors: [] });
+    expect(await statusPageSettings("w1")).toEqual({ page: null, monitors: [] });
   });
 });
 
@@ -160,28 +160,28 @@ describe("saveStatusPage", () => {
   const value = { slug: "acme", title: "T", announcement: null, published: true, monitors: [{ monitorId: M1, displayName: "Wedding site", position: 0 }] };
 
   it("creates the one page and its monitors with badge keys", async () => {
-    const f = use([[], [{ id: M1 }]], [[{ id: PAGE }]]);
-    expect(await saveStatusPage(value)).toEqual({ ok: true, oldSlug: null, message: "Status page saved. It updates within a minute.", audit: { message: "Status page saved: /s/acme (published, 1 monitor)", resourceId: null } });
+    const f = use([[], [], [{ id: M1 }]], [[{ id: PAGE }]]);
+    expect(await saveStatusPage(value, "w1")).toEqual({ ok: true, oldSlug: null, message: "Status page saved. It updates within a minute.", audit: { message: "Status page saved: /s/acme (published, 1 monitor)", resourceId: null } });
     expect(f.writes.map((w) => w.kind)).toEqual(["insert", "delete", "insert"]);
-    expect(payloadOf(f.writes[0].calls)).toMatchObject({ slug: "acme", title: "T", announcement: null, published: true });
+    expect(payloadOf(f.writes[0].calls)).toMatchObject({ slug: "acme", title: "T", announcement: null, published: true, workspaceId: "w1" });
     expect(payloadOf(f.writes[2].calls)).toEqual([{ pageId: PAGE, monitorId: M1, displayName: "Wedding site", badgeKey: "wedding-site", position: 0 }]);
   });
 
   it("updates the existing page and remembers its old address", async () => {
-    const f = use([[{ id: PAGE, slug: "old-name" }], [{ id: M1 }]]);
-    expect(await saveStatusPage({ ...value, published: false })).toMatchObject({ ok: true, oldSlug: "old-name", audit: { message: "Status page saved: /s/acme (not published, 1 monitor)" } });
+    const f = use([[{ id: PAGE, slug: "old-name" }], [], [{ id: M1 }]]);
+    expect(await saveStatusPage({ ...value, published: false }, "w1")).toMatchObject({ ok: true, oldSlug: "old-name", audit: { message: "Status page saved: /s/acme (not published, 1 monitor)" } });
     expect(f.writes.map((w) => w.kind)).toEqual(["update", "delete", "insert"]);
   });
 
   it("refuses a monitor that no longer exists, before writing", async () => {
-    const f = use([[], []]);
-    expect(await saveStatusPage(value)).toEqual({ ok: false, error: "A monitor on the list no longer exists. Reload and try again." });
+    const f = use([[], [], []]);
+    expect(await saveStatusPage(value, "w1")).toEqual({ ok: false, error: "A monitor on the list no longer exists. Reload and try again." });
     expect(f.writes).toHaveLength(0);
   });
 
   it("writes no monitor rows for an empty list", async () => {
-    const f = use([[{ id: PAGE, slug: "acme" }]]);
-    expect(await saveStatusPage({ ...value, monitors: [] })).toMatchObject({ ok: true });
+    const f = use([[{ id: PAGE, slug: "acme" }], []]);
+    expect(await saveStatusPage({ ...value, monitors: [] }, "w1")).toMatchObject({ ok: true });
     expect(f.writes.map((w) => w.kind)).toEqual(["update", "delete"]);
   });
 });

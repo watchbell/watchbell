@@ -20,6 +20,9 @@ import { createGrantConnected } from "@/lib/data/create-db";
 import { FIRESTORE_SIZE_NOTE } from "@/lib/databases/firebase";
 import { outboundLinks } from "@/lib/demo/links";
 import { FirestoreRowMenu } from "./row-menu";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Stage 6 create requests: Firebase's create runs a few long-running Google operations (polled) after approval.
 export const maxDuration = 60;
@@ -34,13 +37,14 @@ function Count({ c, of }: { c: { n: number; pct: number } | null; of: string }) 
 
 export default async function FirebasePage({ searchParams }: { searchParams: Promise<{ create?: string; google?: string }> }) {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const { create, google } = await searchParams;
   const googleNote = google ? CREATE_CALLBACK_TEXT[google] : undefined;
   const createGrant = member.role === "owner" ? await createGrantConnected().catch(() => null) : null;
   const now = new Date();
   const act = canAct(member.role);
   const links = outboundLinks();
-  const [rows, book] = await Promise.all([listDatabases("firestore"), aliasBook()]);
+  const [rows, book] = await Promise.all([listDatabases("firestore", wsc.id), aliasBook()]);
   const view = firebaseRows(rows, book);
   return (
     <>
@@ -51,6 +55,7 @@ export default async function FirebasePage({ searchParams }: { searchParams: Pro
         sub="Firestore has no running or stopped state. Every 5 minutes the collector reads one health document (288 of your 50k daily reads)."
         actions={member.role === "owner" ? <><Link href="/connections" className={buttonClass()}>Manage accounts</Link>{createGrant !== null && <DisconnectGoogleCreateButton />}<CreateButton type="firebase_project" target="" targetName="Firebase" label="New project" /></> : undefined}
       />
+      {act && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {googleNote && <Banner tone={googleNote.tone === "ok" ? "info" : "danger"} title={googleNote.tone === "ok" ? "Google connected" : "Google wasn't connected"}>{googleNote.text}</Banner>}
       {/* Stage 6 create requests: new Firebase projects waiting for the owner's approval. */}
       <PendingCreates member={member} types={["firebase_project"]} focus={create ?? null} />

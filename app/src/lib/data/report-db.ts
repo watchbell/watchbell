@@ -53,7 +53,7 @@ export async function reportMonths(now: Date, zone: string): Promise<string[]> {
 }
 
 async function rowsWithSites(where?: ReturnType<typeof eq>): Promise<ReportRow[]> {
-  const list = where ? await db().select().from(reports).where(where) : await db().select().from(reports).orderBy(asc(reports.clientName));
+  const list = await db().select().from(reports).where(where).orderBy(asc(reports.clientName));
   if (!list.length) return [];
   const ids = list.map((r) => r.id);
   const [sites, sends] = await Promise.all([
@@ -72,7 +72,8 @@ async function rowsWithSites(where?: ReturnType<typeof eq>): Promise<ReportRow[]
   });
 }
 
-export const listReports = (): Promise<ReportRow[]> => rowsWithSites();
+// 1.8: `ws` = the workspace shown (null or absent = every report; the monthly send reads them all).
+export const listReports = (ws: string | null = null): Promise<ReportRow[]> => rowsWithSites(ws ? eq(reports.workspaceId, ws) : undefined);
 export async function getReport(id: string): Promise<ReportRow | null> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   return (await rowsWithSites(eq(reports.id, id)))[0] ?? null;
@@ -184,10 +185,11 @@ async function replaceSites(tx: Tx, reportId: string, sites: ReportContent["site
   if (sites.length) await tx.insert(reportSites).values(sites.map((s) => ({ reportId, ...s })));
 }
 
-export async function createReport(c: ReportContent): Promise<string> {
+// 1.8: `ws` = the workspace the new report belongs to (absent: the default workspace, by the column default).
+export async function createReport(c: ReportContent, ws?: string): Promise<string> {
   const { sites, ...row } = c;
   return db().transaction(async (tx) => {
-    const [r] = await tx.insert(reports).values(row).returning({ id: reports.id });
+    const [r] = await tx.insert(reports).values(ws ? { ...row, workspaceId: ws } : row).returning({ id: reports.id });
     await replaceSites(tx, r.id, sites);
     return r.id;
   });
@@ -216,9 +218,9 @@ export async function deleteReport(id: string): Promise<boolean> {
 
 // The Reports editor's list of uptime monitors (HTTP only): "app · host/path". Console-only; the PDF uses the
 // display names the owner types instead.
-export async function reportMonitorOptions(): Promise<{ id: string; label: string }[]> {
+export async function reportMonitorOptions(ws: string | null = null): Promise<{ id: string; label: string }[]> {
   const rows = await db().select({ id: monitors.id, url: monitors.url, app: resources.name }).from(monitors)
-    .innerJoin(resources, eq(resources.id, monitors.resourceId)).where(eq(monitors.kind, "http")).orderBy(asc(resources.name), asc(monitors.url));
+    .innerJoin(resources, eq(resources.id, monitors.resourceId)).where(and(eq(monitors.kind, "http"), ws ? eq(resources.workspaceId, ws) : undefined)).orderBy(asc(resources.name), asc(monitors.url));
   return rows.map((r) => {
     let where = r.url;
     try {

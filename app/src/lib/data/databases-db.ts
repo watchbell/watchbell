@@ -16,11 +16,12 @@ export type DbRow = {
 };
 
 // Watched databases of one kind with their snapshot, account label and the apps linked to them. Bounded (R8).
-export async function listDatabases(kind: DbKind): Promise<DbRow[]> {
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function listDatabases(kind: DbKind, ws: string | null = null): Promise<DbRow[]> {
   const rows = await db().select({ r: resources, s: snapshots, account: accounts.label }).from(resources)
     .innerJoin(accounts, eq(accounts.id, resources.accountId))
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
-    .where(and(eq(resources.kind, kind), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(eq(resources.kind, kind), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(resources.name).limit(PAGE_ROWS.databases);
   if (!rows.length) return [];
   const users = await db().select({ dbId: links.toResourceId, id: resources.id, name: resources.name }).from(links)
@@ -61,11 +62,11 @@ export async function supabaseSlotInputs(): Promise<SlotInput[]> {
 export type LinkedDb = { id: string; externalId: string; name: string; kind: DbKind; account: string; state: State };
 
 // Edit link dialog: every watched database, any provider.
-export async function databaseOptions(): Promise<DbOption[]> {
+export async function databaseOptions(ws: string | null = null): Promise<DbOption[]> {
   const rows = await db().select({ id: resources.id, name: resources.name, kind: resources.kind, externalId: resources.externalId, account: accounts.label, data: snapshots.data }).from(resources)
     .innerJoin(accounts, eq(accounts.id, resources.accountId))
     .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
-    .where(and(inArray(resources.kind, [...DB_KINDS]), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(inArray(resources.kind, [...DB_KINDS]), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(resources.name).limit(PAGE_ROWS.databases);
   return rows.map((r) => dbOptionFrom({ ...r, kind: r.kind as DbKind }));
 }

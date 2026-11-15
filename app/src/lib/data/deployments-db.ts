@@ -23,10 +23,11 @@ export function toDeployLite(d: typeof deployments.$inferSelect): DeployLite {
 export type DeploymentRow = DeployLite & { appId: string; appName: string; primaryDomain?: string | null };
 
 // Deployments page (and the app page's tab): newest first, watched apps only, at most 200 rows (R8).
-export async function listDeployments(opts: { appId?: string } = {}): Promise<DeploymentRow[]> {
+// 1.8: opts.ws = the workspace shown (absent or null = every workspace).
+export async function listDeployments(opts: { appId?: string; ws?: string | null } = {}): Promise<DeploymentRow[]> {
   const rows = await db().select({ d: deployments, appName: resources.name, meta: resources.meta }).from(deployments)
     .innerJoin(resources, eq(resources.id, deployments.resourceId))
-    .where(and(eq(resources.monitored, true), opts.appId ? eq(deployments.resourceId, opts.appId) : undefined))
+    .where(and(eq(resources.monitored, true), opts.appId ? eq(deployments.resourceId, opts.appId) : undefined, opts.ws ? eq(resources.workspaceId, opts.ws) : undefined))
     .orderBy(desc(deployments.createdAtProvider)).limit(PAGE_ROWS.deployments);
   return rows.map(({ d, appName, meta }) => ({
     ...toDeployLite(d), appId: d.resourceId, appName,
@@ -58,10 +59,10 @@ export async function deploymentState(appId: string, externalId: string): Promis
 
 // Overview → Activity → Ongoing. A build older than an hour that still says "building" was never updated, as in the
 // collector's app state rule, so it isn't shown as ongoing.
-export async function ongoingBuilds(now: Date): Promise<DeploymentRow[]> {
+export async function ongoingBuilds(now: Date, ws: string | null = null): Promise<DeploymentRow[]> {
   const rows = await db().select({ d: deployments, appName: resources.name }).from(deployments)
     .innerJoin(resources, eq(resources.id, deployments.resourceId))
-    .where(and(eq(resources.monitored, true), eq(deployments.state, "building"), gte(deployments.createdAtProvider, new Date(now.getTime() - 3_600_000))))
+    .where(and(eq(resources.monitored, true), eq(deployments.state, "building"), gte(deployments.createdAtProvider, new Date(now.getTime() - 3_600_000)), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(desc(deployments.createdAtProvider)).limit(PAGE_ROWS.ongoingBuilds);
   return rows.map(({ d, appName }) => ({ ...toDeployLite(d), appId: d.resourceId, appName }));
 }

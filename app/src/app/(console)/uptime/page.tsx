@@ -29,6 +29,8 @@ import { MonitorDialog } from "./monitor-dialog";
 import { DomainMoved } from "./domain-moved";
 import { MonitorMenu } from "./monitor-menu";
 import { Masked, MaskedText } from "@/components/alias";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Check now runs an HTTP check (up to 10 s) inside this page's server action.
 export const maxDuration = 30;
@@ -50,7 +52,9 @@ export default async function UptimePage() {
   const member = await requirePageMember();
   const now = new Date();
   const act = canAct(member.role);
-  const [mons, apps, windows, pub] = await Promise.all([listMonitors(now), act ? appOptions() : Promise.resolve([]), listWindows(), publicMonitorIds()]); // perf P4
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
+  const ws = wsc.id;
+  const [mons, apps, windows, pub] = await Promise.all([listMonitors(now, ws), act ? appOptions(ws) : Promise.resolve([]), listWindows(), publicMonitorIds()]); // perf P4
   // U5 / B3: a monitor inside a maintenance window, heartbeats included, reads "Maintenance · until HH:MM" (WIB).
   const shown = mons.map((m) => ({ m, s: monitorStatus(m, activeFor(windows, { monitorId: m.id, appId: m.appId }, now), now) }));
   const counts = summaryCounts(shown.map(({ m, s }) => ({ state: s.state, appGone: m.appGone })));
@@ -96,6 +100,9 @@ export default async function UptimePage() {
   const options: TargetOptions = {
     apps: apps.map((a) => ({ id: a.id, name: a.name })),
     monitors: mons.filter((m) => !m.appGone).map((m) => ({ id: m.id, label: isHeartbeat(m) ? `${m.appName} · ${m.path}` : `${m.appName}${m.path}` })),
+    // 1.8: a window for the workspace shown, when there are several.
+    workspace: wsc.list.length > 1 && wsc.id ? { id: wsc.id, name: wsc.list.find((w) => w.id === wsc.id)?.name ?? "" } : null,
+    many: wsc.list.length > 1,
   };
   const maintRows: ListRow[] = windows.map((w) => {
     const t = windowText(w, now);
@@ -124,6 +131,7 @@ export default async function UptimePage() {
         sub={isCloud() ? UPTIME_COPY.sub.cloud : UPTIME_COPY.sub.selfhost}
         actions={act ? <><RefreshButton /><MaintenanceDialog mode="add" options={options} /><MonitorDialog mode="add" apps={apps} /></> : undefined}
       />
+      {act && <MoveToWorkspace kind="resource" items={[...new Map(mons.map((m) => [m.appId, { id: m.appId, name: m.appName, hint: "with its monitors and domains" }])).values()]} workspaces={wsc.list} current={wsc.id} />}
       <div className="grid grid-cols-1 gap-4 min-[721px]:grid-cols-2 min-[1281px]:grid-cols-5">
         {SUMMARY.map(([title, key]) => (
           <Card key={title} title={title}>

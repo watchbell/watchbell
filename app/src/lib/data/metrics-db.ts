@@ -169,12 +169,13 @@ export type Health = {
 };
 
 // Overview → Health: the last 24 h of every watched app, as totals and 30 points of 48 minutes each.
-export async function health(now: Date): Promise<Health> {
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function health(now: Date, ws: string | null = null): Promise<Health> {
   const size = 48 * 60_000;
   const n = WINDOWS.healthBuckets;
   const first = firstBucket(now, size, n);
   const since = new Date(first);
-  const watched = and(eq(resources.monitored, true), isNull(resources.goneAt));
+  const watched = and(eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined);
   const t = bin("48 minutes", checks.at);
   const dt = bin("48 minutes", deployments.createdAtProvider);
   // Three independent reads, sent together (perf P4).

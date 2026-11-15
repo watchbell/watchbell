@@ -13,14 +13,19 @@ import { aliasBook, listDatabases } from "@/lib/data/cached";
 import { D1_FREE } from "@/lib/databases/extra";
 import { cn } from "@/lib/utils";
 import { D1_ACCESS_KEY, d1AccessNote, d1Views, parseD1Access } from "@/lib/view/extra-dbs";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { canAct } from "@/lib/view/labels";
+import { dbAlias } from "@/lib/view/display-name";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Stage 8: Cloudflare D1 databases under the Cloudflare accounts on Connections (the same token: "D1 Read" lists them,
 // "Account Analytics Read" adds rows read and written). New databases are watched automatically and read hourly.
 export default async function D1Page() {
   const member = await requirePageMember();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const now = new Date();
   const [rows, book, cfAccounts, accessRow] = await Promise.all([
-    listDatabases("d1_database"), aliasBook(),
+    listDatabases("d1_database", wsc.id), aliasBook(),
     // Labels only: no credential column is selected.
     db().select({ id: accounts.id, label: accounts.label }).from(accounts).where(eq(accounts.provider, "cloudflare")).orderBy(asc(accounts.createdAt)).limit(20),
     db().select({ value: settings.value }).from(settings).where(eq(settings.key, D1_ACCESS_KEY)).limit(1),
@@ -40,6 +45,7 @@ export default async function D1Page() {
         sub="Size from the D1 API and rows read and written today (UTC) from Cloudflare's GraphQL analytics, read hourly with the Cloudflare token on Connections. Watchbell never runs a query on a database."
         actions={member.role === "owner" ? <Link href="/connections" className={buttonClass()}>Manage accounts</Link> : undefined}
       />
+      {canAct(member.role) && <MoveToWorkspace kind="resource" items={rows.map((r) => ({ id: r.id, name: dbAlias(book, r.id) }))} workspaces={wsc.list} current={wsc.id} />}
       {member.role === "owner" && notes.map((a) => (
         <Banner key={a.id} tone={a.note.tone === "warn" ? "warning" : "info"} title={<span className="inline-flex items-center gap-2">D1 access <AccountChip name={a.label} /></span>}>
           {a.note.text}

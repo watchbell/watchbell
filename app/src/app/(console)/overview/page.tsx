@@ -10,6 +10,8 @@ import { requirePageMember } from "@/lib/auth";
 import { PendingCreates } from "@/components/create/pending-creates";
 import { listRecommendations } from "@/lib/data/advisor-db";
 import { listApps } from "@/lib/data/apps-db";
+import { unsortedCount } from "@/lib/data/workspace-db";
+import { UnsortedNote } from "@/components/unsorted-note";
 import { ongoingBuilds } from "@/lib/data/deployments-db";
 import { aliasBook, listDatabases, listDomains, supabaseSlotInputs } from "@/lib/data/cached";
 import { listEvents } from "@/lib/data/events-db";
@@ -32,6 +34,7 @@ import { ActivityCard } from "./activity-card";
 import { HealthCard } from "./health-card";
 import { InventoryCard } from "./inventory-card";
 import { StatusStrip } from "./status-strip";
+import { currentWorkspace } from "@/lib/workspace/current";
 
 // "Refresh now" runs the collector inside this page's server action; approving a Firebase create (Stage 6) polls
 // Google's operations, up to about 35 s.
@@ -46,11 +49,14 @@ export default async function OverviewPage() {
   const { RecSummarySlot: RecSummary, AiNotesSlot: AiNotes } = extensions;
   // Independent reads, started together (task 12 M1). This cuts latency, not database work.
   // The Advisor is a side card: if its row can't be read the card is left out instead of failing Overview (null).
-  const [apps, h, events, builds, run, broken, supa, neon, fire, slotInputs, domains, stored, book, pool, staleMs] = await Promise.all([
-    listApps(now), health(now), listEvents(PAGE_ROWS.recentEvents, { excludeActions: true }), ongoingBuilds(now), lastMinuteRun(), brokenAccounts(),
-    listDatabases("supabase_project"), listDatabases("neon_project"), listDatabases("firestore"), supabaseSlotInputs(), listDomains(),
+  // 1.8: everything about apps and databases is the chosen workspace's; the collector, accounts and the pool are the install's.
+  const ws = (await currentWorkspace()).id;
+  const [apps, h, events, builds, run, broken, supa, neon, fire, slotInputs, domains, stored, book, pool, staleMs, unsorted] = await Promise.all([
+    listApps(now, undefined, ws), health(now, ws), listEvents(PAGE_ROWS.recentEvents, { excludeActions: true, ws }), ongoingBuilds(now, ws), lastMinuteRun(), brokenAccounts(),
+    listDatabases("supabase_project", ws), listDatabases("neon_project", ws), listDatabases("firestore", ws), supabaseSlotInputs(), listDomains(ws),
     listRecommendations(now).catch(() => null), aliasBook(), isCloud() ? poolUsage() : Promise.resolve(null),
     collectorStaleLimit().catch(() => undefined),
+    unsortedCount(now).catch(() => 0),
   ]);
   // Privacy: databases by alias, no emails, in every text this page shows (lib/view/display-name.ts).
   const recent = events.map((e) => hideEvent(e, book));
@@ -72,6 +78,7 @@ export default async function OverviewPage() {
     <>
       <AutoRefresh at={now.getTime()} />
       <PageHeader crumbs={[{ label: "Home" }, { label: "Overview" }]} title="Overview" sub={summary ?? undefined} actions={act ? <RefreshButton /> : undefined} />
+      <UnsortedNote count={unsorted} />
       <StatusStrip vercel={vercelCell(appStates)} supabase={supabaseCell(supa, now)} neon={neonCell(neon, now, book)} firebase={firebaseCell(fire, now)} cloudflare={cloudflareCell(domains)} collector={isDemo() ? { state: "ok", sub: DEMO_COLLECTOR_TEXT } : collectorCell(run, now, staleMs)} />
       {cred && (
         <Banner tone="danger" title={cred.title} action={member.role === "owner" ? <Link href="/connections" className={buttonClass({ size: "sm" })}>Open connections</Link> : undefined}>

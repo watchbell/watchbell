@@ -17,6 +17,8 @@ import { SetDnsOnlyButton } from "../dns/record-actions";
 import { RecheckButton } from "./recheck-button";
 import { MaskedText } from "@/components/alias";
 import { outboundLinks } from "@/lib/demo/links";
+import { currentWorkspace } from "@/lib/workspace/current";
+import { MoveToWorkspace } from "@/components/move-to-workspace";
 
 // Re-check runs a TLS handshake and an RDAP read (up to ~20 s).
 export const maxDuration = 30;
@@ -35,7 +37,8 @@ function dnsOnlyAction(d: { zoneId: string | null; records: { id: string; type: 
 export default async function DomainsPage() {
   const member = await requirePageMember();
   const now = new Date();
-  const list = await listDomains();
+  const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
+  const list = await listDomains(wsc.id);
   const act = canAct(member.role);
   const links = outboundLinks(); // demo: the domains are made up, so no Visit
   const proxied = list.filter((d) => dnsCell(d.records, d.isVercel, d.zoneName, d.vercel?.recommendedIps ?? []).proxiedToVercel);
@@ -47,6 +50,7 @@ export default async function DomainsPage() {
         title="Domains"
         sub="Every domain of a watched app. DNS from Cloudflare, configuration from Vercel, domain expiry from RDAP, certificate expiry from Watchbell's own TLS check."
       />
+      {act && <MoveToWorkspace kind="resource" items={list.map((d) => ({ id: d.id, name: d.name, hint: d.appName ? `moves the app ${d.appName}` : undefined }))} workspaces={wsc.list} current={wsc.id} />}
       {proxied.map((d) => (
         <Banner key={d.id} tone="warning" title={`${d.name} is proxied by Cloudflare`} action={act ? dnsOnlyAction(d, member.role === "owner") : undefined}>
           {proxiedBannerText(daysLeft(isoDate(d.tls?.notAfter), now))}

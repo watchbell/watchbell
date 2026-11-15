@@ -41,7 +41,7 @@ describe("exampleFrom", () => {
   it("round-trips through applyExample", () => {
     const op = opById("status")!;
     const saved = exampleFrom(op, { ...initialBuilder(op), query: [{ name: "include", value: "alerts" }] }, "only alerts", "i", now);
-    expect(saved.ok && applyExample(op, saved.example).query).toEqual([{ name: "include", value: "alerts" }]);
+    expect(saved.ok && applyExample(op, saved.example).query).toEqual([{ name: "include", value: "alerts" }, { name: "workspace", value: "" }]);
   });
 });
 

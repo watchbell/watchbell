@@ -44,13 +44,14 @@ function domainFacts(d: DomainView, now: Date): TopoFact[] {
 
 // Privacy: a database node shows its alias (`alias`; the drawer reveals `name` on click), the Database fact lists
 // aliases, and account labels lose their emails.
-export async function topologyColumns(now: Date, book: AliasBook): Promise<[TopoNode[], TopoNode[], TopoNode[]]> {
-  const apps = (await listApps(now)).filter((a) => !a.gone);
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function topologyColumns(now: Date, book: AliasBook, ws: string | null = null): Promise<[TopoNode[], TopoNode[], TopoNode[]]> {
+  const apps = (await listApps(now, undefined, ws)).filter((a) => !a.gone);
   const dbs = await db().select({ r: resources, s: snapshots, label: accounts.label }).from(resources)
     .innerJoin(accounts, eq(accounts.id, resources.accountId)).leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
-    .where(and(inArray(resources.kind, [...DB_KINDS]), eq(resources.monitored, true), isNull(resources.goneAt))).orderBy(asc(resources.name)).limit(200);
+    .where(and(inArray(resources.kind, [...DB_KINDS]), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined)).orderBy(asc(resources.name)).limit(200);
   const edges = await appDbLinks();
-  const domains = await listDomains();
+  const domains = await listDomains(ws);
   const watched = new Set(dbs.map(({ r }) => r.id));
   const appOrder = new Map(apps.map((a, i) => [a.id, i]));
   const domCol: TopoNode[] = domains

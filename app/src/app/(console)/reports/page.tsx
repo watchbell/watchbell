@@ -6,6 +6,7 @@ import { notifyEnv } from "@/lib/notify/env";
 import { timeZone } from "@/lib/time";
 import { zoneDay } from "@/lib/zone-day";
 import { ReportsView } from "./reports-view";
+import { currentWorkspace, workspaceForEditing } from "@/lib/workspace/current";
 
 // Watchbell 1.7 (spec §2.1): Manage › Reports, for every member. Viewers get the list without recipients (personal
 // data); the editor's monitor list and the senders are read only for those who can use them.
@@ -18,8 +19,10 @@ export default async function ReportsPage() {
   const zone = timeZone();
   const now = new Date();
   const editor = role !== "viewer";
+  // 1.8: the workspace's reports; a new report and its website picker belong to the workspace shown (or the default).
+  const [ws, editing] = await Promise.all([currentWorkspace(), workspaceForEditing()]);
   const [reports, finished, monitors, smtp] = await Promise.all([
-    listReports(), reportMonths(now, zone), editor ? reportMonitorOptions() : Promise.resolve([]), role === "owner" ? readChannel("smtp").catch(() => null) : Promise.resolve(null),
+    listReports(ws.id), reportMonths(now, zone), editor ? reportMonitorOptions(editing) : Promise.resolve([]), role === "owner" ? readChannel("smtp").catch(() => null) : Promise.resolve(null),
   ]);
   const current = zoneDay(now, zone).slice(0, 7);
   const months = [...finished.map((m) => ({ value: m, label: monthLabel(m) })), { value: current, label: `${monthLabel(current)} (so far)` }];

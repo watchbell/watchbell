@@ -51,19 +51,20 @@ export function toMonitorLite(m: typeof monitors.$inferSelect): MonitorLite {
 
 // move (Watchbell 1.2.1): the HTTP monitor's host is no longer a domain of its app (lib/domain-move.ts): "Domain
 // changed: from → to" with Update monitor, instead of reading as the app being down.
-export type MonitorRow = MonitorLite & { appName: string; appGone: boolean; days: Map<string, DayCount> | undefined; uptime30: number | null; move?: DomainMove | null };
+export type MonitorRow = MonitorLite & { appName: string; appGone: boolean; days: Map<string, DayCount> | undefined; uptime30: number | null; move?: DomainMove | null; workspaceId?: string };
 
 // Uptime page: every monitor of a watched app, with its 90 days and 30-day uptime. Per app, HTTP checks come before
 // heartbeats ('http' sorts after 'heartbeat', hence desc), as in the mockup.
-export async function listMonitors(now: Date): Promise<MonitorRow[]> {
-  const rows = await db().select({ m: monitors, appName: resources.name, goneAt: resources.goneAt, appMeta: resources.meta }).from(monitors)
+// 1.8: `ws` = the workspace shown (null = every workspace).
+export async function listMonitors(now: Date, ws: string | null = null): Promise<MonitorRow[]> {
+  const rows = await db().select({ m: monitors, appName: resources.name, goneAt: resources.goneAt, appMeta: resources.meta, ws: resources.workspaceId }).from(monitors)
     .innerJoin(resources, eq(resources.id, monitors.resourceId))
-    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true)))
+    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(resources.name, desc(monitors.kind), monitors.url).limit(PAGE_ROWS.monitors);
   const days = await monitorDays(rows.map((r) => r.m.id), now);
   const moves = await movesOf(rows.map((r) => ({ id: r.m.id, kind: r.m.kind, url: r.m.url, appId: r.m.resourceId, appName: r.appName, appMeta: r.appMeta, lastError: r.m.lastError })));
-  return rows.map(({ m, appName, goneAt }) => ({
-    ...toMonitorLite(m), appName, appGone: goneAt !== null, days: days.get(m.id), uptime30: uptimePct(lastDays(days.get(m.id), now, UPTIME_DAYS)),
+  return rows.map(({ m, appName, goneAt, ws: workspaceId }) => ({
+    ...toMonitorLite(m), appName, appGone: goneAt !== null, workspaceId, days: days.get(m.id), uptime30: uptimePct(lastDays(days.get(m.id), now, UPTIME_DAYS)),
     move: moves.get(m.id) ?? null,
   }));
 }
@@ -102,9 +103,9 @@ const isHeartbeat = (m: { kind?: string | null }) => m.kind === "heartbeat";
 const targetOf = (m: { kind?: string | null; name?: string | null; url: string }) => (isHeartbeat(m) ? (m.name ?? "heartbeat") : hostPath(m.url));
 
 // Add monitor → Application select: watched apps with the domain their first monitor checks.
-export async function appOptions(): Promise<AppOption[]> {
+export async function appOptions(ws: string | null = null): Promise<AppOption[]> {
   const apps = await db().select({ id: resources.id, name: resources.name }).from(resources)
-    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt)))
+    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt), ws ? eq(resources.workspaceId, ws) : undefined))
     .orderBy(resources.name).limit(PAGE_ROWS.apps);
   if (!apps.length) return [];
   // A heartbeat's url ("heartbeat:backup-job") names no domain.

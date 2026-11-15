@@ -28,6 +28,9 @@ vi.mock("@/lib/data/events-db", () => ({ listEvents: h.listEvents }));
 vi.mock("@/lib/data/logs-db", () => ({ listStoredLogs: h.listStoredLogs }));
 vi.mock("@/lib/data/advisor-db", () => ({ listRecommendations: h.listRecommendations }));
 vi.mock("@/lib/data/cached", () => ({ aliasBook: h.aliasBook, listDatabases: h.listDatabases }));
+// 1.8: one workspace unless a test says otherwise.
+const wsm = vi.hoisted(() => ({ list: [] as { id: string; name: string; position: number }[], ids: new Map<string, string>() }));
+vi.mock("@/lib/data/workspace-db", () => ({ listWorkspaces: async () => wsm.list, alertWorkspaceIds: async () => wsm.ids }));
 
 import { appDetail, consoleSnapshot, resolveApp, snapApps, snapDatabases, snapEvents, snapLogs, snapMonitors } from "./snapshot";
 
@@ -58,6 +61,8 @@ const dbApp = app({
 });
 
 beforeEach(() => {
+  wsm.list = [];
+  wsm.ids = new Map();
   vi.resetAllMocks();
   for (const m of h.memos) m.clear();
   h.aliasBook.mockResolvedValue(book);
@@ -200,5 +205,30 @@ describe("snapEvents / snapLogs / snapDatabases", () => {
     h.listDatabases.mockImplementation(async (kind: string) => (kind === "supabase_project"
       ? [{ id: "db-1", name: "atlas-main", kind, account: "x", state: "paused", stateSince: null, usedBy: [{ id: "app-2", name: "acme-shop" }], externalId: "ref", data: {} }] : []));
     expect(await snapDatabases()).toEqual([{ name: "db-a", provider: "supabase", state: "paused", since: null, usedBy: ["acme-shop"] }]);
+  });
+});
+
+// Watchbell 1.8 (spec §5, API): ?workspace= narrows the snapshot to one workspace; with several workspaces each app,
+// monitor and alert names its workspace.
+describe("consoleSnapshot with workspaces (1.8)", () => {
+  it("reads one workspace and names each item's workspace", async () => {
+    wsm.list = [{ id: "wA", name: "Kopi Senja", position: 0 }, { id: "wB", name: "Northwind", position: 1 }];
+    wsm.ids = new Map([["al-a", "wA"], ["al-b", "wB"]]);
+    h.listApps.mockResolvedValue([app({ workspaceId: "wA" })]);
+    h.listMonitors.mockResolvedValue([{ ...mon({ state: "err" }), appName: "orbit-blog", appGone: false, uptime30: 99, workspaceId: "wA" }]);
+    const firing = (id: string, title: string) => ({ id, title, message: "x", severity: "critical", resourceKind: "app", resourceName: "orbit-blog", startedAt: now, resourceId: "app-1", ruleKey: "MonitorDown", subject: "m1", causedBy: null });
+    h.listFiring.mockResolvedValue([firing("al-a", "a down"), firing("al-b", "b down")]);
+    const snap = await consoleSnapshot(now, ["apps", "monitors", "alerts"], "wA");
+    expect(h.listApps).toHaveBeenCalledWith(now, undefined, "wA");
+    expect(h.listMonitors).toHaveBeenCalledWith(now, "wA");
+    expect(snap.apps[0]).toMatchObject({ id: "orbit-blog", workspace: "Kopi Senja" });
+    expect((snap.monitors.items as { workspace?: string }[])[0].workspace).toBe("Kopi Senja");
+    expect(snap.alerts.open).toBe(1);
+    expect((snap.alerts.items as { title: string; workspace?: string }[])).toEqual([expect.objectContaining({ title: "a down", workspace: "Kopi Senja" })]);
+  });
+
+  it("adds no workspace field with a single workspace", async () => {
+    const snap = await consoleSnapshot(now, ["apps"]);
+    expect(snap.apps[0]).not.toHaveProperty("workspace");
   });
 });

@@ -428,6 +428,20 @@
       "when": 1794577587787,
       "tag": "0064_report_send_rule",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1794726000981,
+      "tag": "0065_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 66,
+      "version": "7",
+      "when": 1794726028824,
+      "tag": "0066_workspaces_lockdown",
+      "breakpoints": true
     }
   ]
 }

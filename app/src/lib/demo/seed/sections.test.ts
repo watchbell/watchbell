@@ -1,12 +1,12 @@
 import { PGlite } from "@electric-sql/pglite";
-import { asc, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { selfhostMigrationsFolder } from "@/db/pglite";
 import { rowsOf } from "@/db/rows";
 import * as schema from "@/db/schema";
-import { accounts, alerts, events, keepActive, links, providerStatus, resources, settings, snapshots, storedLogs } from "@/db/schema";
+import { accounts, alerts, events, keepActive, links, monitors, providerStatus, resources, settings, snapshots, storedLogs } from "@/db/schema";
 import { supabaseMetrics, supabaseMetricsKeys } from "@/db/compute-schema";
 
 // Task 5: every console section's loader returns data against a seeded visitor database. The loaders read through
@@ -37,6 +37,7 @@ import { readBrand } from "@/lib/data/branding-db";
 import { listReports } from "@/lib/data/report-db";
 import { makeReportPdf } from "@/lib/report/make";
 import { deployDays, reports, reportSends, reportSites } from "@/db/report-schema";
+import { workspaces as schemaWorkspaces } from "@/db/schema";
 import { seedDemoDb } from "./index";
 
 type Drizzle = ReturnType<typeof drizzle<typeof schema>>;
@@ -262,7 +263,8 @@ describe("demo dataset: every console section has data", () => {
       metrics: await d.select().from(supabaseMetrics).orderBy(asc(supabaseMetrics.hour)),
       logs: await d.select().from(storedLogs).orderBy(asc(storedLogs.id)),
       status: await d.select().from(providerStatus).orderBy(asc(providerStatus.provider)),
-      settings: await d.select().from(settings).where(sql`key <> 'advisor.latest'`).orderBy(asc(settings.key)), // the first view computes it
+      // advisor.latest: the first view computes it; workspace.default: written by the migration (1.8), not the seed.
+      settings: await d.select().from(settings).where(sql`key not in ('advisor.latest', 'workspace.default')`).orderBy(asc(settings.key)),
       proposals: rowsOf(await d.execute(sql`select * from ops.action_proposals order by id`)),
       usage: rowsOf(await d.execute(sql`select at, model, tokens_in, tokens_out, latency_ms, status from ops.ai_usage order by at, id`)),
       // 1.7.1 (review M-10): the report rows too.
@@ -270,6 +272,9 @@ describe("demo dataset: every console section has data", () => {
       reportSites: await d.select().from(reportSites).orderBy(asc(reportSites.reportId), asc(reportSites.position)),
       reportSends: await d.select().from(reportSends).orderBy(asc(reportSends.reportId), asc(reportSends.month)),
       deployDays: await d.select().from(deployDays).orderBy(asc(deployDays.resourceId), asc(deployDays.day)),
+      // 1.8: the workspaces and where each resource sits.
+      workspaces: await d.select().from(schemaWorkspaces).orderBy(asc(schemaWorkspaces.position)),
+      placement: (await d.select({ id: resources.id, ws: resources.workspaceId }).from(resources).orderBy(asc(resources.id))),
     });
     expect(await dump(again)).toEqual(await dump(a));
   }, 60_000);
@@ -286,4 +291,20 @@ describe("demo dataset: reports and branding (1.7)", () => {
     if ("error" in made) throw new Error(made.error);
     expect(new TextDecoder().decode(made.bytes.slice(0, 5))).toBe("%PDF-");
   }, 30_000);
+});
+
+// Watchbell 1.8: the demo shows workspaces with the same made-up clients as its reports.
+describe("demo dataset: workspaces (1.8)", () => {
+  it("has Personal and two clients, each client holding its report and its report's apps", async () => {
+    const list = await a.select().from(schemaWorkspaces).orderBy(asc(schemaWorkspaces.position));
+    expect(list.map((w) => w.name)).toEqual(["Personal", "Kopi Senja", "Northwind Studio"]);
+    const byName = new Map(list.map((w) => [w.name, w.id]));
+    const reps = await a.select().from(reports);
+    expect(reps.find((r) => r.clientName === "Kopi Senja")?.workspaceId).toBe(byName.get("Kopi Senja"));
+    expect(reps.find((r) => r.clientName === "Northwind Studio")?.workspaceId).toBe(byName.get("Northwind Studio"));
+    const sites = await a.select({ reportId: reportSites.reportId, ws: resources.workspaceId }).from(reportSites)
+      .innerJoin(monitors, eq(monitors.id, reportSites.monitorId)).innerJoin(resources, eq(resources.id, monitors.resourceId));
+    for (const s of sites) expect(s.ws).toBe(reps.find((r) => r.id === s.reportId)?.workspaceId);
+    expect((await a.select().from(resources).where(eq(resources.workspaceId, byName.get("Personal") as string))).length).toBeGreaterThan(0);
+  });
 });

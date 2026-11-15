@@ -20,7 +20,7 @@ describe("initialBuilder", () => {
 describe("applyExample", () => {
   it("sets the named query value and goes back to the start for everything else", () => {
     const b = applyExample(op("status"), { query: { include: "alerts" } });
-    expect(b.query).toEqual([{ name: "include", value: "alerts" }]);
+    expect(b.query).toEqual([{ name: "include", value: "alerts" }, { name: "workspace", value: "" }]); // 1.8: the status operation lists ?workspace=
     expect(b.headers).toEqual([{ name: "X-Client", value: "api-explorer" }]);
   });
   it("adds names the operation doesn't list, and replaces the body", () => {

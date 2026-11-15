@@ -223,9 +223,12 @@ export async function createProposals(drafts: ProposalDraft[]): Promise<RunRow[]
 
 // ---- list ----
 // Pending first, then newest; the last 7 days; at most `limit`.
-export async function listProposals(now: Date, limit: number): Promise<Proposal[]> {
+// 1.8: `ws` = the workspace shown: proposals about its resources and those about none (null = every workspace).
+export async function listProposals(now: Date, limit: number, ws: string | null = null): Promise<Proposal[]> {
+  const recent = sql`${actionProposals.createdAt} >= ${new Date(now.getTime() - LIST_WINDOW_MS).toISOString()}::timestamptz`;
+  const inWs = ws ? sql`(${actionProposals.resourceId} is null or exists (select 1 from ops.resources r where r.id = ${actionProposals.resourceId} and r.workspace_id = ${ws}::uuid))` : null;
   const rows = await db().select(ROW).from(actionProposals)
-    .where(sql`${actionProposals.createdAt} >= ${new Date(now.getTime() - LIST_WINDOW_MS).toISOString()}::timestamptz`)
+    .where(inWs ? sql`${recent} and ${inWs}` : recent)
     .orderBy(sql`case when ${actionProposals.status} = 'pending' then 0 else 1 end`, desc(actionProposals.createdAt), desc(actionProposals.id))
     .limit(limit);
   return rows.map(toProposal);

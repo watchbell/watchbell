@@ -14,6 +14,7 @@ import { type MakeError, makeReportPdf } from "@/lib/report/make";
 import { markSend, markSentByOwner, reopenFailedSend, reportMail, sendReportMail, sendReportNow, UNKNOWN_OUTCOME } from "@/lib/report/send";
 import { timeZone } from "@/lib/time";
 import { zoneDay } from "@/lib/zone-day";
+import { workspaceForEditing } from "@/lib/workspace/current";
 
 // Watchbell 1.7 (spec §2.1): operators edit what a report says; owners decide who gets it and when; a test goes only
 // to the person asking. Audit lines name the client, never an address. In the demo, edits stay in the visitor's own
@@ -50,7 +51,7 @@ export async function saveReportContent(id: string | null, form: unknown): Promi
     try {
       if (id) {
         if (!(await updateReportContent(id, p.value))) return { ok: false, error: "That report no longer exists." };
-      } else saved = await createReport(p.value);
+      } else saved = await createReport(p.value, await workspaceForEditing()); // 1.8: in the workspace shown (or the default)
     } catch {
       return { ok: false, error: "A website in the list no longer exists. Reload the page and try again." };
     }

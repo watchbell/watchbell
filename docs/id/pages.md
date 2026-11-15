@@ -25,6 +25,7 @@ yang tidak disentuh selama 30 menit diperbarui paling sering setiap 4 menit.
 - [Database](#database)
 - [DevOps](#devops)
 - [Manage](#manage)
+- [Workspaces](#workspaces)
 - [Halaman di luar menu](#halaman-di-luar-menu)
 
 ## Home
@@ -321,6 +322,32 @@ teks error, atau nama provider. Unduh bulan mana pun yang datanya masih disimpan
 bahasa. Owner bisa mengirimnya otomatis tiap tanggal 1 dengan PDF terlampir, ke maksimal 5 alamat, lewat channel Email
 (SMTP) atau Resend; pengiriman yang gagal dicoba lagi tanggal 2 dan 3, lalu alert ReportSendFailed memberi tahu Anda;
 untuk bulan itu owner bisa **Send again** atau menandai **I sent it myself**. Operator mengubah isi laporan dan mengirim tes ke dirinya sendiri; viewer mengunduh.
+
+## Workspaces
+
+Workspace mengelompokkan barang milik satu klien: aplikasi, database, domain, monitor (beserta cek, uptime, dan
+alert-nya), deployment, event, repository, laporan bulanan, dan status page. Instalasi dimulai dengan satu workspace,
+**Personal**; tidak ada yang berubah sampai Anda menambah workspace lain (Settings › Workspaces, owner).
+
+- **Berpindah.** Header sidebar menampilkan workspace yang sedang dilihat; buka untuk memilih yang lain atau **All
+  workspaces**. Pilihan disimpan per browser. Halaman tentang aplikasi, database, dan alert menampilkan workspace yang
+  dipilih; Connections, Settings, member, Backups, dan halaman mesin tetap milik seluruh instalasi.
+- **All workspaces** (`/workspaces`): tiap workspace dengan kondisi terburuknya, jumlah aplikasi, monitor yang mati,
+  alert terbuka, dan deploy terakhir; **Open** berpindah ke sana. Alert tentang instalasi sendiri (collector, backup,
+  mesin ini) disebut sekali di atas.
+- **Memindahkan.** **Move to workspace…** di Applications, Uptime, Domains, halaman database, dan Repositories (operator
+  dan owner). Aplikasi pindah beserta domain, monitor, dan riwayatnya; memindahkan domain atau monitor berarti
+  memindahkan aplikasinya; repository yang terhubung ikut, kecuali dipakai aplikasi di workspace lain.
+- **Barang baru** masuk ke workspace default (Settings › Workspaces). Yang pertama terlihat dalam 14 hari terakhir
+  tercatat sebagai "new, not sorted" di Overview, Applications, dan All workspaces sampai dipindahkan atau dibiarkan.
+- **Status page dan laporan.** Satu status page per workspace, masing-masing di `/s/<alamat>` sendiri; Settings › Status
+  page mengedit milik workspace yang dipilih (workspace default saat All workspaces). Laporan juga milik satu workspace.
+- **Maintenance.** Jendela maintenance bisa untuk satu workspace ("This workspace") atau semuanya.
+- **Alert.** Lonceng menghitung semua workspace. Halaman Alerts menampilkan alert workspace yang dipilih plus alert
+  instalasi, dan menyebut berapa yang terbuka di workspace lain. Dengan beberapa workspace, notifikasi dan digest
+  diawali `[workspace]`. API `GET /api/v1/status?workspace=<id>` membaca satu workspace.
+- **Siapa melihat apa.** Workspace mengelompokkan, tidak menyembunyikan: setiap member melihat semua workspace dengan
+  role biasanya.
 
 ## Halaman di luar menu
 

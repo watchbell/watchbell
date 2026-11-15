@@ -86,11 +86,29 @@ export const eventTypeEnum = ops.enum("event_type", ["deployment", "monitor", "d
 export const triggerEnum = ops.enum("collector_trigger", ["cron_job_org", "qstash", "vercel_cron", "manual"]);
 
 // Everything Sync finds. `monitored` is the owner's tick in the Sync dialog; `gone_at` marks rows the provider stopped returning.
+// Watchbell 1.8 (docs/superpowers/specs/2026-11-15-watchbell-1-8-workspaces-design.md): a group per client. Everything
+// the console watches belongs to one; the upgrade puts every existing row in "Personal". Grouping, not a security
+// boundary: every member sees every workspace. Checks (name length, unique name) are in drizzle/0066.
+// New rows land in the default workspace unless the code says otherwise (children with their parent, things made in the
+// console in the current workspace): ops.default_workspace_id() (drizzle/0065) reads the "workspace.default" setting.
+export const DEFAULT_WORKSPACE = sql`ops.default_workspace_id()`;
+
+export const workspaces = ops.table("workspaces", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  position: integer("position").notNull().default(0),
+  ...stamps,
+});
+
 export const resources = ops.table(
   "resources",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+    // 1.8: a child (domain under an app, DNS record under a zone, Neon branch) always has its parent's workspace.
+    workspaceId: uuid("workspace_id").notNull().default(DEFAULT_WORKSPACE).references(() => workspaces.id),
+    // 1.8: set when the thing was moved or its "not sorted yet" note dismissed.
+    sortedAt: timestamp("sorted_at", { withTimezone: true }),
     kind: resourceKindEnum("kind").notNull(),
     externalId: text("external_id").notNull(),
     name: text("name").notNull(),
@@ -105,6 +123,7 @@ export const resources = ops.table(
   (t) => [
     uniqueIndex("resources_account_kind_external").on(t.accountId, t.kind, t.externalId),
     index("resources_account_kind").on(t.accountId, t.kind),
+    index("resources_workspace").on(t.workspaceId),
   ],
 );
 
@@ -195,7 +214,9 @@ export const rollupsHourly = ops.table(
 // every 7 × 24 h from starts_at.
 export const maintenanceWindows = ops.table("maintenance_windows", {
   id: uuid("id").primaryKey().defaultRandom(),
-  scope: text("scope").$type<"all" | "app" | "monitor">().notNull(),
+  scope: text("scope").$type<"all" | "app" | "monitor" | "workspace">().notNull(),
+  // 1.8: the workspace a "workspace" window quiets (null for the other scopes).
+  workspaceId: uuid("workspace_id").references(() => workspaces.id, { onDelete: "cascade" }),
   resourceId: uuid("resource_id").references(() => resources.id, { onDelete: "cascade" }),
   monitorId: uuid("monitor_id").references(() => monitors.id, { onDelete: "cascade" }),
   startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
@@ -216,6 +237,8 @@ export const recommendationDismissals = ops.table("recommendation_dismissals", {
 // U6: the public status page (one for now) and the monitors on it, under the owner's own names.
 export const statusPages = ops.table("status_pages", {
   id: uuid("id").primaryKey().defaultRandom(),
+  // 1.8: one status page per workspace.
+  workspaceId: uuid("workspace_id").notNull().unique().default(DEFAULT_WORKSPACE).references(() => workspaces.id),
   slug: text("slug").notNull().unique(),
   title: text("title").notNull(),
   announcement: text("announcement"),
@@ -488,6 +511,8 @@ export const githubRepos = ops.table(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     accountId: uuid("account_id").notNull().references(() => accounts.id, { onDelete: "cascade" }),
+    // 1.8: a repo has its own workspace (it follows an app it is linked to, unless apps elsewhere use it too).
+    workspaceId: uuid("workspace_id").notNull().default(DEFAULT_WORKSPACE).references(() => workspaces.id),
     externalId: text("external_id").notNull(),
     owner: text("owner").notNull(),
     name: text("name").notNull(),

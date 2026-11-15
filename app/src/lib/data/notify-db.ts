@@ -4,6 +4,8 @@ import { readBrand } from "./branding-db";
 import { ENV_COPY } from "@/lib/copy/edition";
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
+import { workspacePrefix } from "@/lib/workspace/alerts";
+import { alertWorkspaceNames } from "./workspace-db";
 import { alertRules, alerts, type ChannelKind, channels, checks, monitors, resources, settings, storedLogs } from "@/db/schema";
 import { composeMessage, type Notice } from "@/lib/alerts/compose";
 import type { MessageTemplates } from "@/lib/alerts/message-template";
@@ -177,7 +179,9 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
   // Read at send time, once per delivery (a changed setting applies to the next one); unreadable means English. Each
   // channel is composed in its own language, from this one read.
   // 1.2.4: the rules' custom texts, read once too.
-  const [book, langs, templates] = await Promise.all([lettersOrEmpty(), readNotifyLangs(), readMessageTemplates()]);
+  // 1.8: with several workspaces a notice names its workspace ("[Kopi Senja] shop /"); unreadable means no names.
+  const [book, langs, templates, ws] = await Promise.all([lettersOrEmpty(), readNotifyLangs(), readMessageTemplates(),
+    alertWorkspaceNames(rows.map(({ a }) => a)).catch(() => ({ count: 1, nameOf: new Map<string, string>() }))]);
   const accepted = new Set<string>();
   for (const kind of ["telegram", "discord", "webhook", "smtp"] as Push[]) {
     if (!configured.has(kind)) continue;
@@ -187,7 +191,7 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
     // Telegram is the owner's own chat, so it keeps the real names (Watchbell 1.2.2, D18).
     const notices: Notice[] = mine.map(({ a, threshold }) => {
       const shown = kind === "telegram" ? a : hideAlert(a, book);
-      return { kind: a.pending!, ruleKey: a.ruleKey, severity: a.severity, title: shown.title, message: shown.message, startedAt: a.startedAt, causedBy: shown.causedBy, provider: a.providerIncident, threshold };
+      return { kind: a.pending!, ruleKey: a.ruleKey, severity: a.severity, title: workspacePrefix(ws.nameOf.get(a.id), ws.count) + shown.title, message: shown.message, startedAt: a.startedAt, causedBy: shown.causedBy, provider: a.providerIncident, threshold };
     });
     const msg = composeMessage(notices, now, serverEnv().SITE_URL, kind === "webhook" ? "en" : kind === "smtp" ? langs.email : langs[kind], templates);
     const r = await send(kind, hideEmails(kind === "telegram" ? msg.telegram : msg.discord), kind === "webhook" ? notices.map((n) => ({ ...n, title: hideEmails(n.title), message: hideEmails(n.message) })) : undefined);
@@ -227,10 +231,10 @@ export async function digestData(now: Date): Promise<Omit<DigestInput, "siteUrl"
   const paused = await pausedSections();
   const severityOrder = sql`case ${alerts.severity} when 'critical' then 0 when 'warning' then 1 else 2 end`;
   const [firing, openedRows, resolvedRows, apps, providers] = await Promise.all([
-    db().select({ ruleKey: alerts.ruleKey, severity: alerts.severity, title: alerts.title, message: alerts.message, resourceId: alerts.resourceId, startedAt: alerts.startedAt }).from(alerts)
+    db().select({ id: alerts.id, ruleKey: alerts.ruleKey, subject: alerts.subject, severity: alerts.severity, title: alerts.title, message: alerts.message, resourceId: alerts.resourceId, startedAt: alerts.startedAt }).from(alerts)
       .where(and(isNull(alerts.resolvedAt), activeAlertFilter(paused))).orderBy(severityOrder, desc(alerts.startedAt)).limit(50),
     db().select({ n: sql<number>`count(*)::int` }).from(alerts).where(gte(alerts.startedAt, since)),
-    db().select({ ruleKey: alerts.ruleKey, title: alerts.title, resourceId: alerts.resourceId, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt }).from(alerts)
+    db().select({ id: alerts.id, ruleKey: alerts.ruleKey, subject: alerts.subject, title: alerts.title, resourceId: alerts.resourceId, startedAt: alerts.startedAt, resolvedAt: alerts.resolvedAt }).from(alerts)
       .where(and(isNotNull(alerts.resolvedAt), gte(alerts.resolvedAt, since))).orderBy(desc(alerts.resolvedAt)).limit(20),
     db().select({ id: resources.id, name: resources.name }).from(resources)
       .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt))).orderBy(resources.name).limit(PAGE_ROWS.apps),
@@ -247,10 +251,13 @@ export async function digestData(now: Date): Promise<Omit<DigestInput, "siteUrl"
   const errs = new Map(errors.map((e) => [e.id, e.n]));
   // Privacy: databases by alias and no emails in the alerts' text (buildDigest hides any email left).
   const book = await lettersOrEmpty();
+  // 1.8: with several workspaces each alert names its workspace, as in the notices.
+  const ws = await alertWorkspaceNames([...firing, ...resolvedRows]).catch(() => ({ count: 1, nameOf: new Map<string, string>() }));
+  const pre = (id: string) => workspacePrefix(ws.nameOf.get(id), ws.count);
   return {
     now, opened: openedRows[0]?.n ?? 0,
-    firing: firing.map(({ resourceId, ...a }) => { const shown = hideAlert({ ...a, resourceId, causedBy: null }, book); return { ...a, title: shown.title, message: shown.message }; }),
-    resolved: resolvedRows.flatMap((r) => (r.resolvedAt ? [{ ruleKey: r.ruleKey, title: hideAlert({ title: r.title, message: "", causedBy: null, resourceId: r.resourceId }, book).title, took: tookText(r.startedAt, r.resolvedAt) }] : [])),
+    firing: firing.map(({ resourceId, id, subject: _subject, ...a }) => { const shown = hideAlert({ ...a, resourceId, causedBy: null }, book); return { ...a, title: pre(id) + shown.title, message: shown.message }; }),
+    resolved: resolvedRows.flatMap((r) => (r.resolvedAt ? [{ ruleKey: r.ruleKey, title: pre(r.id) + hideAlert({ title: r.title, message: "", causedBy: null, resourceId: r.resourceId }, book).title, took: tookText(r.startedAt, r.resolvedAt) }] : [])),
     apps: apps.map((a) => {
       const u = up.get(a.id);
       return { name: a.name, uptime: u && u.total > 0 ? ((u.total - u.bad) / u.total) * 100 : null, errors: errs.get(a.id) ?? 0 };

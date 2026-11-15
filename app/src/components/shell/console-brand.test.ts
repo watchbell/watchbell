@@ -25,3 +25,12 @@ describe("the console's brand (1.7.1, review M-9)", () => {
     expect(renderToStaticMarkup(h(ConsoleBrand, { name: "Studio Nusa", hasLogo: true, logoVersion: "0123456789ab" }))).toContain('src="/brand-icon?v=0123456789ab"');
   });
 });
+
+describe("the console's brand with workspaces (1.8)", () => {
+  it("shows the workspace switcher under the name instead of Personal, and both link home", () => {
+    const out = renderToStaticMarkup(h(ConsoleBrand, { name: "Studio Nusa", hasLogo: false }, h("span", null, "Kopi Senja")));
+    expect(out).toContain("Kopi Senja");
+    expect(out).not.toContain("Personal");
+    expect(out.match(/href="\/"/g)?.length).toBe(2);
+  });
+});

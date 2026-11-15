@@ -33,16 +33,18 @@ function cached<A extends unknown[], R>(key: string[], fn: (...args: A) => Promi
 }
 
 const byKind = Object.fromEntries((Object.keys(DB_TAGS) as DbKind[]).map((kind) => [
-  kind, cached(["listDatabases", kind], () => dbs.listDatabases(kind), [DB_TAGS[kind]]),
-])) as Record<DbKind, () => Promise<dbs.DbRow[]>>;
+  kind, cached(["listDatabases", kind], (ws: string | null = null) => dbs.listDatabases(kind, ws), [DB_TAGS[kind]]),
+])) as Record<DbKind, (ws?: string | null) => Promise<dbs.DbRow[]>>;
 
-export const listDatabases = (kind: DbKind): Promise<dbs.DbRow[]> => byKind[kind]();
+// 1.8: keyed by the workspace too (null = every workspace).
+export const listDatabases = (kind: DbKind, ws: string | null = null): Promise<dbs.DbRow[]> => byKind[kind](ws);
 export const supabaseSlotInputs = cached(["supabaseSlotInputs"], () => dbs.supabaseSlotInputs(), [TAG.supabase]);
-export const databaseOptions = cached(["databaseOptions"], () => dbs.databaseOptions(), [TAG.supabase, TAG.neon, TAG.firebase, TAG.extraDbs]);
+export const databaseOptions = cached(["databaseOptions"], (ws: string | null = null) => dbs.databaseOptions(ws), [TAG.supabase, TAG.neon, TAG.firebase, TAG.extraDbs]);
 
-export const listDomains = cached(["listDomains"], () => net.listDomains(), [TAG.domains, TAG.zones]);
-export const listZoneOptions = cached(["listZoneOptions"], () => net.listZoneOptions(), [TAG.zones]);
-export const getZoneView = cached(["getZoneView"], (id: string | null) => net.getZoneView(id), [TAG.zones]);
+// 1.8: keyed by the workspace too (unstable_cache keys on the arguments).
+export const listDomains = cached(["listDomains"], (ws: string | null = null) => net.listDomains(ws), [TAG.domains, TAG.zones]);
+export const listZoneOptions = cached(["listZoneOptions"], (ws: string | null = null) => net.listZoneOptions(ws), [TAG.zones]);
+export const getZoneView = cached(["getZoneView"], (id: string | null, ws: string | null = null) => net.getZoneView(id, ws), [TAG.zones]);
 
 // Privacy: the db-a, app-a, site-a.example, account-1 letters. Databases and apps are added, renamed and removed only
 // by Sync (and Remove from console), which expire every tag; the collector's network tasks write zones and domains.

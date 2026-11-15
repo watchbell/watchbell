@@ -157,6 +157,7 @@ export const OPS: ApiOp[] = [
     docsOnly: false,
     params: [
       { name: "include", in: "query", type: "string", required: false, example: "apps,alerts", description: "Comma-separated sections to return: apps, monitors, alerts, advisor. Default: all four." },
+      { name: "workspace", in: "query", type: "string", required: false, example: "00000000-0000-4000-8000-00000000f001", description: "One workspace's apps, monitors and alerts (its id, from Settings › Workspaces). Default: every workspace. With several workspaces each item names its workspace." },
       xClient,
     ],
     response: { status: 200, contentType: "application/json", description: "The requested sections of the console snapshot.", example: STATUS_RESPONSE },

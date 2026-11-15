@@ -23,6 +23,7 @@ vi.mock("@/lib/report/make", () => ({ makeReportPdf: h.makeReportPdf }));
 vi.mock("@/lib/report/send", async (orig) => ({ ...(await orig<typeof import("@/lib/report/send")>()), sendReportMail: h.sendReportMail, reopenFailedSend: h.reopenFailedSend, sendReportNow: h.sendReportNow, markSentByOwner: h.markSentByOwner, markSend: h.markSend }));
 vi.mock("@/lib/data/branding-db", () => ({ readBrand: h.readBrand }));
 vi.mock("@/lib/time", () => ({ timeZone: () => "Asia/Jakarta" }));
+vi.mock("@/lib/workspace/current", () => ({ workspaceForEditing: async () => "w-kopi" }));
 
 import { deleteReportAction, markReportSent, resendReport, saveReportContent, saveReportDelivery, sendTestReport } from "./actions";
 
@@ -49,6 +50,7 @@ describe("Reports actions (1.7)", () => {
     expect(h.requireActionMember).toHaveBeenCalledWith("operator");
     expect(h.updateReportContent).toHaveBeenCalledWith(ID, expect.objectContaining({ clientName: "PT Kopi Sejahtera", sites: [{ monitorId: M1, displayName: "Toko", position: 0 }] }));
     expect((await saveReportContent(null, content)).ok).toBe(true);
+    expect(h.createReport.mock.calls[0][1]).toBe("w-kopi"); // 1.8: a new report lands in the workspace shown
     expect(h.createReport).toHaveBeenCalled();
   });
 

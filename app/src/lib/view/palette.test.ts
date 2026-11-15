@@ -121,3 +121,14 @@ describe("rankShown (screenshot mode)", () => {
     expect(rankShown(real, shown, "").map((i) => i.label)).toEqual(["Overview", "app-a", "app-b"]);
   });
 });
+
+// Watchbell 1.8 (spec §5): the palette also opens a workspace ("Go to workspace Kopi Senja"), when there are several.
+describe("buildItems: workspaces (1.8)", () => {
+  const src = { apps: [], monitors: [], domains: [] };
+  it("lists Go to workspace entries only when there is more than one workspace", () => {
+    const two = buildItems("viewer", { ...src, workspaces: [{ id: "w1", name: "Personal" }, { id: "w2", name: "Kopi Senja" }] });
+    const ws = two.filter((i) => i.id.startsWith("workspace:"));
+    expect(ws.map((i) => [i.label, i.href])).toEqual([["Go to workspace Personal", "/workspaces/open?id=w1"], ["Go to workspace Kopi Senja", "/workspaces/open?id=w2"]]);
+    expect(buildItems("viewer", { ...src, workspaces: [{ id: "w1", name: "Personal" }] }).some((i) => i.id.startsWith("workspace:"))).toBe(false);
+  });
+});

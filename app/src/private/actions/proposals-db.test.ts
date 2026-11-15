@@ -105,6 +105,21 @@ describe("listProposals", () => {
   });
 });
 
+describe("listProposals in a workspace (1.8)", () => {
+  it("keeps proposals about the workspace's resources and those about none", async () => {
+    const f = fakeDb([[row()]]);
+    h.current = f;
+    await listProposals(now, 20, "00000000-0000-4000-8000-0000000000a1");
+    const where = render(whereOf(f.queries[0])!);
+    expect(where.sql).toContain("workspace_id");
+    expect(where.params).toContain("00000000-0000-4000-8000-0000000000a1");
+    const all = fakeDb([[row()]]);
+    h.current = all;
+    await listProposals(now, 20);
+    expect(render(whereOf(all.queries[0])!).sql).not.toContain("workspace_id");
+  });
+});
+
 describe("readProposal", () => {
   it("reads one proposal by id as a contract proposal, or null", async () => {
     const f = fakeDb([[row({ status: "done", result: "Checked." })], []]);

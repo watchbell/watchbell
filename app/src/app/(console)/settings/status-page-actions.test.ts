@@ -12,6 +12,7 @@ vi.mock("@/lib/rate-limit-db", () => ({ limit: h.limit }));
 vi.mock("next/cache", () => ({ refresh: h.refresh, revalidatePath: h.revalidatePath }));
 vi.mock("@/lib/data/audit-db", () => ({ recordAction: h.recordAction }));
 vi.mock("@/lib/data/public-status-db", () => ({ saveStatusPage: h.saveStatusPage }));
+vi.mock("@/lib/workspace/current", () => ({ workspaceForEditing: async () => "w-kopi" }));
 
 import { LIMITS } from "@/lib/rate-limit";
 import { saveStatusPageSettings } from "./status-page-actions";
@@ -56,7 +57,7 @@ describe("saveStatusPageSettings", () => {
     expect(await saveStatusPageSettings(form)).toEqual({ ok: true, message: "Status page saved. It updates within a minute." });
     expect(h.saveStatusPage).toHaveBeenCalledWith({
       slug: "acme", title: "Acme' apps", announcement: null, published: true, monitors: [{ monitorId: M1, displayName: "Portfolio", position: 0 }],
-    });
+    }, "w-kopi"); // 1.8: the page of the workspace shown
     expect(h.recordAction).toHaveBeenCalledWith({ kind: "ok", ...audit, actorUserId: "user-1" });
     expect(h.revalidatePath.mock.calls).toEqual([["/s/acme"]]);
     expect(h.refresh).toHaveBeenCalledTimes(1);
