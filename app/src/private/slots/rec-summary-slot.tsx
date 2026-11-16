@@ -1,5 +1,5 @@
 import { IconMessage2, IconNotes } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { pageGate } from "@/lib/auth";
 import { WHY_COPY } from "@/lib/copy/edition";
 import { ago } from "@/lib/time";

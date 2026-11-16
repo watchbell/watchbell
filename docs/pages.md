@@ -319,7 +319,8 @@ nothing changes until you add another (Settings › Workspaces, owner).
   and owners). An app moves with its domains, monitors and history; a domain or monitor moves its app; a repository
   linked to the app follows unless an app in another workspace uses it too.
 - **New things** land in the default workspace (Settings › Workspaces). Those first seen in the last 14 days are listed
-  as "new, not sorted" on Overview, Applications and All workspaces until moved or left where they are.
+  as "new, not sorted" on Overview, Applications and All workspaces until moved or left where they are; on All
+  workspaces each one has its own **Move to…**.
 - **Status page and reports.** One status page per workspace, each at its own `/s/<address>`; Settings › Status page
   edits the chosen workspace's (the default one under All workspaces). Reports belong to a workspace too.
 - **Maintenance.** A window can cover one workspace ("This workspace") or all of them.

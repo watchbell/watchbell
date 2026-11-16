@@ -9,7 +9,7 @@ import { accounts, monitors, resources, workspaces } from "@/db/schema";
 const h = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db/client", () => ({ db: () => h.db }));
 
-import { saveStatusPage, statusPageSettings } from "./public-status-db";
+import { isPublishedSlug, saveStatusPage, statusPageSettings } from "./public-status-db";
 
 // Watchbell 1.8 (spec §5): one status page per workspace, each with its own address and the workspace's monitors.
 const A = "00000000-0000-4000-8000-0000000000a1";
@@ -51,5 +51,19 @@ describe("status page per workspace (1.8)", () => {
 
   it("refuses an address another workspace's page uses", async () => {
     expect(await saveStatusPage(page("north", mon.kopi), A)).toEqual({ ok: false, error: "Another workspace's status page uses that address. Pick another one." });
+  });
+});
+
+// 1.8.1 (public routes audit): a made-up slug is "not found" without reading the page; a page just saved (or
+// unpublished) is seen at once on the instance that saved it.
+describe("published slugs", () => {
+  it("knows published slugs, refuses others, and follows a save", async () => {
+    await saveStatusPage(page("kopi", mon.kopi), A);
+    expect(await isPublishedSlug("kopi")).toBe(true);
+    expect(await isPublishedSlug("made-up")).toBe(false);
+    await saveStatusPage({ ...page("kopi", mon.kopi), published: false }, A);
+    expect(await isPublishedSlug("kopi")).toBe(false);
+    await saveStatusPage(page("kopi-2", mon.kopi), A);
+    expect(await isPublishedSlug("kopi-2")).toBe(true);
   });
 });

@@ -4,7 +4,7 @@ import { ConsoleBrand } from "./console-brand";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 import { type ConsoleVersion, VersionLabel } from "./version-label";
 import { IconChevronRight } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, type Ref, useState } from "react";
 import type { ClientExtension } from "@/lib/extensions";
@@ -19,7 +19,7 @@ import { NAV_ICONS } from "./nav-icons";
 // when it is missing), each page listed once; a sub-heading (DevOps › Automation) above the items that carry one.
 export function Sidebar({
   role, ext, sections, selfhost = false, version = null, brand = { name: "Watchbell", hasLogo: false }, workspace, collector, alerts, mobileOpen, onNavigate, navRef,
-}: { role: Role; ext: ClientExtension; sections?: SectionId[]; selfhost?: boolean; version?: ConsoleVersion | null; brand?: { name: string; hasLogo: boolean; logoVersion?: string | null }; workspace?: { list: { id: string; name: string }[]; current: string | null }; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number; mobileOpen: boolean; onNavigate: () => void; navRef?: Ref<HTMLElement> }) {
+}: { role: Role; ext: ClientExtension; sections?: SectionId[]; selfhost?: boolean; version?: ConsoleVersion | null; brand?: { name: string; hasLogo: boolean; logoVersion?: string | null }; workspace?: { list: { id: string; name: string }[]; current: string | null }; collector: { lastRunAt: string | null; now: number; demo?: boolean; staleMs?: number }; alerts: number | null; mobileOpen: boolean; onNavigate: () => void; navRef?: Ref<HTMLElement> }) {
   // The search too, for the one item whose href has a query (Status page: /settings?tab=status-page). The console is
   // rendered per request (its layout reads cookies), so this never forces a client-side bailout of a prerender.
   const active = activeKey(usePathname(), ext, useSearchParams());
@@ -76,7 +76,7 @@ export function Sidebar({
                           >
                             <Icon size={17} className={on ? "text-nav-active-text" : "text-ink-faint"} />
                             {item.label}
-                            {item.key === "alerts" && alerts > 0 && <span className="ml-auto rounded-[10px] bg-err-soft px-1.5 font-mono text-[11px] font-medium text-err">{alerts}<span className="sr-only"> firing</span></span>}
+                            {item.key === "alerts" && alerts !== null && alerts > 0 && <span className="ml-auto rounded-[10px] bg-err-soft px-1.5 font-mono text-[11px] font-medium text-err">{alerts}<span className="sr-only"> firing</span></span>}
                           </Link>
                         </li>
                       </Fragment>

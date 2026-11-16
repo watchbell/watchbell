@@ -1,5 +1,5 @@
 import { IconApps } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, Card, EmptyState, PageHeader } from "@/components/kit";
 
 // An app id that isn't a UUID, isn't watched, or was just removed from the console.

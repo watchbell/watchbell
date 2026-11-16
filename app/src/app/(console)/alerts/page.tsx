@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Banner, Card, PageHeader } from "@/components/kit";
 import { AutoRefresh } from "@/components/live";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

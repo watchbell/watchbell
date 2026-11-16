@@ -72,3 +72,16 @@ describe("Topbar extension drawer button", () => {
     expect(renderAs("owner", false)).not.toContain("Kantor virtual");
   });
 });
+
+// 1.8.1 (driver audit): when the open-alert count can't be read the bell used to show nothing, as if all were clear.
+// It shows "?" and says why.
+describe("Topbar bell when the alert count is unreadable", () => {
+  it("shows ? and an honest label instead of looking clear", () => {
+    const out = renderToStaticMarkup(h(AliasProvider, {
+      book: EMPTY_BOOK, shot: false,
+      children: h(Topbar, { user: { email: "owner@example.com", role: "owner" }, alerts: null, onToggleNav: () => {}, onOpenPalette: () => {} }),
+    }));
+    expect(out).toContain('aria-label="Alerts, count unavailable"');
+    expect(out).toMatch(/>\?<\/span>/);
+  });
+});

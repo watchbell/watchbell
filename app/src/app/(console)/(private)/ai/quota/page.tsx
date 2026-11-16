@@ -1,5 +1,5 @@
 import { IconBolt, IconBrandGoogle, IconPlug } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { AutoRefresh } from "@/components/live";
 import { buttonClass, Card, EmptyState, PageHeader, Progress, Tag } from "@/components/kit";
 import { TableHead, td, tableClass } from "@/components/table";

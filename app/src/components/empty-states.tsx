@@ -1,5 +1,5 @@
 import { IconActivity, IconApps, IconHeartbeat, IconRocket } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, EmptyState } from "@/components/kit";
 
 // R7: the typed empty states the mockup doesn't draw.

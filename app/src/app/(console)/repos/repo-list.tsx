@@ -1,7 +1,7 @@
 "use client";
 
 import { IconFilterOff } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Masked } from "@/components/alias";

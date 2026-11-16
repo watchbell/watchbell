@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Masked, MaskedText } from "@/components/alias";
 import { Card } from "@/components/kit";
 import { StateIcon } from "@/components/status";

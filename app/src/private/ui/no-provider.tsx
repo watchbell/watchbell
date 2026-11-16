@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { usePathname } from "next/navigation";
 import { Banner, buttonClass } from "@/components/kit";
 import { aiBanner } from "./ai-banner";

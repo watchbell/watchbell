@@ -15,6 +15,7 @@ import { branchExists, dependabotAlerts, LOCKFILE_MAX_BYTES, type RootFile, repo
 import { productionCandidate, scanBranchOf, scanFallbackOf } from "@/lib/deps/branch";
 import { PACKAGE_MAX_BYTES } from "@/lib/providers/github";
 import type { FetchOpts } from "@/lib/providers/http";
+import { logSoft } from "@/lib/soft";
 
 // Stage 9 slice 5 (owner 16 Oct): the dependency (CVE) scan's rows (0034 ops.dependency_scans, ops.dependency_vulns).
 // Read-only everywhere else: GitHub GETs with the read-only token (the root file list, package.json, the lockfile, the
@@ -313,7 +314,7 @@ export async function runDepsScan(deadline: number, opts: FetchOpts & RepoPick =
     }
   }
   // Retention: resolved rows older than 90 days.
-  await db().delete(dependencyVulns).where(and(isNotNull(dependencyVulns.resolvedAt), lt(dependencyVulns.resolvedAt, new Date(Date.now() - KEEP_RESOLVED_MS)))).catch(() => undefined);
+  await db().delete(dependencyVulns).where(and(isNotNull(dependencyVulns.resolvedAt), lt(dependencyVulns.resolvedAt, new Date(Date.now() - KEEP_RESOLVED_MS)))).then(() => undefined, (e) => logSoft(e, "resolved vulns cleanup"));
   return out;
 }
 
@@ -399,7 +400,7 @@ export async function appDepsView(appId: string): Promise<AppDepsView> {
   vulns.sort((a, b) => rank(a.severity) - rank(b.severity) || (a.package < b.package ? -1 : a.package > b.package ? 1 : 0) || (a.vulnId < b.vulnId ? -1 : 1));
   const prs = await db().select({ number: dependencyPrs.number, stage: dependencyPrs.stage, stageText: dependencyPrs.stageText, openedAt: dependencyPrs.openedAt })
     .from(dependencyPrs).where(and(eq(dependencyPrs.repoId, link.id), gte(dependencyPrs.openedAt, new Date(Date.now() - 14 * 86_400_000))))
-    .orderBy(desc(dependencyPrs.openedAt)).limit(5).catch(() => []);
+    .orderBy(desc(dependencyPrs.openedAt)).limit(5).catch((e) => { logSoft(e, "dependency PR list"); return []; });
   return { repo: link, scan: scan ?? null, vulns, writeConnected: !!w, prs: (prs ?? []).map((p) => ({ ...p, fullName: link.fullName })) };
 }
 

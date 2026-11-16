@@ -1,5 +1,5 @@
 import { IconUser } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { DbName, Masked, type MaskKind } from "@/components/alias";
 import { cn } from "@/lib/utils";
 

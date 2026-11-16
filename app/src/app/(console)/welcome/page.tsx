@@ -1,6 +1,6 @@
 import { IconCheck } from "@tabler/icons-react";
 import { eq } from "drizzle-orm";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { db } from "@/db/client";
 import { accounts, resources } from "@/db/schema";
 import { buttonClass, Card, PageHeader } from "@/components/kit";

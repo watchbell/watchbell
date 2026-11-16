@@ -16,5 +16,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "scripts/**/*.test.ts"],
+    // 1.8.1: PGlite in tests refuses what postgres-js refuses (test/strict-pglite.ts).
+    setupFiles: ["./test/strict-pglite.ts"],
   },
 });

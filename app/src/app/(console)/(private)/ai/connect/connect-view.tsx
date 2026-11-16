@@ -1,7 +1,7 @@
 "use client";
 
 import { IconPlus } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { useState } from "react";
 import { buttonClass, Card, Tag } from "@/components/kit";
 import { cn } from "@/lib/utils";

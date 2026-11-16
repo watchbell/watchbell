@@ -8,6 +8,7 @@ import { CREATE_GRANT_KEY } from "@/lib/create/google-connect";
 import { type CreateRequestView, type CreateResult, type CreateType, summaryOf } from "@/lib/create/types";
 import { serverEnv } from "@/lib/env";
 import { isUuid } from "@/lib/ids";
+import { soft } from "@/lib/soft";
 
 // Stage 6 create requests: the table (0048 ops.create_requests). Status moves only forward, each step a compare-and-set
 // on the status it expects: requested → approved | rejected | expired; approved → running (the claim: one process
@@ -68,7 +69,7 @@ export function toView(r: CreateRow, viewerMemberId: string | null): CreateReque
 // Waiting first, then newest; the last 7 days. Expired ones are marked on the way (no job needed).
 export async function listRequests(viewerMemberId: string | null, types?: CreateType[], limit = 20): Promise<CreateRequestView[]> {
   const now = new Date();
-  await expireRequests(now).catch(() => 0);
+  await soft(expireRequests(now), 0, "expire create requests");
   const rows = await db().select().from(createRequests)
     .where(and(
       sql`${createRequests.createdAt} >= ${new Date(now.getTime() - LIST_WINDOW_MS).toISOString()}::timestamptz`,

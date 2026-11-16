@@ -1,5 +1,5 @@
 import { IconFlame } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Banner, buttonClass, Card, EmptyState, PageHeader, Progress } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { AutoRefresh } from "@/components/live";

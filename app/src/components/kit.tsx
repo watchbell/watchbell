@@ -1,5 +1,5 @@
 import { IconInbox, type Icon as TablerIcon } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import type { ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { MaskedText } from "@/components/alias";
 import { StateIcon } from "@/components/status";

@@ -1,5 +1,5 @@
 import { IconSitemap } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, Card, EmptyState, PageHeader, Tag } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { AutoRefresh } from "@/components/live";

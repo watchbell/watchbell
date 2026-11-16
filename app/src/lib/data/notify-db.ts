@@ -29,6 +29,7 @@ import { tookText } from "@/lib/view/alerts";
 import { type AliasBook, EMPTY_BOOK, hideAlert, hideEmails } from "@/lib/view/display-name";
 import { dayKey } from "@/lib/time";
 import { PAGE_ROWS } from "@/lib/view/windows";
+import { soft } from "@/lib/soft";
 
 const DROP_AFTER_MS = 30 * 60_000;
 const MIN_LEFT_MS = 6_000;
@@ -181,7 +182,7 @@ export async function deliverPending(now: Date, deadline: number, deps: { sender
   // 1.2.4: the rules' custom texts, read once too.
   // 1.8: with several workspaces a notice names its workspace ("[Kopi Senja] shop /"); unreadable means no names.
   const [book, langs, templates, ws] = await Promise.all([lettersOrEmpty(), readNotifyLangs(), readMessageTemplates(),
-    alertWorkspaceNames(rows.map(({ a }) => a)).catch(() => ({ count: 1, nameOf: new Map<string, string>() }))]);
+    soft(alertWorkspaceNames(rows.map(({ a }) => a)), { count: 1, nameOf: new Map<string, string>() }, "alert workspace names")]);
   const accepted = new Set<string>();
   for (const kind of ["telegram", "discord", "webhook", "smtp"] as Push[]) {
     if (!configured.has(kind)) continue;
@@ -252,7 +253,7 @@ export async function digestData(now: Date): Promise<Omit<DigestInput, "siteUrl"
   // Privacy: databases by alias and no emails in the alerts' text (buildDigest hides any email left).
   const book = await lettersOrEmpty();
   // 1.8: with several workspaces each alert names its workspace, as in the notices.
-  const ws = await alertWorkspaceNames([...firing, ...resolvedRows]).catch(() => ({ count: 1, nameOf: new Map<string, string>() }));
+  const ws = await soft(alertWorkspaceNames([...firing, ...resolvedRows]), { count: 1, nameOf: new Map<string, string>() }, "digest workspace names");
   const pre = (id: string) => workspacePrefix(ws.nameOf.get(id), ws.count);
   return {
     now, opened: openedRows[0]?.n ?? 0,

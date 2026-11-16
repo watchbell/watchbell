@@ -1,13 +1,13 @@
 import { BrandMark } from "@/components/brand/brand-mark";
 import { DEFAULT_BRAND, displayName } from "@/lib/branding";
-import { readBrand } from "@/lib/data/branding-db";
+import { publicBrand } from "@/lib/data/branding-db";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { cache } from "react";
 import { UptimeBars } from "@/components/charts";
 import { StateIcon, Status } from "@/components/status";
-import { publicView } from "@/lib/data/public-status-db";
+import { isPublishedSlug, publicView } from "@/lib/data/public-status-db";
 import { overallLine, parseSlug } from "@/lib/public-status";
 import { zoneName } from "@/lib/time";
 
@@ -26,7 +26,7 @@ type Props = { params: Promise<{ slug: string }> };
 // generateMetadata and the page share one read per render.
 const view = cache(async (raw: string) => {
   const slug = parseSlug(raw);
-  return slug ? publicView(slug, new Date()) : null;
+  return slug && await isPublishedSlug(slug) ? publicView(slug, new Date()) : null;
 });
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -49,7 +49,7 @@ function Notice({ state, title, children }: { state: "info" | "maint"; title: st
 export default async function PublicStatusPage({ params }: Props) {
   const { slug } = await params;
   // Watchbell 1.7: the owner's brand (Settings › Branding); without one the page looks as before.
-  const [v, brand] = await Promise.all([view(slug), readBrand().catch(() => DEFAULT_BRAND)]);
+  const [v, brand] = await Promise.all([view(slug), publicBrand.get().catch(() => DEFAULT_BRAND)]);
   if (!v) notFound();
   const overall = overallLine(v.monitors);
   return (

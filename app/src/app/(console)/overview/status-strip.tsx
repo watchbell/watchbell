@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { MaskedText } from "@/components/alias";
 import { StateIcon } from "@/components/status";
 import type { State } from "@/lib/status";

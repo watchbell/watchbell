@@ -12,7 +12,7 @@ export default async function WorkspacesPage() {
   return (
     <>
       <PageHeader crumbs={[{ label: "Home" }, { label: "All workspaces" }]} title="All workspaces" />
-      <div className="mt-3.5"><WorkspacesView workspaces={sums.workspaces} install={sums.install} now={now.getTime()} unsorted={unsorted} defaultName={list.find((w) => w.id === def)?.name ?? "Personal"} canEdit={member.role !== "viewer"} /></div>
+      <div className="mt-3.5"><WorkspacesView workspaces={sums.workspaces} install={sums.install} now={now.getTime()} unsorted={unsorted} defaultName={list.find((w) => w.id === def)?.name ?? "Personal"} canEdit={member.role !== "viewer"} targets={list.filter((w) => w.id !== def).map((w) => ({ id: w.id, name: w.name }))} /></div>
     </>
   );
 }

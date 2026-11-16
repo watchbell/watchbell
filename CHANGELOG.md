@@ -2,6 +2,32 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.1
+
+Fixes from the first days of Workspaces, and a lighter load on the database.
+
+### Fixed
+
+- **All workspaces** no longer fails to load on a cloud console once there are two or more workspaces (a date was
+  sent to the database in a form only the built-in database accepts).
+- Switching workspace no longer makes the browser fetch every page in the sidebar at once. Links now load ahead only
+  when you point at them or reach them with the keyboard, so a switch is one request instead of dozens, and each
+  page view asks the server for less.
+- **All workspaces** reads each app's state the way Overview does: a client with a degraded app shows "1 app
+  degraded" instead of "All up".
+- **Connections › Schedulers** says cron-job.org is late only after the CollectorStale limit (Alerts › Rules), not
+  after 3 minutes, and no longer claims it runs every minute.
+- Pages that anyone can open without signing in (the sign-in page, the logo and the public status page) read the
+  database at most once a minute per server, and an address with an unknown status page answers "not found" without
+  reading it, so a flood of requests can't use up the database's connections.
+- When the open-alert count can't be read, the bell shows "?" instead of looking clear, and reads that fall back to
+  a safe value now leave a line in the server log.
+
+### Added
+
+- **Move to…** on each new, not-sorted item on All workspaces, and "Moving to <workspace>…" with a spinner while a
+  move runs (also in the Move to workspace dialog).
+
 ## 1.8.0
 
 Workspaces: one console for several clients, each looked at on its own.

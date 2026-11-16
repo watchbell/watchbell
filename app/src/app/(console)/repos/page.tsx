@@ -1,5 +1,5 @@
 import { IconBrandGithub } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, Card, EmptyState, PageHeader } from "@/components/kit";
 import { requirePageMember } from "@/lib/auth";
 import { listRepoItems } from "@/lib/data/repos-db";

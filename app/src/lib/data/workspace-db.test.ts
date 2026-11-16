@@ -235,3 +235,43 @@ describe("workspaceSummaries counts like the pages", () => {
     expect(sums.install.openAlerts).toBe(before);
   });
 });
+
+// 1.8.1: All workspaces said "All up" for a client whose Overview showed an app degraded (demo, 15 Nov): the summary
+// counted monitors down and alerts only. It now reads each app's state the way Overview does.
+describe("workspaceSummaries reads app states", () => {
+  it("shows a workspace with a degraded app as warn, and a down app as down", async () => {
+    const [acc] = await db.select({ id: accounts.id }).from(accounts);
+    const warnWs = await createWorkspace("Degraded Client");
+    const downWs = await createWorkspace("Down Client");
+    if (!("id" in warnWs) || !("id" in downWs)) throw new Error("not created");
+    const [a] = await db.insert(resources).values({ accountId: acc.id, kind: "app", externalId: "prj_deg", name: "deg", monitored: true, workspaceId: warnWs.id }).returning();
+    const [b] = await db.insert(resources).values({ accountId: acc.id, kind: "app", externalId: "prj_down", name: "down", monitored: true, workspaceId: downWs.id }).returning();
+    await db.insert(schema.snapshots).values([{ resourceId: a.id, state: "warn" }, { resourceId: b.id, state: "err" }]);
+    const sums = await workspaceSummaries(new Date());
+    expect(sums.workspaces.find((w) => w.id === warnWs.id)?.worst).toBe("warn");
+    expect(sums.workspaces.find((w) => w.id === downWs.id)?.worst).toBe("down");
+  });
+});
+
+// Final review I3 (1.8.1): All workspaces needs each app's shown state only, not listApps (30 days of uptime, 24 h of
+// response times, pageviews, capped at 200 apps). The lean read must still follow maintenance like Overview.
+describe("workspaceSummaries stays light", () => {
+  it("does not call listApps", () => {
+    const src = readFileSync(join(process.cwd(), "src/lib/data/workspace-db.ts"), "utf8");
+    expect(src).not.toMatch(/\blistApps\(/);
+  });
+
+  it("an app whose only failing monitor is in a maintenance window is not down", async () => {
+    const [acc] = await db.select({ id: accounts.id }).from(accounts);
+    const made = await createWorkspace("Maint Client");
+    if (!("id" in made)) throw new Error("not created");
+    const [app] = await db.insert(resources).values({ accountId: acc.id, kind: "app", externalId: "prj_maint", name: "maint", monitored: true, workspaceId: made.id }).returning();
+    const [mon] = await db.insert(monitors).values({ resourceId: app.id, url: "https://maint.example/", state: "err" }).returning();
+    await db.insert(schema.snapshots).values({ resourceId: app.id, state: "err" });
+    const now = new Date();
+    await db.insert(schema.maintenanceWindows).values({ scope: "monitor", monitorId: mon.id, startsAt: new Date(now.getTime() - 60_000), durationMin: 60 });
+    const sums = await workspaceSummaries(now);
+    const w = sums.workspaces.find((x) => x.id === made.id);
+    expect(w?.appsDown).toBe(0);
+  });
+});

@@ -1,4 +1,4 @@
-import { publicBadge } from "@/lib/data/public-status-db";
+import { isPublishedSlug, publicBadge } from "@/lib/data/public-status-db";
 import { badgeSvg, parseSlug } from "@/lib/public-status";
 
 // U7: /s/{slug}/badge/{key}.svg, rendered on first request and cached 5 minutes (ISR). `.svg` paths skip the proxy
@@ -21,7 +21,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ slug: string; 
   const { slug: rawSlug, file } = await ctx.params;
   const slug = parseSlug(rawSlug);
   const key = KEY.exec(file)?.[1];
-  const b = slug && key ? await publicBadge(slug, key, new Date()) : null;
+  const b = slug && key && await isPublishedSlug(slug) ? await publicBadge(slug, key, new Date()) : null;
   const svg = b ? badgeSvg(b.label, b.value, b.tone) : badgeSvg("status", "not found", "unknown");
   return new Response(svg, { status: b ? 200 : 404, headers: HEADERS });
 }

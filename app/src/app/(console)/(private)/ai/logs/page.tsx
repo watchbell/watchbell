@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { AutoRefresh } from "@/components/live";
 import { Button, buttonClass, Card, EmptyState, fieldClass, PageHeader } from "@/components/kit";
 import { Status } from "@/components/status";

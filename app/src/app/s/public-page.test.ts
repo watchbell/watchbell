@@ -4,10 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublicView } from "@/lib/data/public-status-db";
 
 const publicView = vi.fn<(slug: string, now: Date) => Promise<PublicView | null>>();
-vi.mock("@/lib/data/public-status-db", () => ({ publicView: (slug: string, now: Date) => publicView(slug, now) }));
+vi.mock("@/lib/data/public-status-db", () => ({ publicView: (slug: string, now: Date) => publicView(slug, now), isPublishedSlug: async () => true }));
 // Watchbell 1.7: the brand on the public page.
 const brand = vi.hoisted(() => ({ value: { name: null as string | null, accent: null, senderName: null, publicUrl: null, poweredBy: true, hasLogo: false } }));
-vi.mock("@/lib/data/branding-db", () => ({ readBrand: async () => brand.value }));
+vi.mock("@/lib/data/branding-db", () => ({ publicBrand: { get: async () => brand.value } }));
 
 import PublicStatusPage from "./[slug]/page";
 import StatusPageNotFound from "./[slug]/not-found";

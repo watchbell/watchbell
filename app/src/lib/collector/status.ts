@@ -40,3 +40,15 @@ export function schedulerRun(
   if (now.getTime() - run.finishedAt.getTime() >= lateMs) return { state: "warn", text: `Last run ${when} · late` };
   return { state: "ok", text: `Last run ${when}` };
 }
+
+// 1.8.1: the cron-job.org row of Connections › Schedulers. Late follows the CollectorStale rule (Alerts › Rules), as
+// the watchdog and the sidebar do; the schedule itself is whatever the owner set at cron-job.org.
+export function cronJobRow(
+  run: { startedAt: Date; finishedAt: Date | null; ok: boolean | null } | null,
+  now: Date,
+  staleMs: number,
+): { help: string; state: "ok" | "warn" | "err" | "build" | "idle"; text: string } {
+  const help = `Calls /api/collect with a secret header, on the schedule set at cron-job.org. Late after ${Math.round(staleMs / 60_000)} min (Alerts › Rules › CollectorStale).`;
+  if (!run) return { help, state: "idle", text: "Not set up yet" };
+  return { help, ...schedulerRun(run, now, staleMs) };
+}

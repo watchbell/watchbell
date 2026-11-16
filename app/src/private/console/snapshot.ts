@@ -19,6 +19,7 @@ import { lastDays, UPTIME_DAYS, uptimePct } from "@/lib/view/uptime";
 import { problemsOf } from "@/lib/view/why";
 import type { ConsoleSnapshot, SnapshotApp } from "./types";
 import { scrubText } from "./scrub";
+import { soft } from "@/lib/soft";
 
 // R5: the ONE place console data is turned into something an agent may read. /api/v1/status, /api/v1/advice, the MCP
 // read tools, Ask AI and the Playground's console mode all call these readers. Everything passes through the alias
@@ -56,7 +57,7 @@ const monitorsAt = cache((ms: number, ws: string | null = null) => (ws ? listMon
 const firingOnce = cache(() => listShownFiring());
 // 1.8: the workspace names, only when there are several (a single-workspace install's answers don't change).
 const wsNamesOnce = cache(async (): Promise<Map<string, string>> => {
-  const list = await listWorkspaces().catch(() => []);
+  const list = await soft(listWorkspaces(), [], "workspace list");
   return list.length > 1 ? new Map(list.map((w) => [w.id, w.name])) : new Map();
 });
 const named = (names: Map<string, string>, id: string | null | undefined) => (id && names.has(id) ? { workspace: names.get(id) as string } : {});

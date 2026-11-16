@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import type { ReactNode } from "react";
 import { BrandMark } from "@/components/brand/brand-mark";
 

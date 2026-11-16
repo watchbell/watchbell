@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Card } from "@/components/kit";
 import { AutoRunForm } from "./auto-run-form";
 import { AutoRollbackForm } from "./auto-rollback-form";

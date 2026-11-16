@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => ({ publicBadge: vi.fn() }));
-vi.mock("@/lib/data/public-status-db", () => ({ publicBadge: h.publicBadge }));
+vi.mock("@/lib/data/public-status-db", () => ({ publicBadge: h.publicBadge, isPublishedSlug: async () => true }));
 
 import * as route from "./route";
 

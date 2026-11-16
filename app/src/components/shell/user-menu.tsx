@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { useTransition } from "react";
 import { signOut } from "@/app/auth/actions";
 import { useMask } from "@/components/alias";

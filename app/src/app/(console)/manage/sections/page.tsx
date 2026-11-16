@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Card, PageHeader } from "@/components/kit";
 import { NoAccess } from "@/components/no-access";
 import { pageGate } from "@/lib/auth";

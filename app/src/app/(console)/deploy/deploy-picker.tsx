@@ -1,7 +1,7 @@
 "use client";
 
 import { IconExternalLink } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { type KeyboardEvent, useState } from "react";
 import { Masked, useMask } from "@/components/alias";
 import { buttonClass, fieldClass } from "@/components/kit";

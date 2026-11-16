@@ -1,6 +1,6 @@
 import { BrandMark } from "@/components/brand/brand-mark";
 import { brandStyle, DEFAULT_BRAND, displayName } from "@/lib/branding";
-import { readBrand } from "@/lib/data/branding-db";
+import { publicBrand } from "@/lib/data/branding-db";
 import { Banner } from "@/components/kit";
 import { serverEnv } from "@/lib/env";
 import { isDemo, usesLocalAuth } from "@/lib/mode";
@@ -26,7 +26,7 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const errors = selfhost ? SELFHOST_ERRORS : ERRORS;
   const nextPath = typeof next === "string" ? next : undefined;
   // Watchbell 1.7: the owner's brand (Settings › Branding); without one the page is as before.
-  const brand = await readBrand().catch(() => DEFAULT_BRAND);
+  const brand = await publicBrand.get().catch(() => DEFAULT_BRAND);
   const style = brandStyle(brand);
   return (
     <main className="grid min-h-screen place-items-center px-4 py-6">

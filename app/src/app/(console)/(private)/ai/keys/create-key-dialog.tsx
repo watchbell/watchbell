@@ -2,7 +2,7 @@
 
 import { IconCircleCheck, IconCopy, IconKey, IconPlus } from "@tabler/icons-react";
 import { KEYS_COPY } from "@/lib/copy/edition";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button, Field, fieldClass } from "@/components/kit";

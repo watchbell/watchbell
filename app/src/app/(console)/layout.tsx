@@ -19,6 +19,7 @@ import { isDemo, mode } from "@/lib/mode";
 import { timeZone } from "@/lib/time";
 import { EMPTY_BOOK, SHOT_COOKIE } from "@/lib/view/display-name";
 import { currentWorkspace } from "@/lib/workspace/current";
+import { soft } from "@/lib/soft";
 
 // Watchbell 1.7: the browser tab names the brand (nothing changes without one).
 export async function generateMetadata(): Promise<Metadata> {
@@ -37,7 +38,7 @@ export default async function ConsoleLayout({ children }: { children: React.Reac
   // Watchbell 1.2: the sections that are on (lib/sections.ts); unreadable means every section, so nothing disappears.
   // 1.2.3: self-hosted, the owner sees a newer npm version or What's new after an update (null otherwise).
   const [last, staleMs, alerts, book, jar, sections, notice, brand, ws] = await Promise.all([
-    lastCollectorRunAt().catch(() => null), collectorStaleLimit().catch(() => undefined), openAlertCount().catch(() => 0), aliasBook().catch(() => EMPTY_BOOK), cookies(),
+    soft(lastCollectorRunAt(), null, "last collector run"), soft(collectorStaleLimit(), undefined, "collector stale limit"), soft<number | null>(openAlertCount(), null, "open alert count"), aliasBook().catch(() => EMPTY_BOOK), cookies(),
     sectionState().then((s) => s.on).catch(() => undefined),
     member.role === "owner" ? readUpdateNotice().catch(() => null) : null,
     // Watchbell 1.7: the owner's brand (Settings › Branding) in the sidebar and the accent colour.

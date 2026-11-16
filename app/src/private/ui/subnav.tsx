@@ -4,7 +4,7 @@ import {
   IconApi, IconBox, IconChartBar, IconGauge, IconKey, IconLayoutDashboard, IconListDetails, IconLock, IconMessage, IconMessageQuestion, IconPlugConnected, IconRobot,
   type Icon as TablerIcon,
 } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 

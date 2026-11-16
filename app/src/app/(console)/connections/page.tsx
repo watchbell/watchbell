@@ -1,5 +1,5 @@
 import { asc, inArray } from "drizzle-orm";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Banner, PageHeader } from "@/components/kit";
 import { NoAccess } from "@/components/no-access";
 import { db } from "@/db/client";

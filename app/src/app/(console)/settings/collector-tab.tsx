@@ -1,5 +1,5 @@
 import { desc } from "drizzle-orm";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { MaskedText } from "@/components/alias";
 import { buttonClass, Card } from "@/components/kit";
 import { Status } from "@/components/status";

@@ -1,6 +1,8 @@
 import "server-only";
-import { and, asc, desc, eq, inArray, isNull, max, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, max, ne, sql } from "drizzle-orm";
 import { db } from "@/db/client";
+import { appShownStates } from "./apps-db";
+import { publishedSlugs } from "./public-status-db";
 import { listFiring } from "./alerts-db";
 import { pausedSections } from "./sections-db";
 import { reports } from "@/db/report-schema";
@@ -84,7 +86,8 @@ export async function deleteWorkspace(id: string): Promise<{ moved: number; stat
   const target = await defaultWorkspaceId();
   if (target === id) return { error: "default" };
   if (all.length <= 1) return { error: "last" };
-  return db().transaction(async (tx) => {
+  // The status page leaves the public slug memo after the commit (final review M4).
+  const done = await db().transaction(async (tx) => {
     // `moved` counts every row that changed workspace: resources (children too), reports and repos.
     const res = await tx.update(resources).set({ workspaceId: target }).where(eq(resources.workspaceId, id)).returning({ id: resources.id });
     const reps = await tx.update(reports).set({ workspaceId: target }).where(eq(reports.workspaceId, id)).returning({ id: reports.id });
@@ -93,6 +96,8 @@ export async function deleteWorkspace(id: string): Promise<{ moved: number; stat
     await tx.delete(workspaces).where(eq(workspaces.id, id));
     return { moved: res.length + reps.length + repos.length, statusPageRemoved: pages.length > 0 };
   });
+  publishedSlugs.clear();
+  return done;
 }
 
 export async function workspaceExists(id: string): Promise<boolean> {
@@ -102,22 +107,26 @@ export async function workspaceExists(id: string): Promise<boolean> {
 
 export type WorkspaceSummary = {
   id: string; name: string; worst: "down" | "warn" | "ok"; apps: number; monitorsDown: number; openAlerts: number; lastDeployAt: Date | null;
+  appsDown?: number; appsWarn?: number;
 };
 
 // All workspaces (spec §5): each workspace's worst state and counts, plus the open alerts that belong to no resource
 // (the install's own: collector, backups, OS updates), counted once.
 // Final review (1.8, I2): counted as the pages count — watched apps, monitors that are down and not paused, and the
 // open alerts the Alerts page shows (paused sections left out), each filed under its workspace like alertWorkspaceIds.
-export async function workspaceSummaries(_now: Date): Promise<{ workspaces: WorkspaceSummary[]; install: { openAlerts: number } }> {
+export async function workspaceSummaries(now: Date): Promise<{ workspaces: WorkspaceSummary[]; install: { openAlerts: number } }> {
   const watched = and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt));
-  const [list, apps, down, firing, deploys] = await Promise.all([
+  const [list, apps, down, firing, deploys, appRows] = await Promise.all([
     listWorkspaces(),
     db().select({ ws: resources.workspaceId, n: sql<number>`count(*)::int` }).from(resources).where(watched).groupBy(resources.workspaceId),
     db().select({ ws: resources.workspaceId, n: sql<number>`count(*)::int` }).from(monitors).innerJoin(resources, eq(resources.id, monitors.resourceId))
       .where(and(watched, eq(monitors.state, "err"), eq(monitors.paused, false), eq(monitors.ownerPaused, false))).groupBy(resources.workspaceId),
     pausedSections().then((p) => listFiring(p)),
     db().select({ ws: resources.workspaceId, at: max(deployments.createdAtProvider) }).from(deployments).innerJoin(resources, eq(resources.id, deployments.resourceId)).groupBy(resources.workspaceId),
+    // 1.8.1: each app's state as Overview shows it (snapshot, monitors, maintenance), so a degraded app isn't "All up".
+    appShownStates(now),
   ]);
+  const appStates = (ws: string) => appRows.filter((a) => a.workspaceId === ws).map((a) => a.state);
   const wsOf = await alertWorkspaceIds(firing);
   const of = <T extends { ws: string }>(rows: T[], ws: string) => rows.find((r) => r.ws === ws);
   return {
@@ -125,8 +134,13 @@ export async function workspaceSummaries(_now: Date): Promise<{ workspaces: Work
       const monitorsDown = of(down, w.id)?.n ?? 0;
       const mine = firing.filter((a) => wsOf.get(a.id) === w.id);
       const openAlerts = mine.length;
-      const worst = monitorsDown > 0 || mine.some((a) => a.severity === "critical") ? "down" : openAlerts > 0 ? "warn" : "ok";
-      return { id: w.id, name: w.name, worst, apps: of(apps, w.id)?.n ?? 0, monitorsDown, openAlerts, lastDeployAt: of(deploys, w.id)?.at ?? null };
+      const states = appStates(w.id);
+      const worst = monitorsDown > 0 || states.includes("err") || mine.some((a) => a.severity === "critical") ? "down"
+        : openAlerts > 0 || states.includes("warn") ? "warn" : "ok";
+      return {
+        id: w.id, name: w.name, worst, apps: of(apps, w.id)?.n ?? 0, monitorsDown, openAlerts, lastDeployAt: of(deploys, w.id)?.at ?? null,
+        appsDown: states.filter((s) => s === "err").length, appsWarn: states.filter((s) => s === "warn").length,
+      };
     }),
     install: { openAlerts: firing.filter((a) => !wsOf.has(a.id)).length },
   };
@@ -148,7 +162,7 @@ export async function repoFollowsApp(repoId: string, appId: string): Promise<boo
 const UNSORTED_DAYS = 14;
 const unsortedWhere = async (now: Date) => and(
   eq(resources.workspaceId, await defaultWorkspaceId()), isNull(resources.parentId), isNull(resources.sortedAt), isNull(resources.goneAt),
-  eq(resources.monitored, true), sql`${resources.firstSeenAt} >= ${new Date(now.getTime() - UNSORTED_DAYS * 86_400_000)}`,
+  eq(resources.monitored, true), gte(resources.firstSeenAt, new Date(now.getTime() - UNSORTED_DAYS * 86_400_000)),
 );
 
 export async function unsortedCount(now: Date): Promise<number> {

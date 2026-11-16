@@ -1,5 +1,5 @@
 import { IconExternalLink } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import { Masked } from "@/components/alias";

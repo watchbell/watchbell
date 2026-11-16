@@ -12,6 +12,7 @@ import { currentWorkspace } from "@/lib/workspace/current";
 import { UnsortedNote } from "@/components/unsorted-note";
 import { unsortedCount } from "@/lib/data/workspace-db";
 import { MoveToWorkspace } from "@/components/move-to-workspace";
+import { soft } from "@/lib/soft";
 
 // "Refresh now" runs the collector inside this page's server action.
 export const maxDuration = 30;
@@ -22,7 +23,7 @@ export default async function AppsPage() {
   const act = canAct(member.role);
   const wsc = await currentWorkspace(); // 1.8: the workspace shown and the list to move to
   const ws = wsc.id;
-  const [apps, book, unsorted] = await Promise.all([listApps(now, undefined, ws), aliasBook(), unsortedCount(now).catch(() => 0)]);
+  const [apps, book, unsorted] = await Promise.all([listApps(now, undefined, ws), aliasBook(), soft(unsortedCount(now), 0, "unsorted count")]);
   return (
     <>
       <AutoRefresh at={now.getTime()} />

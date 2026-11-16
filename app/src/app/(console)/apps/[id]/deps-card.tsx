@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { ExternalLink } from "@/components/external-link";
 import { Card } from "@/components/kit";
 import { PlainTable } from "@/components/plain-table";

@@ -339,7 +339,8 @@ alert-nya), deployment, event, repository, laporan bulanan, dan status page. Ins
   dan owner). Aplikasi pindah beserta domain, monitor, dan riwayatnya; memindahkan domain atau monitor berarti
   memindahkan aplikasinya; repository yang terhubung ikut, kecuali dipakai aplikasi di workspace lain.
 - **Barang baru** masuk ke workspace default (Settings › Workspaces). Yang pertama terlihat dalam 14 hari terakhir
-  tercatat sebagai "new, not sorted" di Overview, Applications, dan All workspaces sampai dipindahkan atau dibiarkan.
+  tercatat sebagai "new, not sorted" di Overview, Applications, dan All workspaces sampai dipindahkan atau dibiarkan;
+  di All workspaces masing-masing punya tombol **Move to…** sendiri.
 - **Status page dan laporan.** Satu status page per workspace, masing-masing di `/s/<alamat>` sendiri; Settings › Status
   page mengedit milik workspace yang dipilih (workspace default saat All workspaces). Laporan juga milik satu workspace.
 - **Maintenance.** Jendela maintenance bisa untuk satu workspace ("This workspace") atau semuanya.

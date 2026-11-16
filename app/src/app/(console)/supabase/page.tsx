@@ -1,5 +1,5 @@
 import { IconBolt } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Masked } from "@/components/alias";
 import { buttonClass, Card, EmptyState, PageHeader, Progress } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";

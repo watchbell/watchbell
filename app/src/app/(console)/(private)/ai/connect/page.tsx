@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, PageHeader } from "@/components/kit";
 import { serverEnv } from "@/lib/env";
 import { rel } from "@/lib/view/format";

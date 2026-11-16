@@ -4,7 +4,10 @@ import { Card } from "@/components/kit";
 import { Status } from "@/components/status";
 import { db } from "@/db/client";
 import { collectorRuns, settings } from "@/db/schema";
-import { schedulerRun } from "@/lib/collector/status";
+import { collectorStaleLimit } from "@/lib/collector/last-run";
+import { cronJobRow, schedulerRun } from "@/lib/collector/status";
+import { soft } from "@/lib/soft";
+import { STALE_MS } from "@/lib/collector/staleness";
 import { ago } from "@/lib/time";
 
 const runStatus = (run: Parameters<typeof schedulerRun>[0], now: Date, lateMs: number) => {
@@ -19,18 +22,19 @@ async function lastRun(trigger: "cron_job_org" | "vercel_cron") {
 
 export async function SchedulersCard() {
   const now = new Date();
-  const [cron, daily, ping] = await Promise.all([
+  const [cron, daily, ping, staleMs] = await Promise.all([
     lastRun("cron_job_org"),
     lastRun("vercel_cron"),
     db().select().from(settings).where(eq(settings.key, "watchdog.lastPing")).limit(1).then((r) => r[0] ?? null),
+    soft(collectorStaleLimit(), undefined, "collector stale limit"),
   ]);
+  const cronRow = cronJobRow(cron, now, staleMs ?? STALE_MS);
   const pingAt = ping ? new Date(String((ping.value as { at?: string }).at)) : null;
   const rows: { name: string; help: string; status: ReactNode }[] = [
     {
       name: "cron-job.org",
-      help: "Calls /api/collect every minute with a secret header.",
-      status: !cron ? <Status state="idle">Not set up yet</Status>
-        : runStatus(cron, now, 3 * 60_000),
+      help: cronRow.help,
+      status: <Status state={cronRow.state}>{cronRow.text}</Status>,
     },
     {
       name: "Upstash QStash",

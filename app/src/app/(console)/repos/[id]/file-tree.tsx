@@ -1,5 +1,5 @@
 import { IconFile, IconFileOff, IconFolder, IconLock } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { HIDDEN_TEXT } from "@/lib/code/never-read";
 import type { TreeNode } from "@/lib/github/browse";
 import { cn } from "@/lib/utils";

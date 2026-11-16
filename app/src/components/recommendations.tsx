@@ -1,5 +1,5 @@
 import { IconCircleCheck } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import type { ReactNode } from "react";
 import { MaskedText } from "@/components/alias";
 import { buttonClass, Card, EmptyState } from "@/components/kit";

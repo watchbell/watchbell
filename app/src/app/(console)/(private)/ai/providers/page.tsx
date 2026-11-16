@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Banner, Card, PageHeader } from "@/components/kit";
 import { Status } from "@/components/status";
 import { rowClass, tableClass, td, tdWrap, TableHead } from "@/components/table";

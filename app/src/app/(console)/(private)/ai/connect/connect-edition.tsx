@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Card } from "@/components/kit";
 import { CodeTabs } from "@/private/ui/code-tabs";
 import { mcpUrl, serverSetup } from "@/private/ui/snippets";

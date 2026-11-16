@@ -1,5 +1,5 @@
 import { IconLock } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { cn } from "@/lib/utils";
 import { OPS, TAGS } from "@/private/openapi/operations";
 import { MethodChip } from "./method-chip";

@@ -1,7 +1,7 @@
 "use client";
 
 import { IconBell, IconEye, IconEyeOff, IconLayoutSidebar, IconSearch, IconTag } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import type { Ref } from "react";
 import { usePrivacy } from "@/components/alias";
 import { IconButton } from "@/components/kit";
@@ -15,7 +15,7 @@ import { UserMenu } from "./user-menu";
 
 export function Topbar({
   user, office, alerts, onToggleNav, onOpenPalette, navButtonRef,
-}: { user: { email: string; role: Role; hasPassword?: boolean }; office?: DrawerLink; alerts: number; onToggleNav: () => void; onOpenPalette: (opener: HTMLElement) => void; navButtonRef?: Ref<HTMLButtonElement> }) {
+}: { user: { email: string; role: Role; hasPassword?: boolean }; office?: DrawerLink; alerts: number | null; onToggleNav: () => void; onOpenPalette: (opener: HTMLElement) => void; navButtonRef?: Ref<HTMLButtonElement> }) {
   const { show, toggle } = useSources();
   const { shot, setShot } = usePrivacy();
   return (
@@ -47,9 +47,10 @@ export function Topbar({
         {office && user.role === "owner" && <ExtensionDrawer link={office} />}
         <IconButton label="Screenshot mode" pressed={shot} onClick={() => setShot(!shot)}>{shot ? <IconEyeOff size={18} /> : <IconEye size={18} />}</IconButton>
         <ThemeToggle />
-        <Link href="/alerts" aria-label={alerts ? `Alerts, ${alerts} firing` : "Alerts"} className="relative inline-grid size-[34px] shrink-0 place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink">
+        <Link href="/alerts" aria-label={alerts === null ? "Alerts, count unavailable" : alerts ? `Alerts, ${alerts} firing` : "Alerts"} className="relative inline-grid size-[34px] shrink-0 place-items-center rounded-md text-ink-soft hover:bg-hover hover:text-ink">
           <IconBell size={18} />
-          {alerts > 0 && <span aria-hidden className="absolute right-0.5 top-[3px] rounded-[9px] bg-err px-1 font-mono text-[10px] font-medium leading-[15px] text-white">{alerts}</span>}
+          {alerts === null ? <span aria-hidden className="absolute right-0.5 top-[3px] rounded-[9px] bg-warn px-1 font-mono text-[10px] font-medium leading-[15px] text-white">?</span>
+            : alerts > 0 && <span aria-hidden className="absolute right-0.5 top-[3px] rounded-[9px] bg-err px-1 font-mono text-[10px] font-medium leading-[15px] text-white">{alerts}</span>}
         </Link>
         <UserMenu email={user.email} role={user.role} hasPassword={user.hasPassword} />
       </div>

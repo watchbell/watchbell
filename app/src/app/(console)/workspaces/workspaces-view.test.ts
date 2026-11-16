@@ -2,7 +2,7 @@ import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./actions", () => ({ switchWorkspace: vi.fn(), dismissUnsortedAction: vi.fn() }));
+vi.mock("./actions", () => ({ switchWorkspace: vi.fn(), dismissUnsortedAction: vi.fn(), moveToWorkspace: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 import { WorkspacesView } from "./workspaces-view";
@@ -40,3 +40,28 @@ describe("WorkspacesView: not sorted yet (1.8)", () => {
     expect(renderToStaticMarkup(h(WorkspacesView, { workspaces: [K, N], install: { openAlerts: 0 }, now: Date.now(), unsorted, defaultName: "Personal", canEdit: false }))).not.toContain("Leave in Personal");
   });
 });
+
+// 1.8.1 (owner, 15 Nov): move a new thing straight from the note, to any other workspace, with a visible
+// "Moving to <workspace>…" while it runs; and a row whose only problem is a degraded app says so.
+describe("WorkspacesView 1.8.1", () => {
+  const unsorted = [{ id: "r1", name: "ticketing-demo", kind: "app", firstSeenAt: new Date("2026-11-12T03:18:00Z") }];
+  const P = { id: "00000000-0000-4000-8000-00000000f001", name: "Personal" };
+  const T = { id: "00000000-0000-4000-8000-0000000000c3", name: "test" };
+  const view = (canEdit: boolean) => renderToStaticMarkup(h(WorkspacesView, {
+    workspaces: [{ ...N, id: P.id, name: P.name }], install: { openAlerts: 0 }, now: Date.now(), unsorted, defaultName: "Personal", canEdit,
+    targets: [T],
+  }));
+
+  it("offers Move to… on each not-sorted item for editors", () => {
+    expect(view(true)).toContain('aria-label="Move ticketing-demo to another workspace"');
+    expect(view(false)).not.toContain("Move ticketing-demo");
+  });
+
+  it("names a degraded or down app in the row instead of leaving it blank", () => {
+    const W = { ...N, worst: "warn" as const, appsWarn: 1, appsDown: 0 };
+    expect(renderToStaticMarkup(h(WorkspacesView, { workspaces: [W], install: { openAlerts: 0 }, now: Date.now() }))).toContain("1 app degraded");
+    const D = { ...N, worst: "down" as const, appsWarn: 0, appsDown: 2 };
+    expect(renderToStaticMarkup(h(WorkspacesView, { workspaces: [D], install: { openAlerts: 0 }, now: Date.now() }))).toContain("2 apps down");
+  });
+});
+

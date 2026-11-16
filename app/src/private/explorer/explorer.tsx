@@ -1,7 +1,7 @@
 "use client";
 
 import { IconCopy, IconPlayerPlay, IconPlus, IconSend, IconTrash, IconX } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { type ReactNode, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { Banner, Button, Card, EmptyState, Field, fieldClass } from "@/components/kit";

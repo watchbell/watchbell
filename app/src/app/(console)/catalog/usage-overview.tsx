@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Card, Progress } from "@/components/kit";
 import { Resource } from "@/components/resource";
 import { Src } from "@/components/sources";

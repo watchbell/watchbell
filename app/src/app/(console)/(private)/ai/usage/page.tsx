@@ -1,5 +1,5 @@
 import { IconActivity, IconPlayerPause } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { StackedBars } from "@/components/charts";
 import { Card, EmptyState, PageHeader, Progress } from "@/components/kit";
 import { AutoRefresh } from "@/components/live";

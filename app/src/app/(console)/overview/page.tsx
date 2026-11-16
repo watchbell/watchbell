@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { NoApps } from "@/components/empty-states";
 import { Banner, buttonClass, Card, PageHeader } from "@/components/kit";
 import { AutoRefresh } from "@/components/live";
@@ -35,6 +35,7 @@ import { HealthCard } from "./health-card";
 import { InventoryCard } from "./inventory-card";
 import { StatusStrip } from "./status-strip";
 import { currentWorkspace } from "@/lib/workspace/current";
+import { soft } from "@/lib/soft";
 
 // "Refresh now" runs the collector inside this page's server action; approving a Firebase create (Stage 6) polls
 // Google's operations, up to about 35 s.
@@ -56,7 +57,7 @@ export default async function OverviewPage() {
     listDatabases("supabase_project", ws), listDatabases("neon_project", ws), listDatabases("firestore", ws), supabaseSlotInputs(), listDomains(ws),
     listRecommendations(now).catch(() => null), aliasBook(), isCloud() ? poolUsage() : Promise.resolve(null),
     collectorStaleLimit().catch(() => undefined),
-    unsortedCount(now).catch(() => 0),
+    soft(unsortedCount(now), 0, "unsorted count"),
   ]);
   // Privacy: databases by alias, no emails, in every text this page shows (lib/view/display-name.ts).
   const recent = events.map((e) => hideEvent(e, book));

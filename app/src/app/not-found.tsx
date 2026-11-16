@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { BellMark } from "@/components/brand/bell-mark";
 import { buttonClass } from "@/components/kit";
 

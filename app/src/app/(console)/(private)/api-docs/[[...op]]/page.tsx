@@ -1,6 +1,6 @@
 import { IconDownload, IconKey } from "@tabler/icons-react";
 import { headers } from "next/headers";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { notFound } from "next/navigation";
 import { buttonClass, Card, PageHeader } from "@/components/kit";
 import { AI_COPY } from "@/lib/copy/edition";

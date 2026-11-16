@@ -1,22 +1,36 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { IconChevronDown } from "@tabler/icons-react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Button, Card } from "@/components/kit";
+import { Moving } from "@/components/moving";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Status } from "@/components/status";
 import type { WorkspaceSummary } from "@/lib/data/workspace-db";
 import { ago } from "@/lib/time";
-import { dismissUnsortedAction, switchWorkspace } from "./actions";
+import { dismissUnsortedAction, moveToWorkspace, switchWorkspace } from "./actions";
 
 // Watchbell 1.8 (spec §5): All workspaces — which client has a problem, worst first; one click opens it.
 const RANK = { down: 0, warn: 1, ok: 2 } as const;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 type Unsorted = { id: string; name: string; kind: string; firstSeenAt: Date };
+type Ws = { id: string; name: string };
 
-export function WorkspacesView({ workspaces, install, now, unsorted = [], defaultName = "", canEdit = false }: {
+// The row's words when something is wrong: apps first (what Overview shows), then monitors and alerts.
+export const problemText = (w: WorkspaceSummary): string => [
+  w.appsDown ? plural(w.appsDown, "app down", "apps down") : null,
+  w.appsWarn ? plural(w.appsWarn, "app degraded", "apps degraded") : null,
+  w.monitorsDown ? plural(w.monitorsDown, "monitor down", "monitors down") : null,
+  w.openAlerts ? plural(w.openAlerts, "open alert") : null,
+].filter(Boolean).join(" · ");
+
+export function WorkspacesView({ workspaces, install, now, unsorted = [], defaultName = "", canEdit = false, targets = [] }: {
   workspaces: WorkspaceSummary[]; install: { openAlerts: number }; now: number; unsorted?: Unsorted[]; defaultName?: string; canEdit?: boolean;
+  // 1.8.1: where a not-sorted item can go (every workspace but the default).
+  targets?: Ws[];
 }) {
   const [pending, start] = useTransition();
   const router = useRouter();
@@ -59,7 +73,7 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
                 <td className="py-2">
                   {w.worst === "ok" ? <Status state="ok">All up</Status> : (
                     <Status state={w.worst === "down" ? "err" : "warn"}>
-                      {[w.monitorsDown ? plural(w.monitorsDown, "monitor down", "monitors down") : null, w.openAlerts ? plural(w.openAlerts, "open alert") : null].filter(Boolean).join(" · ")}
+                      {problemText(w)}
                     </Status>
                   )}
                 </td>
@@ -77,14 +91,15 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
         <Card title="Not sorted yet">
           <div id="unsorted" className="text-[13px]">
             <p className="mb-2 text-ink-soft">
-              New in the last 14 days and still in {defaultName}, the default workspace. Move them from Applications, Domains, DNS
-              records or the database pages, or leave them in {defaultName}.
+              New in the last 14 days and still in {defaultName}, the default workspace. Move each one to its workspace here (or
+              from Applications, Domains, DNS records or the database pages), or leave them in {defaultName}.
             </p>
             <ul>
               {unsorted.map((u) => (
                 <li key={u.id} className="flex items-center gap-2 border-t border-line py-1.5 first:border-t-0">
                   <span className="font-medium">{u.name}</span>
                   <span className="text-ink-faint">{u.kind.replace(/_/g, " ")} · first seen {ago(new Date(u.firstSeenAt), new Date(now))}</span>
+                  {canEdit && targets.length > 0 && <span className="ml-auto"><MoveItem item={u} targets={targets} disabled={pending} /></span>}
                 </li>
               ))}
             </ul>
@@ -93,5 +108,40 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
         </Card>
       )}
     </div>
+  );
+}
+
+// 1.8.1 (owner, 15 Nov): one not-sorted thing to another workspace, from the note. While it runs: a spinner and
+// "Moving to <workspace>…"; then a toast, and the server's refresh takes the item out of the note.
+function MoveItem({ item, targets, disabled }: { item: Unsorted; targets: Ws[]; disabled: boolean }) {
+  const [moving, setMoving] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const move = (to: Ws) => {
+    setMoving(to.name);
+    start(async () => {
+      const r = await moveToWorkspace("resource", [item.id], to.id);
+      // On success the spinner stays until the server's refresh takes the item out of the note (final review M1).
+      if (r.ok) toast.success(r.message ?? `${item.name} moved to ${to.name}.`);
+      else {
+        toast.error(r.error);
+        setMoving(null);
+      }
+    });
+  };
+  if (moving) return <Moving to={moving} />;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        aria-label={`Move ${item.name} to another workspace`}
+        disabled={disabled || pending}
+        className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-0.5 text-[12.5px] text-ink-soft hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
+      >
+        Move to…<IconChevronDown size={13} stroke={1.75} aria-hidden />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[180px]">
+        <DropdownMenuLabel>Move {item.name} to</DropdownMenuLabel>
+        {targets.map((w) => <DropdownMenuItem key={w.id} onClick={() => move(w)}>{w.name}</DropdownMenuItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { collectorHealth, schedulerRun } from "./status";
+import { collectorHealth, cronJobRow, schedulerRun } from "./status";
 
 const now = new Date("2026-10-12T10:00:00Z");
 const ago = (s: number) => new Date(now.getTime() - s * 1000);
@@ -60,5 +60,23 @@ describe("schedulerRun", () => {
   it("warns that a good run is late once it is older than the threshold", () => {
     expect(schedulerRun(run(200, 180, true), now, LATE)).toEqual({ state: "warn", text: "Last run 3 min ago · late" });
     expect(schedulerRun(run(27 * 3600, 27 * 3600 - 60, true), now, 26 * 3_600_000)).toEqual({ state: "warn", text: "Last run 11 Oct 14:01 · late" });
+  });
+});
+
+// 1.8.1: the Schedulers card said cron-job.org was "late" 3 minutes after a run and called it "every minute", while
+// ops runs it every 30 minutes with the CollectorStale rule at 40 (owner, 15 Nov). The card follows the rule now.
+describe("cronJobRow", () => {
+  const run = (minAgo: number) => ({ startedAt: ago(minAgo * 60 + 5), finishedAt: ago(minAgo * 60), ok: true });
+  it("is on time until the CollectorStale limit, then late", () => {
+    expect(cronJobRow(run(12), now, 40 * 60_000)).toMatchObject({ state: "ok", text: "Last run 12 min ago" });
+    expect(cronJobRow(run(45), now, 40 * 60_000)).toMatchObject({ state: "warn", text: "Last run 45 min ago · late" });
+  });
+  it("names the schedule as set at cron-job.org and the limit, never 'every minute'", () => {
+    const r = cronJobRow(run(1), now, 40 * 60_000);
+    expect(r.help).not.toMatch(/every minute/);
+    expect(r.help).toContain("Late after 40 min");
+  });
+  it("says when it was never set up", () => {
+    expect(cronJobRow(null, now, 5 * 60_000)).toMatchObject({ state: "idle", text: "Not set up yet" });
   });
 });

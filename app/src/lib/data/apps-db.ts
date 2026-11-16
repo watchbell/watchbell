@@ -8,6 +8,7 @@ import { storedDomains } from "@/lib/domain-move";
 import { type ProductionSource, readProductionSource } from "@/lib/deps/branch";
 import { type DomainFlag, type DomainLines, appDomainLines } from "@/lib/view/app-domains";
 import { appDomain } from "@/lib/view/format";
+import { appStatus } from "@/lib/view/labels";
 import { type PageViewsView, pageViewsOf, pageViewsUnavailable } from "@/lib/view/pageviews";
 import { type DayCount, lastDays, UPTIME_DAYS, uptimePct } from "@/lib/view/uptime";
 import { PAGE_ROWS, WINDOWS } from "@/lib/view/windows";
@@ -110,6 +111,27 @@ export async function listApps(now: Date, onlyId?: string, ws: string | null = n
       database: dbs.get(r.id) ?? null, dbPaused: s?.data.dbPaused === true, pageViews: pageViewsOf(s?.data),
       pageViewsNote: pageViewsUnavailable({ gone: r.goneAt !== null, teamId: str(r.meta.teamId), accountOk: accStatus === "ok", hasProductionDeploy: dep !== undefined }),
     };
+  });
+}
+
+// 1.8.1 (final review I3): each watched app's shown state and workspace, for All workspaces. The same inputs as
+// listApps' state (snapshot, monitors with maintenance, the latest production deploy) without the page's extras
+// (30 days of uptime, response times, pageviews, domains), and no 200-app cap.
+export async function appShownStates(now: Date): Promise<{ workspaceId: string; state: State }[]> {
+  const apps = await db().select({ id: resources.id, ws: resources.workspaceId, goneAt: resources.goneAt, s: snapshots }).from(resources)
+    .leftJoin(snapshots, eq(snapshots.resourceId, resources.id))
+    .where(and(eq(resources.kind, "app"), eq(resources.monitored, true), isNull(resources.goneAt)));
+  if (!apps.length) return [];
+  const ids = apps.map((a) => a.id);
+  const mons = (await db().select().from(monitors).where(inArray(monitors.resourceId, ids))).map(toMonitorLite);
+  const latest = await db().selectDistinctOn([deployments.resourceId], { resourceId: deployments.resourceId, state: deployments.state }).from(deployments)
+    .where(and(inArray(deployments.resourceId, ids), eq(deployments.target, "production")))
+    .orderBy(deployments.resourceId, desc(deployments.createdAtProvider));
+  const windows = mons.length ? await listRawWindows() : [];
+  return apps.map((a) => {
+    const own = mons.filter((m) => m.appId === a.id).map((m) => ({ ...m, maintUntil: activeFor(windows, { monitorId: m.id, appId: m.appId }, now)?.end ?? null }));
+    const dep = latest.find((d) => d.resourceId === a.id);
+    return { workspaceId: a.ws, state: appStatus({ state: a.s?.state ?? "unknown", gone: false, monitors: own, dbPaused: a.s?.data.dbPaused === true, lastDeploy: dep ? { state: dep.state } : null }).state };
   });
 }
 

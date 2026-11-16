@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { closeIdleForm } from "@/app/(console)/supabase/pool-actions";
 import { buttonClass, Card, Progress } from "@/components/kit";
 import { POOL_CAP, POOL_SLOTS, type PoolUsage, poolView } from "@/lib/data/pool-guard";

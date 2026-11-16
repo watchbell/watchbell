@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Card, EmptyState, PageHeader } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { NoAccess } from "@/components/no-access";

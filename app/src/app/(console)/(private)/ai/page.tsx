@@ -1,5 +1,5 @@
 import { IconPlus } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { AutoRefresh } from "@/components/live";
 import { buttonClass, Card, PageHeader, Progress } from "@/components/kit";
 import { Status } from "@/components/status";

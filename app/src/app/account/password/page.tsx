@@ -1,5 +1,5 @@
 import { BellMark } from "@/components/brand/bell-mark";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import { signOut } from "@/app/auth/actions";

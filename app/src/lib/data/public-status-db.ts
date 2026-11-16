@@ -12,6 +12,8 @@ import { BAR_DAYS, lastDays, type Tone, uptimeBars, uptimePct } from "@/lib/view
 import { PAGE_ROWS } from "@/lib/view/windows";
 import type { Audit } from "./monitors-db";
 import { listRawWindows } from "./maintenance-db";
+import { ttlMemo } from "@/lib/memo";
+import { isDemo } from "@/lib/mode";
 import { monitorDays } from "./metrics-db";
 
 export type PublicView = {
@@ -25,6 +27,13 @@ const SOON_MS = 7 * 86_400_000;
 // B1: the public page's only queries. They select named columns (never url, last_error, status codes or the names of
 // apps, databases or providers) and the result is words, numbers and colours. The ids and app ids are read to join
 // the day counts and maintenance windows; they never leave this module. Unpublished or unknown → null (404).
+// 1.8.1 (public routes audit): /s/{slug} and its badges are public; a made-up slug used to cost a database read each.
+// The published slugs are kept per instance for a minute, and anything else is "not found" without a read. Saving
+// or removing a page clears it here; other instances catch up within the minute.
+export const publishedSlugs = ttlMemo(async () => new Set((await db().select({ slug: statusPages.slug }).from(statusPages)
+  .where(eq(statusPages.published, true))).map((r) => r.slug)), 60_000, Date.now, () => isDemo());
+export const isPublishedSlug = async (slug: string): Promise<boolean> => (await publishedSlugs.get()).has(slug);
+
 async function load(slug: string) {
   const [page] = await db().select({ id: statusPages.id, title: statusPages.title, announcement: statusPages.announcement, published: statusPages.published })
     .from(statusPages).where(eq(statusPages.slug, slug)).limit(1);
@@ -132,7 +141,7 @@ const MISSING: SaveDone = { ok: false, error: "A monitor on the list no longer e
 
 // B5: one page per workspace (1.8). It and its monitors are replaced in one transaction, under a lock so two saves
 // can't create two pages.
-export async function saveStatusPage(v: StatusPageValue, ws: string): Promise<SaveDone> {
+async function saveStatusPageRow(v: StatusPageValue, ws: string): Promise<SaveDone> {
   return db().transaction(async (tx): Promise<SaveDone> => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext('ops.status_pages'))`);
     const [existing] = await tx.select({ id: statusPages.id, slug: statusPages.slug }).from(statusPages).where(eq(statusPages.workspaceId, ws)).limit(1);
@@ -166,4 +175,12 @@ export async function saveStatusPage(v: StatusPageValue, ws: string): Promise<Sa
       oldSlug: existing && existing.slug !== v.slug ? existing.slug : null,
     };
   });
+}
+
+export async function saveStatusPage(v: StatusPageValue, ws: string): Promise<SaveDone> {
+  try {
+    return await saveStatusPageRow(v, ws);
+  } finally {
+    publishedSlugs.clear();
+  }
 }

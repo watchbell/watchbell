@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { type ReactNode, useState } from "react";
 import { MaskedText } from "@/components/alias";
 import { StateIcon, Status } from "@/components/status";

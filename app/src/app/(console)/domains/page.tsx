@@ -1,5 +1,5 @@
 import { IconWorld } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { Banner, Button, buttonClass, Card, EmptyState, PageHeader } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { AutoRefresh } from "@/components/live";

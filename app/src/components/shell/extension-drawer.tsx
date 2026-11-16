@@ -2,7 +2,7 @@
 
 import { Dialog } from "@base-ui/react/dialog";
 import { IconBuildingSkyscraper, IconX } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { useState } from "react";
 import { IconButton } from "@/components/kit";
 import type { DrawerLink } from "@/lib/extensions";

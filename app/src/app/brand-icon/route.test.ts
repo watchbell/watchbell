@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-const h = vi.hoisted(() => ({ logo: null as Uint8Array | null }));
-vi.mock("@/lib/data/branding-db", () => ({ readBrandLogo: async () => h.logo }));
+const h = vi.hoisted(() => ({ logo: null as Uint8Array | null, fail: false }));
+vi.mock("@/lib/data/branding-db", () => ({ publicBrandLogo: { get: async () => { if (h.fail) throw new Error("db down"); return h.logo; } } }));
 
 import { logoVersionOf } from "@/lib/branding-version";
 import { GET } from "./route";
@@ -36,3 +36,16 @@ describe("GET /brand-icon caching (1.7.1)", () => {
     expect((await get("?v=nope")).headers.get("cache-control")).toBe("public, max-age=300, s-maxage=300");
   });
 });
+
+// Final review M2 (1.8.1): a database that can't be read is not "no logo": it answers 503, kept nowhere, so a public
+// 404 isn't cached for a minute while the logo is really there.
+describe("GET /brand-icon when the logo can't be read", () => {
+  it("is 503, not cached", async () => {
+    h.fail = true;
+    const res = await get("?v=abc");
+    h.fail = false;
+    expect(res.status).toBe(503);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+});
+

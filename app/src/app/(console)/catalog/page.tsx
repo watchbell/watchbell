@@ -1,5 +1,5 @@
 import { IconExternalLink } from "@tabler/icons-react";
-import Link from "next/link";
+import { HoverLink as Link } from "@/components/hover-link";
 import { buttonClass, Card, PageHeader, Tag } from "@/components/kit";
 import { ListFilter } from "@/components/list-filter";
 import { Status } from "@/components/status";

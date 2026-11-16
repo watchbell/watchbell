@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { moveToWorkspace } from "@/app/(console)/workspaces/actions";
 import { Button, fieldClass } from "@/components/kit";
+import { Moving } from "@/components/moving";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
 // Watchbell 1.8 (spec §5, Moving): pick some of the page's things and the workspace they belong to. All their history
@@ -62,9 +63,10 @@ function MoveDialog({ kind, items, targets, onClose }: { kind: "resource" | "rep
             {targets.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
           </select>
         </label>
-        <div className="mt-2 flex justify-end gap-2">
-          <Button onClick={onClose}>Cancel</Button>
-          <Button variant="primary" onClick={move} disabled={pending || !picked.size || !to}>{pending ? "Moving…" : `Move ${picked.size || ""}`.trim()}</Button>
+        <div className="mt-2 flex items-center justify-end gap-2">
+          {pending && <span className="mr-auto text-[13px]"><Moving to={targets.find((w) => w.id === to)?.name ?? "the workspace"} /></span>}
+          <Button onClick={onClose} disabled={pending}>Cancel</Button>
+          <Button variant="primary" onClick={move} disabled={pending || !picked.size || !to}>{`Move ${picked.size || ""}`.trim()}</Button>
         </div>
       </DialogContent>
     </Dialog>
