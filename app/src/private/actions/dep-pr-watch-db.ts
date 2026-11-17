@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { dependencyPrs, dependencyScans, githubRepos, monitors, resources } from "@/db/schema";
 import { readAliasBook } from "@/lib/data/aliases-db";
@@ -34,6 +34,12 @@ import { readAutoRollback, readAutoSecurity } from "./proposals-settings";
 // on. Never throws; a provider hiccup leaves the PR as it was for the next round.
 
 const MAX_PRS = 10;
+// 1.8.2: stopped PRs read again for a hand merge or close: opened in the last 14 days, each at most every 10 minutes,
+// three per round (one GitHub GET each).
+const STOPPED_STAGES = ["failed", "timeout", "ready-manual"] as const;
+const STOPPED_WINDOW_MS = 14 * 86_400_000;
+const STOPPED_EVERY_MS = 10 * 60_000;
+const STOPPED_MAX = 3;
 const WAIT_VERCEL = "waiting: Vercel didn't say which deployment is live";
 const MIN_LEFT_MS = 15_000;
 
@@ -51,6 +57,10 @@ type Row = {
 
 export type WatchDeps = {
   rows: () => Promise<Row[]>;
+  // 1.8.2: the stopped PRs (failed, timeout, ready to merge by hand) read again for a merge or close made by hand.
+  stopped?: () => Promise<Row[]>;
+  // Final review I2: moves a stopped PR's read time only (a PR GitHub can't read must not hold its place every round).
+  touch?: (id: string) => Promise<void>;
   security: typeof readAutoSecurity;
   rollback: typeof readAutoRollback;
   writeToken: () => Promise<string | null>;
@@ -194,6 +204,17 @@ const DEPS: WatchDeps = {
   }).from(dependencyPrs).innerJoin(githubRepos, eq(githubRepos.id, dependencyPrs.repoId)).leftJoin(resources, eq(resources.id, dependencyPrs.appId))
     .leftJoin(dependencyScans, eq(dependencyScans.repoId, dependencyPrs.repoId))
     .where(inArray(dependencyPrs.stage, [...OPEN_STAGES])).orderBy(asc(dependencyPrs.openedAt)).limit(MAX_PRS)) as Row[],
+  stopped: async () => (await db().select({
+    id: dependencyPrs.id, repoId: dependencyPrs.repoId, appId: dependencyPrs.appId, proposalId: dependencyPrs.proposalId, number: dependencyPrs.number,
+    branch: dependencyPrs.branch, baseBranch: dependencyPrs.baseBranch, headSha: dependencyPrs.headSha, title: dependencyPrs.title, packages: dependencyPrs.packages,
+    auto: dependencyPrs.auto, stage: dependencyPrs.stage, smokeMode: dependencyPrs.smokeMode, previewReadyAt: dependencyPrs.previewReadyAt, openedAt: dependencyPrs.openedAt,
+    fullName: githubRepos.fullName, appName: sql<string | null>`null`, stageText: dependencyPrs.stageText,
+  }).from(dependencyPrs).innerJoin(githubRepos, eq(githubRepos.id, dependencyPrs.repoId))
+    .where(and(
+      isNull(githubRepos.goneAt), inArray(dependencyPrs.stage, [...STOPPED_STAGES]), gte(dependencyPrs.openedAt, new Date(Date.now() - STOPPED_WINDOW_MS)),
+      or(isNull(dependencyPrs.checkedAt), lt(dependencyPrs.checkedAt, new Date(Date.now() - STOPPED_EVERY_MS))),
+    )).orderBy(sql`${dependencyPrs.checkedAt} asc nulls first`).limit(STOPPED_MAX)) as Row[],
+  touch: async (id) => { await db().update(dependencyPrs).set({ checkedAt: new Date() }).where(eq(dependencyPrs.id, id)); },
   security: readAutoSecurity,
   rollback: readAutoRollback,
   writeToken: async () => { const a = await writeAccount(); return a && a !== "unreadable" ? a.token : null; },
@@ -229,7 +250,8 @@ export async function watchDepPrs(now: Date, deadline: number, deps: WatchDeps =
   const out: WatchRound = { watched: 0, merged: 0, stopped: 0 };
   const left = () => deadline - Date.now();
   const rows = await deps.rows();
-  if (!rows.length) return out;
+  const stopped = deps.stopped ? await deps.stopped().catch(() => [] as Row[]) : [];
+  if (!rows.length && !stopped.length) return out;
   const [security, rollback, token] = await Promise.all([deps.security().catch(() => null), deps.rollback().catch(() => null), deps.writeToken().catch(() => null)]);
   if (!token) return out;
   const book = await deps.book().catch(() => EMPTY_BOOK);
@@ -246,7 +268,31 @@ export async function watchDepPrs(now: Date, deadline: number, deps: WatchDeps =
       console.warn("deps/watch failed:", e instanceof Error ? e.name : "error");
     }
   }
+  for (const row of stopped) {
+    if (left() < MIN_LEFT_MS) break;
+    await settleStopped(row, now, token, deps).catch((e) => console.warn("deps/watch stopped failed:", e instanceof Error ? e.name : "error"));
+  }
   return out;
+}
+
+// 1.8.2: a stopped PR the owner merged or closed by hand takes that stage over; one still open only gets its read time
+// moved (save sets checked_at). A read failure leaves the row as it was. Nothing is merged, sent or rolled back here.
+async function settleStopped(row: Row, now: Date, token: string, d: WatchDeps): Promise<void> {
+  const pr = await d.pull(token, row.fullName, row.number);
+  if (!pr.ok) {
+    await d.touch?.(row.id);
+    return;
+  }
+  if (pr.data.merged) {
+    await d.save(row.id, { stage: "merged", finishedAt: now }, row.proposalId, stageLine(row.number, "merged", "merged by hand"));
+    await d.audit(`${AUTO_AUDIT_PREFIX}PR #${row.number} merged by hand · ${row.packages.join(", ")}`.slice(0, 200), row.appId).catch(() => undefined);
+    return;
+  }
+  if (pr.data.state === "closed") {
+    await d.save(row.id, { stage: "closed", finishedAt: now }, row.proposalId, stageLine(row.number, "closed"));
+    return;
+  }
+  await d.save(row.id, {}, row.proposalId, row.stageText ?? stageLine(row.number, row.stage));
 }
 
 type Seen = { step: WatchStep; smoke: SmokeVerdict | null; previewReadyAt: Date | null; headSha: string };

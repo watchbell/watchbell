@@ -5,13 +5,15 @@ import type { Proposal } from "./proposals-types";
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const owner = { id: "mem-1", userId: "user-1", email: "owner@example.com", role: "owner" as const };
 
-const h = vi.hoisted(() => ({ requireActionMember: vi.fn(), decideAndRun: vi.fn(), refresh: vi.fn() }));
+const h = vi.hoisted(() => ({ requireActionMember: vi.fn(), decideAndRun: vi.fn(), refresh: vi.fn(), askAgain: vi.fn(), notifyNew: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("next/cache", () => ({ refresh: h.refresh }));
 vi.mock("next/server", () => ({ after: (fn: () => unknown) => { void fn(); } }));
 vi.mock("./proposals-decide", () => ({ decideAndRun: h.decideAndRun }));
+vi.mock("./proposals-db", () => ({ askAgain: h.askAgain }));
+vi.mock("./proposals-notify", () => ({ notifyNewProposals: h.notifyNew }));
 
-import { decideProposalAction, decideProposalForm } from "./page-actions";
+import { askAgainAction, decideProposalAction, decideProposalForm } from "./page-actions";
 
 const proposal = (o: Partial<Proposal> = {}): Proposal => ({
   id: UUID, room: "workloads", action: "recheck", actionLabel: "Check again now", risk: "safe", title: "Check app-a again now", reason: "app-a /. Down.",
@@ -98,5 +100,55 @@ describe("decideProposalForm (the page's Approve / Reject form)", () => {
   it("a missing field is not valid", async () => {
     expect(await decideProposalForm(null, form({ id: UUID }))).toEqual({ ok: false, error: "Something in that request wasn't valid." });
     expect(h.decideAndRun).not.toHaveBeenCalled();
+  });
+});
+
+// 1.8.2 (owner 17 Nov): Ask again on an expired proposal in History; a pending copy goes to Telegram like a new one.
+describe("askAgainAction (owner only)", () => {
+  const ALERT = "523e4567-e89b-42d3-a456-426614174000";
+  const NEW = "923e4567-e89b-42d3-a456-426614174999";
+  const copy = {
+    id: NEW, room: "workloads", action: "github_bump_pr", risk: "safe", title: "Open a PR updating Next.js in app-o", reason: "r", resourceName: "app-o",
+    proposedBy: "Workloads officer", status: "pending", auto: false, result: null, createdAt: new Date("2026-11-17T10:30:00Z"), decidedAt: null,
+    expiresAt: new Date("2026-11-17T12:30:00Z"), resourceId: null, targetRef: null, alertId: ALERT,
+  };
+
+  it("refuses an operator before reading anything", async () => {
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await askAgainAction(UUID)).toEqual({ ok: false, error: "You don't have permission to do that." });
+    expect(h.requireActionMember).toHaveBeenCalledWith("owner");
+    expect(h.askAgain).not.toHaveBeenCalled();
+  });
+
+  it("refuses a malformed id", async () => {
+    expect(await askAgainAction("nope")).toEqual({ ok: false, error: "Something in that request wasn't valid." });
+    expect(h.askAgain).not.toHaveBeenCalled();
+  });
+
+  it("sends the new copy to Telegram once, as a reply to its alert, and refreshes the page", async () => {
+    h.askAgain.mockResolvedValue({ status: "ok", row: copy });
+    h.notifyNew.mockResolvedValue(undefined);
+    const r = await askAgainAction(UUID);
+    expect(r).toEqual({ ok: true, message: "Asked again. It waits for you here and on Telegram for 2 hours." });
+    expect(h.askAgain).toHaveBeenCalledWith(UUID, expect.any(Date));
+    expect(h.notifyNew).toHaveBeenCalledTimes(1);
+    const [list, , opts] = h.notifyNew.mock.calls[0];
+    expect(list).toEqual([expect.objectContaining({ id: NEW, status: "pending", action: "github_bump_pr" })]);
+    expect(opts.alertIds).toEqual(new Map([[NEW, ALERT]]));
+    expect(h.refresh).toHaveBeenCalled();
+  });
+
+  it("explains each refusal and sends nothing", async () => {
+    for (const [status, error] of [
+      ["not-expired", "Only an expired proposal can be asked again."],
+      ["alert-resolved", "Its alert isn't firing any more, so there's nothing to ask."],
+      ["already-waiting", "A copy of this proposal is already waiting for you."],
+      ["superseded", "A newer copy of this proposal exists, so this one can't be asked again."],
+      ["missing", "Unknown proposal."],
+    ]) {
+      h.askAgain.mockResolvedValue({ status });
+      expect(await askAgainAction(UUID)).toEqual({ ok: false, error });
+    }
+    expect(h.notifyNew).not.toHaveBeenCalled();
   });
 });

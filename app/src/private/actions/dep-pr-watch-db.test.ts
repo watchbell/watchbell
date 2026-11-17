@@ -479,6 +479,58 @@ describe("watchDepPrs", () => {
   });
 });
 
+// 1.8.2 (17 Nov): the owner merged two apps' update PRs by hand after the watcher had
+// stopped on "needs a look"; the rows kept that stage for good. A stopped PR (failed, timeout, ready to merge by hand)
+// is now read again now and then, and only its merged or closed state is taken over: no merge, no Telegram, no rollback.
+describe("watchDepPrs and stopped PRs merged or closed by hand", () => {
+  const stopped = (o: object = {}) => row({ stage: "failed" as const, stageText: "PR #12: needs a look ⚠️ — unexpected lockfile change @emnapi/core", ...o });
+  const pulled = (state: "open" | "closed", merged: boolean) => vi.fn().mockResolvedValue(ok({ state, merged, mergeable: null, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "main" }));
+
+  it("takes over a merge made by hand: stage merged, an audit line, nothing sent or merged", async () => {
+    const d = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped()]), pull: pulled("closed", true) });
+    expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 0, merged: 0, stopped: 0 });
+    expect(d.saved).toEqual([{ set: { stage: "merged", finishedAt: now }, text: "PR #12: merged ✅ — merged by hand" }]);
+    expect(d.audit).toHaveBeenCalledWith(expect.stringContaining("PR #12 merged by hand"), APP);
+    expect(d.notify).not.toHaveBeenCalled();
+    expect(d.merge).not.toHaveBeenCalled();
+    expect(d.checks).not.toHaveBeenCalled();
+  });
+
+  it("a PR closed without a merge becomes closed, never merged", async () => {
+    const d = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped({ stage: "timeout" })]), pull: pulled("closed", false) });
+    await watchDepPrs(now, deadline(), d);
+    expect(d.saved).toEqual([{ set: { stage: "closed", finishedAt: now }, text: "PR #12: closed" }]);
+  });
+
+  it("a PR still open keeps its stage and text (only the read time moves)", async () => {
+    const d = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped({ stage: "ready-manual", stageText: "PR #12: ready to merge (manual)" })]), pull: pulled("open", false) });
+    await watchDepPrs(now, deadline(), d);
+    expect(d.saved).toEqual([{ set: {}, text: "PR #12: ready to merge (manual)" }]);
+    expect(d.audit).not.toHaveBeenCalled();
+  });
+
+  // Final review I2: a PR GitHub can't read (repository gone from the token, deleted, renamed) still moves its read time,
+  // or it would take one of the three places every round for 14 days.
+  it("changes nothing but the read time when GitHub can't be read, and reads nothing without the write token", async () => {
+    const touch = vi.fn().mockResolvedValue(undefined);
+    const d = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped()]), pull: vi.fn().mockResolvedValue({ ok: false, kind: "missing", error: "404" }), touch });
+    await watchDepPrs(now, deadline(), d);
+    expect(d.saved).toEqual([]);
+    expect(touch).toHaveBeenCalledWith("pr-row");
+    const n = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped()]), writeToken: vi.fn().mockResolvedValue(null) });
+    await watchDepPrs(now, deadline(), n);
+    expect(n.pull).not.toHaveBeenCalled();
+  });
+
+  it("reads the stopped PRs after the open ones, in the same round", async () => {
+    const d = deps({ stopped: vi.fn().mockResolvedValue([stopped({ id: "old-row", number: 7 })]), pull: vi.fn()
+      .mockResolvedValueOnce(ok({ state: "open", merged: false, mergeable: true, headSha: SHA, branch: "watchpost/deps-0a1b2c3d", base: "main" }))
+      .mockResolvedValueOnce(ok({ state: "closed", merged: true, mergeable: null, headSha: SHA, branch: "x", base: "main" })) });
+    expect((await watchDepPrs(now, deadline(), d)).merged).toBe(1);
+    expect(d.saved.at(-1)).toEqual({ set: { stage: "merged", finishedAt: now }, text: "PR #7: merged ✅ — merged by hand" });
+  });
+});
+
 describe("runnerLockfileActive (the VM runner behind the registry)", () => {
   beforeEach(() => { delete ext.extensions.runner; });
 

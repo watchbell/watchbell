@@ -1,6 +1,6 @@
 {
   "name": "watchbell",
-  "version": "1.8.1",
+  "version": "1.8.2",
   "private": true,
   "scripts": {
     "dev": "cross-env NEXT_TELEMETRY_DISABLED=1 next dev --port 3100",
@@ -33,7 +33,7 @@
     "cmdk": "^1.1.1",
     "drizzle-orm": "^0.45.4",
     "lucide-react": "^1.55.0",
-    "next": "16.4.2",
+    "next": "16.4.5",
     "pdf-lib": "1.17.1",
     "postgres": "^3.4.9",
     "qrcode": "1.5.4",
@@ -54,7 +54,7 @@
     "cross-env": "^7.0.3",
     "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.5",
-    "eslint-config-next": "16.4.2",
+    "eslint-config-next": "16.4.5",
     "msw": "^3.0.3",
     "shadcn": "^4.22.1",
     "tailwindcss": "^4",

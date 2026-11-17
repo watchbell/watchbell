@@ -153,6 +153,25 @@ describe("withAfterDeploy", () => {
     expect(withAfterDeploy(minute, true, new Set(["hosting", "devops"] as const))).toEqual({ due: minute, early: false });
     expect(withAfterDeploy(minute, true, new Set(["devops"] as const)).early).toBe(true);
   });
+  // 1.8.2 (17 Nov): a run has 20 s and security needs 11 s left, so behind domains or logs it was put off run after run
+  // (an app's deploy at 16:50 WIB was still unchecked at 17:05). A marked app's check now goes right after the
+  // Vercel task that marks it.
+  it("runs a marked app's check right after the Vercel task, before the slower tasks", () => {
+    const due = ["heartbeats", "checks", "vercel", "supabase", "neon", "domains", "logs", "alerts", "digest"] as TaskName[];
+    expect(withAfterDeploy(due, true)).toEqual({
+      due: ["heartbeats", "checks", "vercel", "security", "supabase", "neon", "domains", "logs", "alerts", "digest"], early: true,
+    });
+  });
+  // Final review M3: a 6-hourly slot run does the dependency part first (up to 12 s); moved forward it would push the
+  // slower tasks (neon shares the :36 minute) past the budget every time. Only the early check moves.
+  it("leaves a due 6-hourly check where it was, even while an app is marked", () => {
+    const due = ["heartbeats", "checks", "vercel", "supabase", "logs", "security", "alerts"] as TaskName[];
+    expect(withAfterDeploy(due, true)).toEqual({ due, early: false });
+  });
+  it("leaves the 6-hourly check where it was without a mark", () => {
+    const due = ["heartbeats", "checks", "vercel", "supabase", "logs", "security", "alerts"] as TaskName[];
+    expect(withAfterDeploy(due, false)).toEqual({ due, early: false });
+  });
 });
 
 describe("checkTimeout", () => {

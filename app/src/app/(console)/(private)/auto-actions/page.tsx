@@ -9,7 +9,7 @@ import { pageGate } from "@/lib/auth";
 import { ago } from "@/lib/time";
 import { cn } from "@/lib/utils";
 import { AREA_LABELS } from "@/private/actions/areas";
-import { DecideForm } from "@/private/actions/decide-form";
+import { AskAgainForm, DecideForm } from "@/private/actions/decide-form";
 import { isProposalId } from "@/private/actions/proposals";
 import { listProposals, readProposal } from "@/private/actions/proposals-db";
 import { ACTION_KINDS, readAutoRun } from "@/private/actions/proposals-settings";
@@ -110,7 +110,10 @@ function HistoryRow({ p, focused, now }: { p: Proposal; focused: boolean; now: D
         <span className="text-[12.5px] text-ink-soft">{AREA_LABELS[p.room]} · {p.risk}</span>
       </td>
       <td className={td}><Status state={statusState(p.status)}>{p.status}</Status></td>
-      <td className={cn(td, tdWrap, "text-ink-soft")}>{p.result ? <MaskedText text={p.result} /> : "—"}</td>
+      <td className={cn(td, tdWrap, "text-ink-soft")}>
+        {p.result ? <MaskedText text={p.result} /> : "—"}
+        {p.askAgain && <AskAgainForm id={p.id} />}
+      </td>
       <td className={td}>{p.auto ? <Tag>Auto</Tag> : p.status === "expired" ? "—" : "Owner"}</td>
       <td className={cn(td, "text-ink-soft")}>{ago(new Date(p.decidedAt ?? p.createdAt), now)}</td>
     </tr>

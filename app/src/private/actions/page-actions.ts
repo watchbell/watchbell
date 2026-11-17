@@ -4,8 +4,10 @@ import { refresh } from "next/cache";
 import { after } from "next/server";
 import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
-import { isProposalId } from "./proposals";
+import { isProposalId, toProposal } from "./proposals";
+import { askAgain } from "./proposals-db";
 import { decideAndRun } from "./proposals-decide";
+import { notifyNewProposals } from "./proposals-notify";
 
 // The Auto-actions page's Approve / Reject (owner only, checked again here whatever the page showed). The same decide
 // path as the office route and the Telegram buttons (proposals-decide.ts), with the office route's messages: an approval
@@ -41,4 +43,31 @@ export async function decideProposalAction(id: string, decision: "approve" | "re
 export async function decideProposalForm(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
   const text = (k: string) => { const v = form.get(k); return typeof v === "string" ? v : ""; };
   return decideProposalAction(text("id"), text("decision") as "approve" | "reject");
+}
+
+// 1.8.2 (owner 17 Nov): Ask again on an expired proposal in History (owner only, checked again here). proposals-db
+// askAgain decides whether it may (expired, alert still firing, no open copy); the new copy goes to Telegram like a
+// new proposal, as a reply to its alert's message.
+const ASK_AGAIN_REFUSED = {
+  "not-expired": "Only an expired proposal can be asked again.",
+  "alert-resolved": "Its alert isn't firing any more, so there's nothing to ask.",
+  "already-waiting": "A copy of this proposal is already waiting for you.",
+  superseded: "A newer copy of this proposal exists, so this one can't be asked again.",
+  missing: "Unknown proposal.",
+} as const;
+
+export async function askAgainAction(id: string): Promise<ActionResult> {
+  return runGuarded("owner", async (): Promise<ActionResult> => {
+    if (!isProposalId(id)) return { ok: false, error: INVALID };
+    const r = await askAgain(id, new Date());
+    if (r.status !== "ok") return { ok: false, error: ASK_AGAIN_REFUSED[r.status] };
+    await notifyNewProposals([toProposal(r.row)], {}, { alertIds: new Map([[r.row.id, r.row.alertId ?? null]]) }).catch(() => undefined);
+    refresh();
+    return { ok: true, message: "Asked again. It waits for you here and on Telegram for 2 hours." };
+  }, deps, "local");
+}
+
+export async function askAgainForm(_prev: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const v = form.get("id");
+  return askAgainAction(typeof v === "string" ? v : "");
 }

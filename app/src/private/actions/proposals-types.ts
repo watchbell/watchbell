@@ -55,6 +55,7 @@ export type Proposal = {
   createdAt: string;         // ISO
   decidedAt: string | null;  // ISO
   expiresAt: string;         // ISO; a pending proposal expires after PROPOSAL_TTL_MS or when its alert resolves
+  askAgain?: true;           // 1.8.2: expired while its alert still fires, so Auto-actions › History offers Ask again
 };
 
 export type AutoRun = Record<ProposalAction, boolean>; // risky kinds are always false (enforced on write and on read)

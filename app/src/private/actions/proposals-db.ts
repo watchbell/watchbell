@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, isNotNull, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { ACTIONS_COPY } from "@/lib/copy/edition";
 import { accounts, alerts as alertRows, appSecurity, deployments, events, links, monitors, resources, snapshots, storedLogs } from "@/db/schema";
@@ -24,6 +24,7 @@ import {
 } from "./log-proposals";
 import { AUTO_ROLLBACK_GAP_MS, AUTO_ROLLBACK_RULES, autoRollbackDecision, autoRollbackReason, deployRef, type RollbackCheck } from "./auto-rollback";
 import { notifyAutoRollback, notifyNewProposals, notifyProposalResult } from "./proposals-notify";
+import { PROPOSAL_TTL_MS } from "./proposals-types";
 import { type Runner, runProposalAction, type RunTarget } from "./proposals-run";
 import { autoBumpReady, frameworkFixes, type FrameworkFix, productionMismatches } from "@/lib/data/deps-pr";
 import { type AutoRollback, readAutoRollback, readAutoRun, readAutoSecurity } from "./proposals-settings";
@@ -227,11 +228,43 @@ export async function createProposals(drafts: ProposalDraft[]): Promise<RunRow[]
 export async function listProposals(now: Date, limit: number, ws: string | null = null): Promise<Proposal[]> {
   const recent = sql`${actionProposals.createdAt} >= ${new Date(now.getTime() - LIST_WINDOW_MS).toISOString()}::timestamptz`;
   const inWs = ws ? sql`(${actionProposals.resourceId} is null or exists (select 1 from ops.resources r where r.id = ${actionProposals.resourceId} and r.workspace_id = ${ws}::uuid))` : null;
-  const rows = await db().select(ROW).from(actionProposals)
+  // 1.8.2: whether an expired proposal's alert still fires (Ask again), read in the same query.
+  // Final review I1: and no newer proposal for the same alert and action (a copy the owner then rejected or ran).
+  const firing = sql<boolean | null>`case when ${actionProposals.alertId} is null then null else (exists (select 1 from ops.alerts a where a.id = ${actionProposals.alertId} and a.resolved_at is null) and not exists (select 1 from ops.action_proposals b where b.alert_id = ${actionProposals.alertId} and b.action = ${actionProposals.action} and b.created_at > ${actionProposals.createdAt})) end`;
+  const rows = await db().select({ ...ROW, alertId: actionProposals.alertId, firing }).from(actionProposals)
     .where(inWs ? sql`${recent} and ${inWs}` : recent)
     .orderBy(sql`case when ${actionProposals.status} = 'pending' then 0 else 1 end`, desc(actionProposals.createdAt), desc(actionProposals.id))
     .limit(limit);
-  return rows.map(toProposal);
+  return rows.map(({ alertId, firing: fires, ...r }) => {
+    const p = toProposal(r);
+    return r.status === "expired" && alertId && fires === true ? { ...p, askAgain: true as const } : p;
+  });
+}
+
+// ---- ask again (1.8.2, owner 17 Nov) ----
+// Update-PR proposals sent to Telegram at 03:30 WIB expired at 05:30 unanswered, and an expired proposal is never
+// proposed again while its alert fires. The owner's Ask again (Auto-actions › History) inserts a pending copy with a
+// fresh PROPOSAL_TTL_MS: only from an expired proposal (a rejected one stays rejected) whose alert still fires. The
+// open-proposal index (alert, action) refuses a second open copy, so two quick clicks make one.
+export type AskAgain = { status: "ok"; row: RunRow } | { status: "not-expired" | "alert-resolved" | "already-waiting" | "superseded" | "missing" };
+export async function askAgain(id: string, now: Date): Promise<AskAgain> {
+  const [p] = await db().select({ ...RUN_ROW, resourceKind: actionProposals.resourceKind }).from(actionProposals).where(eq(actionProposals.id, id)).limit(1);
+  if (!p) return { status: "missing" };
+  if (p.status !== "expired") return { status: "not-expired" };
+  if (!p.alertId) return { status: "alert-resolved" };
+  // Final review I1: only the newest proposal of its (alert, action) — an older one must not bring back a pair the
+  // owner rejected or ran.
+  const [newer] = await db().select({ id: actionProposals.id }).from(actionProposals)
+    .where(and(eq(actionProposals.alertId, p.alertId), eq(actionProposals.action, p.action), gt(actionProposals.createdAt, p.createdAt))).limit(1);
+  if (newer) return { status: "superseded" };
+  const [fires] = await db().select({ id: alertRows.id }).from(alertRows).where(and(eq(alertRows.id, p.alertId), isNull(alertRows.resolvedAt))).limit(1);
+  if (!fires) return { status: "alert-resolved" };
+  const [row] = await db().insert(actionProposals).values({
+    alertId: p.alertId, ruleKey: p.ruleKey, room: p.room, action: p.action, risk: p.risk, title: p.title, reason: p.reason, resourceKind: p.resourceKind,
+    resourceId: p.resourceId, resourceName: p.resourceName, targetRef: p.targetRef, proposedBy: p.proposedBy, status: "pending",
+    expiresAt: new Date(now.getTime() + PROPOSAL_TTL_MS),
+  } as typeof actionProposals.$inferInsert).onConflictDoNothing().returning(RUN_ROW);
+  return row ? { status: "ok", row: row as RunRow } : { status: "already-waiting" };
 }
 
 // ---- read one ----

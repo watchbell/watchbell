@@ -2,6 +2,28 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.2
+
+A Next.js security update, and three gaps found while fixing it.
+
+### Security
+
+- Next.js 16.4.5 (from 16.4.2): fixes advisory GHSA-mfr8-8qww-v76h (moderate). Upgrade to clear the CVE tag on your
+  own Watchbell.
+
+### Fixed
+
+- The security check after a new production deployment runs right after the deployment is seen. It used to come after
+  the slower tasks of a collector run and could be put off run after run, so an app stayed marked vulnerable well
+  after its fix went live.
+- An update pull request that stopped on "needs a look" and was then merged or closed by hand now shows merged or
+  closed (checked every 10 minutes for 14 days) instead of "needs a look" for good.
+
+### Added
+
+- **Ask again** on an expired proposal in Auto-actions › History, while its alert still fires: the proposal waits for
+  you again for 2 hours, on the page and on Telegram. Handy when a proposal arrived at night and expired unanswered.
+
 ## 1.8.1
 
 Fixes from the first days of Workspaces, and a lighter load on the database.

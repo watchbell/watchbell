@@ -32,7 +32,7 @@ permissions:
   pull-requests: write
 jobs:
   precheck:
-    uses: watchbell/watchbell/.github/workflows/precheck.yml@v1.8.1
+    uses: watchbell/watchbell/.github/workflows/precheck.yml@v1.8.2
     with:
       working-directory: .
 ```

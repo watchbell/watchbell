@@ -90,7 +90,8 @@ selalu menunggu Anda, kecuali aturan auto-rollback yang sempit di bawah, yang ha
 
 - **Di halaman Auto-actions** (khusus owner): "Waiting for you" menampilkan usulan yang pending beserta alasan dan
   targetnya. Approve langsung menjalankan aksinya; Reject menutupnya. Di bawahnya ada riwayat semua yang diusulkan,
-  dijalankan, ditolak, atau kedaluwarsa.
+  dijalankan, ditolak, atau kedaluwarsa. Usulan yang kedaluwarsa dan alert-nya masih firing punya tombol **Ask again**:
+  usulan itu menunggu Anda lagi selama 2 jam, di sini dan di Telegram. Usulan yang ditolak tidak diusulkan lagi.
 - **Di Telegram**, dengan [tombol approval](notifications.md#tombol-approval) aktif: setiap pesan usulan punya tombol
   **Approve** dan **Reject**. Hanya akun Telegram yang sudah Anda tautkan yang bisa memakainya. Untuk aksi berisiko,
   Approve lebih dulu berubah menjadi **Sure? Approve**, yang harus Anda tekan dalam 2 menit. Di laptop yang

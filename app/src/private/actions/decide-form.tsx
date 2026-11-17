@@ -4,7 +4,7 @@ import { useActionState } from "react";
 import { buttonClass } from "@/components/kit";
 import type { ActionResult } from "@/lib/action";
 import { cn } from "@/lib/utils";
-import { decideProposalForm } from "./page-actions";
+import { askAgainForm, decideProposalForm } from "./page-actions";
 
 // Approve / Reject for one waiting proposal: one small form, the pressed button names the decision. Works before
 // hydration too (a plain form post); afterwards the answer shows beside the buttons until the refreshed list moves it.
@@ -20,6 +20,23 @@ export function DecideForm({ id }: { id: string }) {
         Reject
       </button>
       {pending && <span className="text-[12.5px] text-ink-soft" role="status">Working…</span>}
+      {!pending && state && (
+        <span className={cn("text-[12.5px]", state.ok ? "text-ink-soft" : "text-err")} role={state.ok ? "status" : "alert"}>
+          {state.ok ? state.message : state.error}
+        </span>
+      )}
+    </form>
+  );
+}
+
+// 1.8.2: Ask again on an expired proposal in History (shown only while its alert fires; the action checks again).
+export function AskAgainForm({ id }: { id: string }) {
+  const [state, action, pending] = useActionState<ActionResult | null, FormData>(askAgainForm, null);
+  return (
+    <form action={action} className="mt-1.5 flex flex-wrap items-center gap-2">
+      <input type="hidden" name="id" value={id} />
+      <button type="submit" disabled={pending} className={buttonClass({ size: "sm" })}>Ask again</button>
+      {pending && <span className="text-[12.5px] text-ink-soft" role="status">Sending…</span>}
       {!pending && state && (
         <span className={cn("text-[12.5px]", state.ok ? "text-ink-soft" : "text-err")} role={state.ok ? "status" : "alert"}>
           {state.ok ? state.message : state.error}

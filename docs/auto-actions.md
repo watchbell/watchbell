@@ -86,7 +86,8 @@ the narrow auto-rollback rule below, which you have to switch on.
 
 - **On the Auto-actions page** (owner only): "Waiting for you" lists pending proposals with the reason and the target.
   Approve runs the action at once; Reject closes it. Below is the history of everything proposed, run, rejected or
-  expired.
+  expired. An expired proposal whose alert still fires has **Ask again**: it waits for you again for 2 hours, here and
+  on Telegram. A rejected one isn't asked again.
 - **On Telegram**, with [approval buttons](notifications.md#approval-buttons) on: each proposal message has
   **Approve** and **Reject**. Only your linked Telegram account can use them. For a risky action, Approve first turns
   into **Sure? Approve**, which you must press within 2 minutes. On a self-hosted laptop the buttons work while

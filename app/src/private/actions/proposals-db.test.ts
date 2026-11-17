@@ -10,7 +10,7 @@ vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).d
 vi.mock("./proposals-run", () => ({ runProposalAction: vi.fn() }));
 
 import {
-  claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, frameworkAskedApps, listProposals, PROPOSAL_STEP_DEPS, prodMismatchOf,
+  askAgain, claimProposal, createProposals, decideProposal, executeProposal, expireProposals, finishProposal, frameworkAskedApps, listProposals, PROPOSAL_STEP_DEPS, prodMismatchOf,
   pruneProposals, readLogApps, readProposal, readProposalFacts, readRollbackContext, runLogProposals, runProposalsStep, type StepDeps,
 } from "./proposals-db";
 
@@ -91,6 +91,75 @@ describe("createProposals", () => {
   });
 });
 
+// 1.8.2 (owner 17 Nov): three update-PR proposals sent to Telegram at 03:30 WIB expired at 05:30 while the owner slept,
+// and an expired proposal is never proposed again while its alert fires. Ask again (Auto-actions › History) makes a
+// pending copy with a fresh window, only for an expired one whose alert still fires; a rejected one stays rejected.
+describe("askAgain", () => {
+  const NEW = "923e4567-e89b-42d3-a456-426614174999";
+  const src = (o: object = {}) => ({
+    ...row({ status: "expired", action: "github_bump_pr", title: "Open a PR updating Next.js in app-o", result: "Expired: nobody decided in time, or the alert stopped firing." }),
+    ruleKey: "FrameworkVulnerable", resourceKind: "app", ...o,
+  });
+
+  it("copies an expired proposal whose alert still fires: pending, a fresh two-hour window, the same alert and action", async () => {
+    const f = fakeDb([[src()], [], [{ id: ALERT }]], [[row({ id: NEW, action: "github_bump_pr" })]]);
+    h.current = f;
+    const r = await askAgain(ID, now);
+    expect(r).toMatchObject({ status: "ok", row: { id: NEW } });
+    expect(f.writes).toHaveLength(1);
+    expect(f.writes[0]).toMatchObject({ kind: "insert", table: actionProposals });
+    const v = payloadOf(f.writes[0].calls)!;
+    expect(v).toMatchObject({
+      alertId: ALERT, ruleKey: "FrameworkVulnerable", action: "github_bump_pr", room: "workloads", risk: "safe", title: "Open a PR updating Next.js in app-o",
+      resourceKind: "app", resourceId: APP, resourceName: "app-a", targetRef: MON, status: "pending", expiresAt: new Date(now.getTime() + 2 * 3_600_000),
+    });
+    expect(v).not.toHaveProperty("id");
+    expect(v).not.toHaveProperty("result");
+    expect(f.writes[0].calls.map((c) => c.method)).toContain("onConflictDoNothing");
+  });
+
+  it("never asks again for a rejected, done or pending proposal", async () => {
+    for (const status of ["rejected", "done", "pending", "failed"]) {
+      const f = fakeDb([[src({ status })]]);
+      h.current = f;
+      expect(await askAgain(ID, now)).toEqual({ status: "not-expired" });
+      expect(f.writes).toHaveLength(0);
+    }
+  });
+
+  it("refuses when the alert resolved meanwhile, or the proposal had no alert (a log check's)", async () => {
+    const f = fakeDb([[src()], [], []]);
+    h.current = f;
+    expect(await askAgain(ID, now)).toEqual({ status: "alert-resolved" });
+    const g = fakeDb([[src({ alertId: null })]]);
+    h.current = g;
+    expect(await askAgain(ID, now)).toEqual({ status: "alert-resolved" });
+    expect([...f.writes, ...g.writes]).toHaveLength(0);
+  });
+
+  it("says a copy is already waiting when the open-proposal index refuses a second one", async () => {
+    h.current = fakeDb([[src()], [], [{ id: ALERT }]], [[]]);
+    expect(await askAgain(ID, now)).toEqual({ status: "already-waiting" });
+  });
+
+  // Final review I1: the owner asked again (copy B) and then rejected or ran B; the older expired A must not bring the
+  // pair back. Only the newest proposal of an (alert, action) can be asked again.
+  it("refuses an older proposal when a newer one exists for the same alert and action", async () => {
+    const f = fakeDb([[src()], [{ id: "newer" }]]);
+    h.current = f;
+    expect(await askAgain(ID, now)).toEqual({ status: "superseded" });
+    expect(f.writes).toHaveLength(0);
+    const q = render(whereOf(f.queries[1])!);
+    expect(q.sql).toContain("created_at");
+    expect(q.params).toEqual(expect.arrayContaining([ALERT, "github_bump_pr"]));
+  });
+
+  it("an unknown proposal is missing", async () => {
+    h.current = fakeDb([[]]);
+    expect(await askAgain(ID, now)).toEqual({ status: "missing" });
+  });
+});
+
 describe("listProposals", () => {
   it("reads the last 7 days, pending first then newest, with the limit, as contract proposals", async () => {
     const f = fakeDb([[row()]]);
@@ -102,6 +171,26 @@ describe("listProposals", () => {
     const order = f.queries[0].find((c) => c.method === "orderBy")!.args.map((a) => render(a).sql).join(" ");
     expect(order).toContain("'pending' then 0 else 1");
     expect(render(whereOf(f.queries[0])!).params).toContain("2026-10-08T05:00:00.000Z");
+  });
+
+  // 1.8.2: History offers Ask again only where it can work: an expired proposal whose alert still fires.
+  it("marks expired proposals whose alert still fires as askable, and nothing else", async () => {
+    h.current = fakeDb([[
+      row({ id: "a", status: "expired", firing: true }), row({ id: "b", status: "expired", firing: false }),
+      row({ id: "c", status: "rejected", firing: true }), row({ id: "d", status: "expired", alertId: null, firing: null }),
+    ]]);
+    const list = await listProposals(now, 20);
+    expect(list.map((p) => [p.id, p.askAgain === true])).toEqual([["a", true], ["b", false], ["c", false], ["d", false]]);
+    expect(list[0]).not.toHaveProperty("firing");
+    expect(list[0]).not.toHaveProperty("alertId");
+  });
+  it("the askable test also needs no newer proposal for the same alert and action (final review I1)", async () => {
+    const f = fakeDb([[row()]]);
+    h.current = f;
+    await listProposals(now, 20);
+    const select = render(f.queries[0][0].args[0] && (f.queries[0][0].args[0] as Record<string, unknown>).firing).sql;
+    expect(select).toContain("not exists");
+    expect(select).toMatch(/b\.created_at > /);
   });
 });
 

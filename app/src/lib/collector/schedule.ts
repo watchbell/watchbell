@@ -181,11 +181,15 @@ export const protectOnly = (task: TaskName, paused: ReadonlySet<SectionId>): boo
 // Watchbell 1.2.1: an app marked after a new production deployment (lib/security/after-deploy.ts) starts the security
 // task in this run even outside its slot: `early`, it checks only the marked apps and its slot stays as it was (the run
 // doesn't record it in collector.lastRun). When the 6-hourly run is due anyway it checks the marked apps first.
+// 1.8.2 (17 Nov): the early check goes right after `vercel` (the task that marks). A run has BUDGET_MS and security
+// needs MIN_LEFT_MS.security left, so behind domains, logs and the like it was put off run after run and a fixed app
+// stayed "vulnerable" for hours. The tasks it overtakes are due again next run. A due 6-hourly slot run keeps its place
+// (final review M3): it scans dependencies first, for up to 12 s, and moved forward would push the slower tasks out.
 export function withAfterDeploy(due: readonly TaskName[], marked: boolean, paused: ReadonlySet<SectionId> = new Set()): { due: TaskName[]; early: boolean } {
   if (!marked || due.includes("security") || !activeTasks(["security"], paused).length) return { due: [...due], early: false };
   const order = Object.keys(TASKS) as TaskName[];
-  const at = due.findIndex((t) => order.indexOf(t) > order.indexOf("security"));
   const out = [...due];
+  const at = out.findIndex((t) => order.indexOf(t) > order.indexOf("vercel"));
   out.splice(at < 0 ? out.length : at, 0, "security");
   return { due: out, early: true };
 }
