@@ -7,12 +7,12 @@ const owner = { id: "mem-1", userId: "user-1", email: "owner@studio.example", ro
 const viewer = { ...owner, id: "mem-3", userId: "user-3", role: "viewer" as const };
 
 const h = vi.hoisted(() => ({
-  requireActionMember: vi.fn(), refresh: vi.fn(), recordAction: vi.fn(), set: vi.fn(),
+  requireActionMember: vi.fn(), refresh: vi.fn(), revalidatePath: vi.fn(), recordAction: vi.fn(), set: vi.fn(),
   moveResources: vi.fn(), moveRepos: vi.fn(),
   listWorkspaces: vi.fn(), createWorkspace: vi.fn(), renameWorkspace: vi.fn(), reorderWorkspaces: vi.fn(), deleteWorkspace: vi.fn(), setDefaultWorkspace: vi.fn(),
 }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
-vi.mock("next/cache", () => ({ refresh: h.refresh, revalidatePath: vi.fn() }));
+vi.mock("next/cache", () => ({ refresh: h.refresh, revalidatePath: h.revalidatePath }));
 vi.mock("next/headers", () => ({ cookies: async () => ({ set: h.set, get: () => undefined }) }));
 vi.mock("@/lib/data/audit-db", () => ({ recordAction: h.recordAction }));
 const cacheTags = vi.hoisted(() => ({ updateTags: vi.fn() }));
@@ -104,5 +104,28 @@ describe("moving and deleting expire the cached lists", () => {
     h.deleteWorkspace.mockResolvedValue({ moved: 2, statusPageRemoved: false });
     await deleteWorkspaceAction(K);
     expect(cacheTags.updateTags).toHaveBeenCalledWith(expect.arrayContaining(["db:supabase", "net:zones"]));
+  });
+});
+
+// 1.8.3 (1.8.1 deferred minor): a workspace deleted in Settings stayed in the Move to… lists of pages the browser
+// already held. Creating, renaming and deleting expire every page's cached render, so each list is read again.
+describe("changing the workspace list refreshes every page (1.8.3)", () => {
+  it("create, rename and delete revalidate the whole layout", async () => {
+    h.createWorkspace.mockResolvedValue({ id: K });
+    await createWorkspaceAction("Northwind");
+    expect(h.revalidatePath).toHaveBeenLastCalledWith("/", "layout");
+    h.revalidatePath.mockClear();
+    h.renameWorkspace.mockResolvedValue("ok");
+    await renameWorkspaceAction(K, "Kopi Senja Coffee");
+    expect(h.revalidatePath).toHaveBeenLastCalledWith("/", "layout");
+    h.revalidatePath.mockClear();
+    h.deleteWorkspace.mockResolvedValue({ moved: 0, statusPageRemoved: false });
+    await deleteWorkspaceAction(K);
+    expect(h.revalidatePath).toHaveBeenLastCalledWith("/", "layout");
+  });
+  it("a refused change revalidates nothing", async () => {
+    h.deleteWorkspace.mockResolvedValue({ error: "default" });
+    await deleteWorkspaceAction(K);
+    expect(h.revalidatePath).not.toHaveBeenCalled();
   });
 });

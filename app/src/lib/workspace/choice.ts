@@ -1,8 +1,23 @@
 // Watchbell 1.8 (spec §5): which workspace the console shows, from a per-browser cookie (no database write when
-// switching). Pure, so the server (layout, pages) and the tests share it.
+// switching). Shared by the server (layout, pages), the switcher and the tests; only wsCookieOptions reads the
+// environment (server only).
 
 export const WS_COOKIE = "wb_ws";
 export const ALL_WORKSPACES = "all";
+
+// 1.8.3: Secure exactly when the console's address (SITE_URL) is https, like the session cookie
+// (lib/local-auth/session-cookie.ts). By NODE_ENV it was dropped by a self-hosted console opened over plain http on
+// the LAN; by the request's scheme it lost Secure behind a TLS proxy.
+export function wsCookieOptions(siteUrl: string | undefined = process.env.SITE_URL) {
+  // Final review M3: Vercel serves https only, so a cloud deploy stays Secure whatever SITE_URL says.
+  let secure = process.env.VERCEL === "1";
+  try {
+    secure ||= new URL(siteUrl ?? "").protocol === "https:";
+  } catch {
+    // no or unusable address: not Secure, as for the session cookie
+  }
+  return { path: "/", sameSite: "lax" as const, httpOnly: true, maxAge: 60 * 60 * 24 * 365, secure };
+}
 
 export type WorkspaceLite = { id: string; name: string };
 

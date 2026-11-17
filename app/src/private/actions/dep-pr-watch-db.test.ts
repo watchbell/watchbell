@@ -490,7 +490,8 @@ describe("watchDepPrs and stopped PRs merged or closed by hand", () => {
     const d = deps({ rows: vi.fn().mockResolvedValue([]), stopped: vi.fn().mockResolvedValue([stopped()]), pull: pulled("closed", true) });
     expect(await watchDepPrs(now, deadline(), d)).toEqual({ watched: 0, merged: 0, stopped: 0 });
     expect(d.saved).toEqual([{ set: { stage: "merged", finishedAt: now }, text: "PR #12: merged ✅ — merged by hand" }]);
-    expect(d.audit).toHaveBeenCalledWith(expect.stringContaining("PR #12 merged by hand"), APP);
+    // 1.8.3 (final review 1.8.2 M6): the owner merged it, so the line carries no Auto-actions prefix.
+    expect(d.audit).toHaveBeenCalledWith("PR #12 merged by hand · next", APP);
     expect(d.notify).not.toHaveBeenCalled();
     expect(d.merge).not.toHaveBeenCalled();
     expect(d.checks).not.toHaveBeenCalled();

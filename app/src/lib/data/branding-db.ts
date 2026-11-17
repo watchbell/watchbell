@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { settings } from "@/db/schema";
 import { BRAND_SETTING, type Brand, DEFAULT_BRAND, parseBrand } from "@/lib/branding";
@@ -13,7 +13,27 @@ const LOGO_SETTING = "branding.logo";
 
 export async function readBrand(): Promise<Brand> {
   const [row] = await db().select({ value: settings.value }).from(settings).where(eq(settings.key, BRAND_SETTING)).limit(1);
-  return row ? parseBrand(row.value) : { ...DEFAULT_BRAND };
+  const b = row ? parseBrand(row.value) : { ...DEFAULT_BRAND };
+  return b.hasLogo && !b.logoVersion ? fillLogoVersion(b) : b;
+}
+
+// 1.8.3 (1.7.1 note): a logo uploaded with 1.7.0 has no version, so its pages asked for a bare /brand-icon the CDN
+// keeps 5 minutes. The first read computes it from the stored logo and saves it (a failed save is tried again on the
+// next read; the brand is shown either way). Final review M1/M2: only the version key is added, and only while the
+// row still has none, so a save made meanwhile (a new name, a new logo with its version) is never undone; a brand
+// whose logo row is gone stops claiming a logo, so it doesn't pay this read on every render.
+const NO_VERSION = sql`(${settings.value} ->> 'logoVersion') is null`;
+export async function fillLogoVersion(b: Brand): Promise<Brand> {
+  let png: Uint8Array | null;
+  try {
+    png = await readBrandLogo();
+  } catch {
+    return b; // can't tell; nothing written
+  }
+  const patch = png ? sql`jsonb_build_object('logoVersion', ${logoVersionOf(png)}::text)` : sql`'{"hasLogo": false}'::jsonb`;
+  await db().update(settings).set({ value: sql`${settings.value} || ${patch}`, updatedAt: new Date() })
+    .where(and(eq(settings.key, BRAND_SETTING), NO_VERSION)).catch(() => undefined);
+  return png ? { ...b, logoVersion: logoVersionOf(png) } : { ...b, hasLogo: false };
 }
 
 // 1.8.1 (public routes audit): the sign-in page, the logo and the public status page are open to anyone, so they read

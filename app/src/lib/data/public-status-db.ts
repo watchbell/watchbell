@@ -32,7 +32,18 @@ const SOON_MS = 7 * 86_400_000;
 // or removing a page clears it here; other instances catch up within the minute.
 export const publishedSlugs = ttlMemo(async () => new Set((await db().select({ slug: statusPages.slug }).from(statusPages)
   .where(eq(statusPages.published, true))).map((r) => r.slug)), 60_000, Date.now, () => isDemo());
-export const isPublishedSlug = async (slug: string): Promise<boolean> => (await publishedSlugs.get()).has(slug);
+// 1.8.3 (1.8.1 deferred minor): a page published on another instance was "not found" here for up to that minute. A
+// miss now reads the list again, at most once per MISS_REREAD_MS per instance: a new page shows within seconds and a
+// flood of made-up slugs still costs one read per 10 s.
+export const MISS_REREAD_MS = 10_000;
+let lastMissRead = 0;
+export async function isPublishedSlug(slug: string, now: number = Date.now()): Promise<boolean> {
+  if ((await publishedSlugs.get()).has(slug)) return true;
+  if (now - lastMissRead < MISS_REREAD_MS) return false;
+  lastMissRead = now;
+  publishedSlugs.clear();
+  return (await publishedSlugs.get()).has(slug);
+}
 
 async function load(slug: string) {
   const [page] = await db().select({ id: statusPages.id, title: statusPages.title, announcement: statusPages.announcement, published: statusPages.published })
@@ -91,7 +102,7 @@ export async function publicBadge(slug: string, key: string, now: Date): Promise
 // Uptime page: the monitors a visitor can see (on a published page), for their Public tag.
 export async function publicMonitorIds(): Promise<Set<string>> {
   const rows = await db().select({ monitorId: statusPageMonitors.monitorId }).from(statusPageMonitors)
-    .innerJoin(statusPages, eq(statusPages.id, statusPageMonitors.pageId)).where(eq(statusPages.published, true)).limit(MAX_ON_PAGE);
+    .innerJoin(statusPages, eq(statusPages.id, statusPageMonitors.pageId)).where(eq(statusPages.published, true)); // 1.8.3: MAX_ON_PAGE is per page, not across pages
   return new Set(rows.map((r) => r.monitorId));
 }
 

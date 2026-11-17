@@ -151,7 +151,8 @@ describe("publicMonitorIds", () => {
   it("gives the monitors on a published page, for the Uptime page's Public tag", async () => {
     const f = use([[{ monitorId: M1 }, { monitorId: M2 }]]);
     expect(await publicMonitorIds()).toEqual(new Set([M1, M2]));
-    expect(limitOf(f.queries[0])).toBe(30);
+    // 1.8.3 (1.8.0 deferred minor): 30 is a per-page limit; across several published pages the tag stopped at 30.
+    expect(limitOf(f.queries[0])).toBeUndefined();
     expect(f.queries[0].map((c) => c.method)).toEqual(expect.arrayContaining(["innerJoin", "where"]));
   });
 });

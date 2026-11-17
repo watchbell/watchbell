@@ -4,10 +4,13 @@ import { refresh } from "next/cache";
 import { after } from "next/server";
 import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
+import { recordAction } from "@/lib/data/audit-db";
+import { telegramTarget } from "@/lib/data/notify-db";
 import { isProposalId, toProposal } from "./proposals";
 import { askAgain } from "./proposals-db";
 import { decideAndRun } from "./proposals-decide";
 import { notifyNewProposals } from "./proposals-notify";
+import { PROPOSAL_TTL_MS } from "./proposals-types";
 
 // The Auto-actions page's Approve / Reject (owner only, checked again here whatever the page showed). The same decide
 // path as the office route and the Telegram buttons (proposals-decide.ts), with the office route's messages: an approval
@@ -57,13 +60,25 @@ const ASK_AGAIN_REFUSED = {
 } as const;
 
 export async function askAgainAction(id: string): Promise<ActionResult> {
-  return runGuarded("owner", async (): Promise<ActionResult> => {
+  return runGuarded("owner", async (member): Promise<ActionResult> => {
     if (!isProposalId(id)) return { ok: false, error: INVALID };
     const r = await askAgain(id, new Date());
     if (r.status !== "ok") return { ok: false, error: ASK_AGAIN_REFUSED[r.status] };
-    await notifyNewProposals([toProposal(r.row)], {}, { alertIds: new Map([[r.row.id, r.row.alertId ?? null]]) }).catch(() => undefined);
+    const row = r.row;
+    // 1.8.3 (final review 1.8.2, minors 4, 5 and 7): who asked again goes to Events; the Telegram send runs after the
+    // answer (as Approve's history line does); the answer promises Telegram only when a chat is connected.
+    await recordAction({ kind: "ok", message: `Asked again: ${row.title}`.slice(0, 200), resourceId: row.resourceId, actorUserId: member.userId }).catch(() => undefined);
+    after(async () => {
+      try {
+        await notifyNewProposals([toProposal(row)], {}, { alertIds: new Map([[row.id, row.alertId ?? null]]) });
+      } catch {
+        // notifyNewProposals reports its own failures; the copy waits on the page either way
+      }
+    });
+    const telegram = await telegramTarget().catch(() => null);
+    const hours = Math.round(PROPOSAL_TTL_MS / 3_600_000);
     refresh();
-    return { ok: true, message: "Asked again. It waits for you here and on Telegram for 2 hours." };
+    return { ok: true, message: `Asked again. It waits for you here${telegram ? " and on Telegram" : ""} for ${hours} hour${hours === 1 ? "" : "s"}.` };
   }, deps, "local");
 }
 

@@ -285,7 +285,8 @@ async function settleStopped(row: Row, now: Date, token: string, d: WatchDeps): 
   }
   if (pr.data.merged) {
     await d.save(row.id, { stage: "merged", finishedAt: now }, row.proposalId, stageLine(row.number, "merged", "merged by hand"));
-    await d.audit(`${AUTO_AUDIT_PREFIX}PR #${row.number} merged by hand · ${row.packages.join(", ")}`.slice(0, 200), row.appId).catch(() => undefined);
+    // 1.8.3 (final review 1.8.2 M6): the owner merged it, so no Auto-actions prefix.
+    await d.audit(`PR #${row.number} merged by hand · ${row.packages.join(", ")}`.slice(0, 200), row.appId).catch(() => undefined);
     return;
   }
   if (pr.data.state === "closed") {

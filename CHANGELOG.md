@@ -2,6 +2,27 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.3
+
+Small fixes from the reviews of 1.8.0 to 1.8.2.
+
+### Fixed
+
+- **Workspaces:** while one item in "Not sorted yet" moves, the other items and Open / Leave wait for it. Creating,
+  renaming or deleting a workspace refreshes the pages you open next, so a deleted workspace no longer stays in Move
+  to… until a reload. The workspace choice now sticks on a self-hosted console opened over plain http on your network, and is
+  marked Secure behind an https proxy (it follows `SITE_URL`, like the sign-in cookie).
+- **Domains:** a domain stays in its app's workspace when the app is moved while the collector is reading its domains.
+- **Status page:** a page published on another server shows within seconds instead of up to a minute, and the
+  Uptime page's Public tag no longer stops at 30 monitors when several status pages are published.
+- **Reports:** under All workspaces, the editor lists every workspace's websites (it listed only the default
+  workspace's). A long client name wraps on page 1 and is shortened in the page header instead of running off the page.
+- **Branding:** a logo uploaded with 1.7.0 gets its version on the first visit, so browsers and the CDN keep it
+  instead of asking again every few minutes; there is no need to upload it again.
+- **Auto-actions:** Ask again answers at once (the Telegram message follows), says "on Telegram" only when Telegram is
+  connected, and is recorded in Events with who asked. A pull request merged by hand is no longer labelled as an
+  automatic action in Events.
+
 ## 1.8.2
 
 A Next.js security update, and three gaps found while fixing it.

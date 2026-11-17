@@ -58,6 +58,14 @@ function text(c: Ctx, s: string, x: number, y: number, o: { size?: number; font?
   return w;
 }
 
+// 1.8.3: a text cut to `width` with "…" (a long client name in the header).
+function fit(font: PDFFont, s: string, size: number, width: number): string {
+  if (font.widthOfTextAtSize(s, size) <= width) return s;
+  let out = s;
+  while (out.length > 1 && font.widthOfTextAtSize(`${out}…`, size) > width) out = out.slice(0, -1);
+  return `${out.trimEnd()}…`;
+}
+
 // Greedy word wrap; returns the y after the last line. `maxLines` cuts a long text with "…" (review I-6).
 function para(c: Ctx, s: string, x: number, y: number, width: number, o: { size?: number; color?: ReturnType<typeof rgb>; lead?: number; maxLines?: number } = {}): number {
   const size = o.size ?? 9.5;
@@ -106,7 +114,10 @@ function header(c: Ctx, o: RenderOptions, logo: PDFImage | null, page: number): 
   text(c, displayName(o.brand), M + 34, y + 14, { size: 13, font: c.bold });
   text(c, o.title?.trim() || t.defaultTitle, M + 34, y + 2, { size: 9, color: SOFT });
   text(c, formatMonth(c.month, o.lang), W - M, y + 14, { size: 11, font: c.bold, right: true });
-  text(c, `${t.preparedFor} ${o.clientName} · ${t.page} ${page} ${t.of} 2`, W - M, y + 2, { size: 9, color: SOFT, right: true });
+  // 1.8.3: a long client name is cut so the right-aligned line never runs into the brand on the left.
+  const pageOf = ` · ${t.page} ${page} ${t.of} 2`;
+  const nameRoom = (W - 2 * M) / 2 - c.regular.widthOfTextAtSize(`${t.preparedFor} ${pageOf}`, 9);
+  text(c, `${t.preparedFor} ${fit(c.regular, o.clientName, 9, nameRoom)}${pageOf}`, W - M, y + 2, { size: 9, color: SOFT, right: true });
   c.page.drawLine({ start: { x: M, y: y - 8 }, end: { x: W - M, y: y - 8 }, thickness: 1.5, color: c.accent });
   return y - 26;
 }
@@ -173,8 +184,10 @@ function pageOne(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null
   const t = reportText(o.lang);
   let y = header(c, o, logo, 1);
   // Review M-5: the zone every time in the report is in (its name in the middle of the month).
-  text(c, `${t.preparedFor} ${o.clientName} · ${m.sites.length} ${t.sites} · ${zoneText(o.zone, o.lang, new Date(`${m.month}-15T12:00:00Z`))}`, M, y, { size: 9.5, color: SOFT });
-  y = calendar(c, m, o, y - 22);
+  // 1.8.3: wrapped (two lines at most) so a long client name stays inside the margins; the calendar follows it.
+  const lead = 9.5 * 1.45;
+  y = para(c, `${t.preparedFor} ${o.clientName} · ${m.sites.length} ${t.sites} · ${zoneText(o.zone, o.lang, new Date(`${m.month}-15T12:00:00Z`))}`, M, y, W - 2 * M, { size: 9.5, color: SOFT, lead, maxLines: 2 });
+  y = calendar(c, m, o, y + lead - 22);
   text(c, t.incidents, M, y, { size: 11, font: c.bold });
   y -= 16;
   // Review M-3: page 1 explains the coloured days (per site); the incidents themselves are listed on page 2.

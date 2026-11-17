@@ -84,14 +84,18 @@ export async function taskCloudflare(now: Date, deadline: number, errors: string
 // Watchbell 1.8 (spec §5): an app's domain is in the app's workspace, inserted there and following it when the domain
 // moves to another app. The only collector write of workspace_id (lib/workspace/landing.test.ts).
 type DomainApp = { id: string; externalId: string; workspaceId: string };
+// 1.8.3 (1.8.0 deferred minor): the task reads the apps once at its start, so an app moved to another workspace while
+// the run waited on Vercel had its domains written back to the old one. The workspace comes from the app's row at
+// write time; the start-of-run value only if that row is gone.
+const appWorkspaceNow = (app: DomainApp) => sql<string>`coalesce((select r.workspace_id from ops.resources r where r.id = ${app.id}), ${app.workspaceId})`;
 export function domainInsert(app: DomainApp, d: { name: string; redirect: string | null; verified: boolean }, accountId: string, now: Date) {
   return {
-    accountId, kind: "domain" as const, externalId: d.name, name: d.name, parentId: app.id, monitored: true, workspaceId: app.workspaceId,
+    accountId, kind: "domain" as const, externalId: d.name, name: d.name, parentId: app.id, monitored: true, workspaceId: appWorkspaceNow(app),
     meta: { redirect: d.redirect, verified: d.verified, projectId: app.externalId }, lastSeenAt: now,
   };
 }
 export function domainConflictSet(app: DomainApp, now: Date) {
-  return { parentId: app.id, workspaceId: app.workspaceId, monitored: true, goneAt: null, lastSeenAt: now, updatedAt: now, meta: sqlExcludedMeta };
+  return { parentId: app.id, workspaceId: appWorkspaceNow(app), monitored: true, goneAt: null, lastSeenAt: now, updatedAt: now, meta: sqlExcludedMeta };
 }
 
 export async function taskDomains(now: Date, deadline: number, errors: string[]): Promise<void> {

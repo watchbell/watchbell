@@ -113,3 +113,32 @@ describe("renderReportPdf (1.7.1)", () => {
     expect(i).toBeLessThan(trace.indexOf("3 Okt · Toko utama · lambat"));
   });
 });
+
+// 1.8.3 (1.7.1 note): a long client name ran page 1's subtitle off the page, and the header's "For <client> · page 1
+// of 2" (right-aligned) ran into the brand on the left. The subtitle wraps (two lines at most); the header shortens the
+// name with "…".
+describe("renderReportPdf with a long client name (1.8.3)", () => {
+  const LONG = "PT Kopi Sejahtera Nusantara Raya Makmur Abadi Sentosa Jaya Bersama Indonesia Timur dan Barat Tbk";
+  it("wraps page 1's subtitle instead of drawing it past the margin", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ clientName: LONG }), trace);
+    const sub = trace.filter((s) => s.startsWith("Untuk PT Kopi") || s.includes("Waktu dalam WIB"));
+    expect(sub.some((s) => s.startsWith("Untuk PT Kopi") && s.includes("Waktu dalam WIB"))).toBe(false);
+    expect(trace.join(" ")).toContain("Indonesia Timur dan Barat Tbk · 1 website · Waktu dalam WIB");
+  });
+  it("shortens the client name in the page header", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ clientName: LONG }), trace);
+    const head = trace.filter((s) => / · halaman [12] dari 2$/.test(s));
+    expect(head).toHaveLength(2);
+    for (const s of head) {
+      expect(s).toContain("…");
+      expect(s.length).toBeLessThan(60);
+    }
+  });
+  it("keeps a short name whole", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts(), trace);
+    expect(trace).toContain("Untuk PT Kopi Sejahtera · halaman 1 dari 2");
+  });
+});

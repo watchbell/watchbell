@@ -4,7 +4,8 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { selfhostMigrationsFolder } from "@/db/pglite";
 import * as schema from "@/db/schema";
-import { accounts, monitors, resources, workspaces } from "@/db/schema";
+import { accounts, monitors, resources, statusPages, workspaces } from "@/db/schema";
+import { eq } from "drizzle-orm";
 
 const h = vi.hoisted(() => ({ db: undefined as unknown }));
 vi.mock("@/db/client", () => ({ db: () => h.db }));
@@ -65,5 +66,17 @@ describe("published slugs", () => {
     expect(await isPublishedSlug("kopi")).toBe(false);
     await saveStatusPage(page("kopi-2", mon.kopi), A);
     expect(await isPublishedSlug("kopi-2")).toBe(true);
+  });
+
+  // 1.8.3 (1.8.1 deferred minor): a page published on another server instance was "not found" here for up to the
+  // memo's minute. A miss now reads the list again, at most once per 10 s, so a flood of made-up slugs still costs
+  // one read per 10 s and a new page shows within seconds.
+  it("sees a page another server published within 10 s, re-reading at most once per 10 s on misses", async () => {
+    await saveStatusPage({ ...page("kopi", mon.kopi), published: false }, A);
+    const t = Date.now() + 3_600_000;
+    expect(await isPublishedSlug("kopi", t)).toBe(false);
+    await (h.db as ReturnType<typeof drizzle>).update(statusPages).set({ published: true }).where(eq(statusPages.slug, "kopi"));
+    expect(await isPublishedSlug("kopi", t + 5_000)).toBe(false);
+    expect(await isPublishedSlug("kopi", t + 11_000)).toBe(true);
   });
 });

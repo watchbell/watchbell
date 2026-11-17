@@ -1,12 +1,12 @@
 "use server";
 
-import { refresh } from "next/cache";
+import { refresh, revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { type ActionResult, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import { createWorkspace, deleteWorkspace, dismissUnsorted, listWorkspaces, moveRepos, moveResources, renameWorkspace, reorderWorkspaces, setDefaultWorkspace } from "@/lib/data/workspace-db";
-import { ALL_WORKSPACES, WS_COOKIE } from "@/lib/workspace/choice";
+import { ALL_WORKSPACES, WS_COOKIE, wsCookieOptions } from "@/lib/workspace/choice";
 import { ALL_TAGS } from "@/lib/cache/tags";
 import { updateTags } from "@/lib/cache/invalidate";
 
@@ -28,7 +28,7 @@ async function audit(message: string, userId: string) {
 }
 
 async function choose(value: string) {
-  (await cookies()).set(WS_COOKIE, value, { path: "/", sameSite: "lax", httpOnly: true, maxAge: 60 * 60 * 24 * 365, secure: process.env.NODE_ENV === "production" });
+  (await cookies()).set(WS_COOKIE, value, wsCookieOptions());
 }
 
 export async function switchWorkspace(value: string): Promise<ActionResult> {
@@ -51,6 +51,7 @@ export async function createWorkspaceAction(name: string): Promise<ActionResult<
     }
     await choose(made.id);
     await audit(`Workspace created: ${name.trim()}`, member.userId);
+    revalidatePath("/", "layout"); // 1.8.3: every page lists the workspaces (switcher, Move to…)
     refresh();
     return { ok: true, message: `${name.trim()} created.`, data: { id: made.id } };
   }, deps, "local");
@@ -67,6 +68,7 @@ export async function renameWorkspaceAction(id: string, name: string): Promise<A
       return { ok: false, error, fieldErrors: { name: error } };
     }
     await audit(`Workspace renamed: ${before ?? "?"} → ${name.trim()}`, member.userId);
+    revalidatePath("/", "layout");
     refresh();
     return { ok: true, message: "Renamed." };
   }, deps, "local");
@@ -103,6 +105,7 @@ export async function deleteWorkspaceAction(id: string): Promise<ActionResult> {
     }
     await audit(`Workspace deleted: ${name} (${r.moved} moved)`, member.userId);
     updateTags(ALL_TAGS); // final review I3: the cached lists are per workspace
+    revalidatePath("/", "layout");
     refresh();
     const things = `${r.moved} thing${r.moved === 1 ? "" : "s"} moved to the default workspace`;
     return { ok: true, message: `${name} deleted. ${things}${r.statusPageRemoved ? "; its status page was removed" : ""}.` };

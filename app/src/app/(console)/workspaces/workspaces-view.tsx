@@ -27,12 +27,20 @@ export const problemText = (w: WorkspaceSummary): string => [
   w.openAlerts ? plural(w.openAlerts, "open alert") : null,
 ].filter(Boolean).join(" · ");
 
+// 1.8.3 (1.8.1 deferred minor): while one not-sorted item moves, the other items and Open / Leave wait. The lock lifts
+// when the moved item leaves the note (the server's refresh) or the move fails (moving is cleared).
+export function notSortedLocked(pending: boolean, moving: string | null, unsorted: readonly { id: string }[]): boolean {
+  return pending || (moving !== null && unsorted.some((u) => u.id === moving));
+}
+
 export function WorkspacesView({ workspaces, install, now, unsorted = [], defaultName = "", canEdit = false, targets = [] }: {
   workspaces: WorkspaceSummary[]; install: { openAlerts: number }; now: number; unsorted?: Unsorted[]; defaultName?: string; canEdit?: boolean;
   // 1.8.1: where a not-sorted item can go (every workspace but the default).
   targets?: Ws[];
 }) {
   const [pending, start] = useTransition();
+  const [moving, setMoving] = useState<string | null>(null);
+  const locked = notSortedLocked(pending, moving, unsorted);
   const router = useRouter();
   const open = (id: string) => start(async () => {
     const r = await switchWorkspace(id);
@@ -80,7 +88,7 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
                 <td className="py-2 font-mono">{plural(w.apps, "app")}</td>
                 <td className="py-2 text-ink-soft">{w.lastDeployAt ? ago(new Date(w.lastDeployAt), new Date(now)) : "—"}</td>
                 <td className="py-2 text-right">
-                  <Button size="sm" onClick={() => open(w.id)} disabled={pending} aria-label={`Open ${w.name}`}>Open</Button>
+                  <Button size="sm" onClick={() => open(w.id)} disabled={locked} aria-label={`Open ${w.name}`}>Open</Button>
                 </td>
               </tr>
             ))}
@@ -99,11 +107,11 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
                 <li key={u.id} className="flex items-center gap-2 border-t border-line py-1.5 first:border-t-0">
                   <span className="font-medium">{u.name}</span>
                   <span className="text-ink-faint">{u.kind.replace(/_/g, " ")} · first seen {ago(new Date(u.firstSeenAt), new Date(now))}</span>
-                  {canEdit && targets.length > 0 && <span className="ml-auto"><MoveItem item={u} targets={targets} disabled={pending} /></span>}
+                  {canEdit && targets.length > 0 && <span className="ml-auto"><MoveItem item={u} targets={targets} disabled={locked} onMoving={setMoving} /></span>}
                 </li>
               ))}
             </ul>
-            {canEdit && <div className="mt-2"><Button size="sm" onClick={() => leave(unsorted.map((u) => u.id))} disabled={pending}>Leave in {defaultName}</Button></div>}
+            {canEdit && <div className="mt-2"><Button size="sm" onClick={() => leave(unsorted.map((u) => u.id))} disabled={locked}>Leave in {defaultName}</Button></div>}
           </div>
         </Card>
       )}
@@ -113,20 +121,26 @@ export function WorkspacesView({ workspaces, install, now, unsorted = [], defaul
 
 // 1.8.1 (owner, 15 Nov): one not-sorted thing to another workspace, from the note. While it runs: a spinner and
 // "Moving to <workspace>…"; then a toast, and the server's refresh takes the item out of the note.
-function MoveItem({ item, targets, disabled }: { item: Unsorted; targets: Ws[]; disabled: boolean }) {
+// One move, then the spinner and the note's lock go. The transition settles after the action's refresh, so a moved
+// item has already left the note by then; one that didn't move (final review 1.8.3 M4: the target was deleted
+// meanwhile) is usable again instead of locking the note.
+export async function moveOne(item: Unsorted, to: Ws, d: {
+  move: typeof moveToWorkspace; success: (m: string) => void; error: (m: string) => void; setMoving: (v: string | null) => void; onMoving: (id: string | null) => void;
+}): Promise<void> {
+  const r = await d.move("resource", [item.id], to.id);
+  if (r.ok) d.success(r.message ?? `${item.name} moved to ${to.name}.`);
+  else d.error(r.error);
+  d.setMoving(null);
+  d.onMoving(null);
+}
+
+function MoveItem({ item, targets, disabled, onMoving }: { item: Unsorted; targets: Ws[]; disabled: boolean; onMoving: (id: string | null) => void }) {
   const [moving, setMoving] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const move = (to: Ws) => {
     setMoving(to.name);
-    start(async () => {
-      const r = await moveToWorkspace("resource", [item.id], to.id);
-      // On success the spinner stays until the server's refresh takes the item out of the note (final review M1).
-      if (r.ok) toast.success(r.message ?? `${item.name} moved to ${to.name}.`);
-      else {
-        toast.error(r.error);
-        setMoving(null);
-      }
-    });
+    onMoving(item.id);
+    start(() => moveOne(item, to, { move: moveToWorkspace, success: (m) => toast.success(m), error: (m) => toast.error(m), setMoving, onMoving }));
   };
   if (moving) return <Moving to={moving} />;
   return (

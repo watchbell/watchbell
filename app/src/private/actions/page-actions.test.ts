@@ -5,10 +5,12 @@ import type { Proposal } from "./proposals-types";
 const UUID = "123e4567-e89b-42d3-a456-426614174000";
 const owner = { id: "mem-1", userId: "user-1", email: "owner@example.com", role: "owner" as const };
 
-const h = vi.hoisted(() => ({ requireActionMember: vi.fn(), decideAndRun: vi.fn(), refresh: vi.fn(), askAgain: vi.fn(), notifyNew: vi.fn() }));
+const h = vi.hoisted(() => ({ requireActionMember: vi.fn(), decideAndRun: vi.fn(), refresh: vi.fn(), askAgain: vi.fn(), notifyNew: vi.fn(), after: vi.fn(), telegramTarget: vi.fn(), recordAction: vi.fn() }));
 vi.mock("@/lib/auth", () => ({ requireActionMember: h.requireActionMember }));
 vi.mock("next/cache", () => ({ refresh: h.refresh }));
-vi.mock("next/server", () => ({ after: (fn: () => unknown) => { void fn(); } }));
+vi.mock("next/server", () => ({ after: h.after }));
+vi.mock("@/lib/data/notify-db", () => ({ telegramTarget: h.telegramTarget }));
+vi.mock("@/lib/data/audit-db", () => ({ recordAction: h.recordAction }));
 vi.mock("./proposals-decide", () => ({ decideAndRun: h.decideAndRun }));
 vi.mock("./proposals-db", () => ({ askAgain: h.askAgain }));
 vi.mock("./proposals-notify", () => ({ notifyNewProposals: h.notifyNew }));
@@ -29,6 +31,8 @@ const form = (entries: Record<string, string>) => {
 beforeEach(() => {
   vi.resetAllMocks();
   h.requireActionMember.mockResolvedValue(owner);
+  h.after.mockImplementation((fn: () => unknown) => { void fn(); });
+  h.recordAction.mockResolvedValue(undefined);
 });
 
 describe("decideProposalAction (owner only)", () => {
@@ -128,8 +132,11 @@ describe("askAgainAction (owner only)", () => {
   it("sends the new copy to Telegram once, as a reply to its alert, and refreshes the page", async () => {
     h.askAgain.mockResolvedValue({ status: "ok", row: copy });
     h.notifyNew.mockResolvedValue(undefined);
+    h.telegramTarget.mockResolvedValue({ token: "t", chatId: "c" });
     const r = await askAgainAction(UUID);
     expect(r).toEqual({ ok: true, message: "Asked again. It waits for you here and on Telegram for 2 hours." });
+    // 1.8.3 (final review 1.8.2 M5): the send runs after the answer, like Approve's history line.
+    expect(h.after).toHaveBeenCalledTimes(1);
     expect(h.askAgain).toHaveBeenCalledWith(UUID, expect.any(Date));
     expect(h.notifyNew).toHaveBeenCalledTimes(1);
     const [list, , opts] = h.notifyNew.mock.calls[0];
@@ -150,5 +157,31 @@ describe("askAgainAction (owner only)", () => {
       expect(await askAgainAction(UUID)).toEqual({ ok: false, error });
     }
     expect(h.notifyNew).not.toHaveBeenCalled();
+  });
+});
+
+// 1.8.3 (final review 1.8.2, minors 4 and 7): the answer only promises Telegram when a chat is connected, the window
+// comes from PROPOSAL_TTL_MS, and Events records who asked again.
+describe("askAgainAction's answer and record (1.8.3)", () => {
+  const copy = {
+    id: "923e4567-e89b-42d3-a456-426614174999", room: "workloads", action: "github_bump_pr", risk: "safe", title: "Open a PR updating Next.js in app-o",
+    reason: "r", resourceName: "app-o", proposedBy: "Workloads officer", status: "pending", auto: false, result: null, createdAt: new Date("2026-11-18T10:30:00Z"),
+    decidedAt: null, expiresAt: new Date("2026-11-18T12:30:00Z"), resourceId: "623e4567-e89b-42d3-a456-426614174000", targetRef: null, alertId: "523e4567-e89b-42d3-a456-426614174000",
+  };
+  it("says only 'here' when no Telegram chat is connected", async () => {
+    h.askAgain.mockResolvedValue({ status: "ok", row: copy });
+    h.telegramTarget.mockResolvedValue(null);
+    expect(await askAgainAction(UUID)).toEqual({ ok: true, message: "Asked again. It waits for you here for 2 hours." });
+  });
+  it("still answers when the Telegram setting can't be read", async () => {
+    h.askAgain.mockResolvedValue({ status: "ok", row: copy });
+    h.telegramTarget.mockRejectedValue(new Error("db"));
+    expect(await askAgainAction(UUID)).toEqual({ ok: true, message: "Asked again. It waits for you here for 2 hours." });
+  });
+  it("records who asked again in Events", async () => {
+    h.askAgain.mockResolvedValue({ status: "ok", row: copy });
+    h.telegramTarget.mockResolvedValue(null);
+    await askAgainAction(UUID);
+    expect(h.recordAction).toHaveBeenCalledWith({ kind: "ok", message: "Asked again: Open a PR updating Next.js in app-o", resourceId: copy.resourceId, actorUserId: "user-1" });
   });
 });
