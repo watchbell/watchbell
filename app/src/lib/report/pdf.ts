@@ -66,13 +66,28 @@ function fit(font: PDFFont, s: string, size: number, width: number): string {
   return `${out.trimEnd()}…`;
 }
 
+// 1.8.4: one word wider than the line (a pasted link) is cut into pieces that fit, so it never runs past the margin.
+function splitWord(font: PDFFont, word: string, size: number, width: number): string[] {
+  if (font.widthOfTextAtSize(word, size) <= width) return [word];
+  const out: string[] = [];
+  let piece = "";
+  for (const ch of word) {
+    if (piece && font.widthOfTextAtSize(piece + ch, size) > width) {
+      out.push(piece);
+      piece = ch;
+    } else piece += ch;
+  }
+  if (piece) out.push(piece);
+  return out;
+}
+
 // Greedy word wrap; returns the y after the last line. `maxLines` cuts a long text with "…" (review I-6).
 function para(c: Ctx, s: string, x: number, y: number, width: number, o: { size?: number; color?: ReturnType<typeof rgb>; lead?: number; maxLines?: number } = {}): number {
   const size = o.size ?? 9.5;
   const lead = o.lead ?? size * 1.45;
   const lines: string[] = [];
   let line = "";
-  for (const word of s.split(/\s+/)) {
+  for (const word of s.split(/\s+/).flatMap((w) => splitWord(c.regular, w, size, width))) {
     const next = line ? `${line} ${word}` : word;
     if (c.regular.widthOfTextAtSize(next, size) > width && line) {
       lines.push(line);
@@ -111,8 +126,10 @@ function header(c: Ctx, o: RenderOptions, logo: PDFImage | null, page: number): 
     const initials = displayName(o.brand).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
     text(c, initials, M + 13 - c.bold.widthOfTextAtSize(initials, 10) / 2, y + 9, { size: 10, font: c.bold, color: rgb(1, 1, 1) });
   }
-  text(c, displayName(o.brand), M + 34, y + 14, { size: 13, font: c.bold });
-  text(c, o.title?.trim() || t.defaultTitle, M + 34, y + 2, { size: 9, color: SOFT });
+  // 1.8.4: the brand and the title (up to 120 characters) stay in the left half, clear of the month and the client line.
+  const leftRoom = (W - 2 * M) / 2 - 34 - 8;
+  text(c, fit(c.bold, displayName(o.brand), 13, leftRoom), M + 34, y + 14, { size: 13, font: c.bold });
+  text(c, fit(c.regular, o.title?.trim() || t.defaultTitle, 9, leftRoom), M + 34, y + 2, { size: 9, color: SOFT });
   text(c, formatMonth(c.month, o.lang), W - M, y + 14, { size: 11, font: c.bold, right: true });
   // 1.8.3: a long client name is cut so the right-aligned line never runs into the brand on the left.
   const pageOf = ` · ${t.page} ${page} ${t.of} 2`;

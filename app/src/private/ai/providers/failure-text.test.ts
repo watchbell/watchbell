@@ -131,3 +131,23 @@ describe("providerFailureMessage", () => {
     expect(named.length).toBeLessThanOrEqual(MESSAGE_MAX);
   });
 });
+
+// 1.8.4 (owner's morning meeting of 18 Nov: "504 ×7"): a provider that answered too slowly was reported as "unreachable
+// (its endpoint or tunnel is down)", which sent the owner looking at the tunnel. A timeout says so; it still counts as
+// unreachable for trying another provider.
+describe("a timeout says timeout (1.8.4)", () => {
+  const slow = (status: number, errorClass: string): ProviderFailure => ({ provider: "test", status, errorClass });
+  it.each([[0, "timeout"], [504, "upstream_error"], [524, "upstream_error"]])("status %i, class %s", (status, errorClass) => {
+    const f = slow(status, errorClass);
+    expect(providerFailureMessage(f, { kind: "none" })).toMatch(/^AI provider "test" didn't answer in time \(timeout\)\. /);
+    expect(providerFailureMessage(f, { kind: "none" }, "id")).toMatch(/^Penyedia AI "test" tidak menjawab tepat waktu \(timeout\)\. /);
+    expect(triesAnother(f)).toBe(true);
+  });
+  it("a fallback that timed out too is named as a timeout", () => {
+    const m = providerFailureMessage(slow(530, "upstream_error"), { kind: "tried", fallback: slow(0, "timeout") });
+    expect(m).toContain('Tried "test" instead, and that failed too (timeout).');
+  });
+  it("a dropped tunnel (530) is still unreachable", () => {
+    expect(providerFailureMessage(slow(530, "upstream_error"), { kind: "none" })).toMatch(/is unreachable \(its endpoint or tunnel is down\)/);
+  });
+});

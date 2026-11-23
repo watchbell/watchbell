@@ -39,6 +39,8 @@ export const MISS_REREAD_MS = 10_000;
 let lastMissRead = 0;
 export async function isPublishedSlug(slug: string, now: number = Date.now()): Promise<boolean> {
   if ((await publishedSlugs.get()).has(slug)) return true;
+  // 1.8.4: the demo skips the memo, so that read was already fresh; reading again would only double the cost of a miss.
+  if (isDemo()) return false;
   if (now - lastMissRead < MISS_REREAD_MS) return false;
   lastMissRead = now;
   publishedSlugs.clear();

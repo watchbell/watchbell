@@ -64,6 +64,11 @@ export function brandProblems(b: Brand): Record<string, string> {
       ok = false;
     }
     if (!ok) e.publicUrl = "An https:// address (http:// only for localhost).";
+    // 1.8.4: Watchbell runs at the root of its address, and email links are built on it ("…/alerts"): a path breaks them.
+    // Final review M4: the text itself must be the origin (an empty ? or #, user:password@ or a line break pass the parser).
+    else if (b.publicUrl.replace(/\/$/, "") !== new URL(b.publicUrl).origin) {
+      e.publicUrl = "Only the console's address, like https://monitor.example.com (no path, ? or #).";
+    }
   }
   if (b.accent !== null) {
     if (!HEX.test(b.accent)) e.accent = "A colour as #rrggbb.";
@@ -88,6 +93,18 @@ export function logoProblem(bytes: Uint8Array): string | null {
 
 const text = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
 
+// 1.8.4: an address with nothing after it but "/", an empty ? or # becomes its origin (host lower-cased, default port
+// dropped); anything else is kept as typed so brandProblems names it.
+function cleanAddress(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.pathname === "/" && !u.search && !u.hash && !u.username && !u.password && !/[\r\n\t]/.test(url)) return u.origin;
+  } catch {
+    // not a URL: brandProblems says so
+  }
+  return url.replace(/\/+$/, "");
+}
+
 // The settings form: blank means the default; the URL loses a trailing slash; the colour is lower-cased.
 export function parseBrandForm(f: Record<string, unknown>): { ok: true; value: Brand } | { ok: false; fieldErrors: Record<string, string> } {
   const url = text(f.publicUrl);
@@ -95,7 +112,7 @@ export function parseBrandForm(f: Record<string, unknown>): { ok: true; value: B
     name: text(f.name),
     accent: text(f.accent)?.toLowerCase() ?? null,
     senderName: text(f.senderName),
-    publicUrl: url ? url.replace(/\/+$/, "") : null,
+    publicUrl: url ? cleanAddress(url) : null,
     poweredBy: f.poweredBy === "on" || f.poweredBy === true || f.poweredBy === "true",
     hasLogo: false,
     logoVersion: null,

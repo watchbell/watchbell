@@ -142,3 +142,44 @@ describe("renderReportPdf with a long client name (1.8.3)", () => {
     expect(trace).toContain("Untuk PT Kopi Sejahtera · halaman 1 dari 2");
   });
 });
+
+// Final review 1.8.3 minors. Fixed in 1.8.4: a 120-character title under the brand ran into the right-aligned line; one
+// word longer than the line (a pasted link) was drawn past the margin. Pinned only: a realistic all-caps 120-character
+// client name keeps the time zone on page 1 (it already did). A name of 120 wide letters (W…) still pushes it past the
+// second line — deferred (final review 1.8.4 M1).
+describe("renderReportPdf edge cases (1.8.4)", () => {
+  it("shortens a 120-character title in the header, and keeps a short one whole", async () => {
+    const title = "Laporan Bulanan Pemantauan Situs Web dan Layanan Daring untuk Seluruh Cabang Toko Kopi di Wilayah Jawa Barat dan Banten";
+    expect(title.length).toBeGreaterThanOrEqual(115);
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ title }), trace);
+    const drawn = trace.filter((s) => s.startsWith("Laporan Bulanan Pemantauan"));
+    expect(drawn.length).toBeGreaterThanOrEqual(2);
+    for (const s of drawn) {
+      expect(s.endsWith("…")).toBe(true);
+      expect(s.length).toBeLessThan(70);
+    }
+    const short: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ title: "Laporan Oktober" }), short);
+    expect(short.filter((s) => s === "Laporan Oktober").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("splits one word longer than the line instead of drawing it past the margin", async () => {
+    const link = `https://kopisejahtera.id/${"promo-akhir-tahun-".repeat(12)}detail`;
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ note: `Lihat ${link} untuk detailnya.` }), trace);
+    const pieces = trace.filter((s) => s.includes("promo-akhir-tahun-"));
+    expect(pieces.length).toBeGreaterThanOrEqual(2);
+    for (const s of pieces) expect(s.length).toBeLessThan(link.length);
+    expect(pieces.join("").replace(/^Lihat /, "")).toContain("promo-akhir-tahun-promo-akhir-tahun-");
+  });
+
+  it("keeps the time zone on page 1 under an all-caps 120-character client name", async () => {
+    const name = "PT KOPI SEJAHTERA NUSANTARA RAYA MAKMUR ABADI SENTOSA JAYA BERSAMA INDONESIA TIMUR DAN BARAT TBK CABANG UTAMA WWWWWWWWWW".slice(0, 120);
+    expect(name).toHaveLength(120);
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ clientName: name }), trace);
+    expect(trace.join(" ")).toContain("Waktu dalam WIB");
+    expect(trace.join(" ")).toContain("1 website");
+  });
+});

@@ -2,6 +2,22 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.4
+
+Small fixes from the review of 1.8.3, and one found while testing Branding.
+
+### Fixed
+
+- **Reports:** a long report title (up to 120 characters) and a long brand name are shortened with "…" in the page
+  header instead of running into the month and the client line. One word longer than a line, such as a pasted link in
+  the note, is split across lines instead of running off the page.
+- **Branding:** the public address takes only the console's address (like `https://monitor.example.com`); one with a
+  path, `?` or `#` is refused, because every link in alert and digest emails is built on it. An address saved earlier
+  with a path is ignored, so links use the address Watchbell runs at.
+- **AI:** a provider that answers too slowly (504, 524 or no answer in time) is now reported as a timeout, in the
+  console and in the office rooms, instead of "unreachable (its endpoint or tunnel is down)".
+- **Demo:** a status-page address that does not exist reads the database once instead of twice.
+
 ## 1.8.3
 
 Small fixes from the reviews of 1.8.0 to 1.8.2.

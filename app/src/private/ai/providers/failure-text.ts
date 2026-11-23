@@ -61,6 +61,11 @@ export function failureKind(f: Pick<ProviderFailure, "status" | "errorClass">): 
   return "other";
 }
 
+// 1.8.4: a provider that answered too slowly (504 Gateway Timeout, Cloudflare 524, or our own timeout) is still
+// "unreachable" for trying another one, but its message says timeout: "tunnel is down" sent the owner looking at the
+// wrong thing on 18 Nov.
+const isTimeout = (f: Pick<ProviderFailure, "status" | "errorClass">) => f.errorClass === "timeout" || f.status === 504 || f.status === 524;
+
 // Whether another provider may be tried after this failure: it is down, busy or broken. Never on a refused key or a
 // 4xx about the request itself (the same request would fail the same way, or the key needs the owner).
 export function triesAnother(f: Pick<ProviderFailure, "status" | "errorClass">): boolean {
@@ -71,6 +76,7 @@ export function triesAnother(f: Pick<ProviderFailure, "status" | "errorClass">):
 const TEXT = {
   en: {
     unreachable: (n: string) => `AI provider "${n}" is unreachable (its endpoint or tunnel is down).`,
+    timeout: (n: string) => `AI provider "${n}" didn't answer in time (timeout).`,
     auth: (n: string, s: number) => `AI provider "${n}" refused the key${s ? ` (${s})` : ""}.`,
     replaceKey: `Replace it on ${PROVIDERS_PAGE}.`,
     rate_limited: (n: string) => `AI provider "${n}" is rate limited (429): its quota is used up.`,
@@ -82,12 +88,13 @@ const TEXT = {
     pinned: () => "This model was picked by name, so no other provider was tried.",
     outOfTime: "There was no time left to try another provider.",
     why: {
-      unreachable: () => "unreachable", auth: (s: number) => `key refused${s ? `, ${s}` : ""}`, rate_limited: () => "rate limited, 429",
+      unreachable: () => "unreachable", timeout: () => "timeout", auth: (s: number) => `key refused${s ? `, ${s}` : ""}`, rate_limited: () => "rate limited, 429",
       server: (s: number) => `server error ${s}`, unreadable: () => "unreadable answer", other: (s: number) => `answered ${s}`,
     },
   },
   id: {
     unreachable: (n: string) => `Penyedia AI "${n}" tak bisa dihubungi (endpoint atau tunnel-nya mati).`,
+    timeout: (n: string) => `Penyedia AI "${n}" tidak menjawab tepat waktu (timeout).`,
     auth: (n: string, s: number) => `Penyedia AI "${n}" menolak kuncinya${s ? ` (${s})` : ""}.`,
     replaceKey: `Ganti kuncinya di ${PROVIDERS_PAGE}.`,
     rate_limited: (n: string) => `Penyedia AI "${n}" kena batas pemakaian (429): kuotanya habis.`,
@@ -99,7 +106,7 @@ const TEXT = {
     pinned: () => "Model ini dipilih langsung, jadi penyedia lain tidak dicoba.",
     outOfTime: "Tidak ada waktu tersisa untuk mencoba penyedia lain.",
     why: {
-      unreachable: () => "tidak bisa dihubungi", auth: (s: number) => `kunci ditolak${s ? `, ${s}` : ""}`, rate_limited: () => "kena batas pemakaian, 429",
+      unreachable: () => "tidak bisa dihubungi", timeout: () => "timeout", auth: (s: number) => `kunci ditolak${s ? `, ${s}` : ""}`, rate_limited: () => "kena batas pemakaian, 429",
       server: (s: number) => `error server ${s}`, unreadable: () => "jawabannya tidak terbaca", other: (s: number) => `menjawab ${s}`,
     },
   },
@@ -112,7 +119,7 @@ function head(f: ProviderFailure, lang: FailureLang, nameMax: number): string {
   const t = TEXT[lang];
   const n = nameOf(f, nameMax);
   switch (failureKind(f)) {
-    case "unreachable": return t.unreachable(n);
+    case "unreachable": return isTimeout(f) ? t.timeout(n) : t.unreachable(n);
     case "auth": {
       // Google's project errors say what to do better than "replace the key" does.
       const google = f.errorClass === "project_denied" || f.errorClass === "project_restricted" ? detailOf(f) : "";
@@ -131,7 +138,7 @@ function next(step: NextStep, first: ProviderFailure, lang: FailureLang, nameMax
   switch (step.kind) {
     case "tried": {
       const f = step.fallback;
-      return t.tried(nameOf(f, nameMax), t.why[failureKind(f)](f.status));
+      return t.tried(nameOf(f, nameMax), isTimeout(f) ? t.why.timeout() : t.why[failureKind(f)](f.status));
     }
     case "none": return t.none(later);
     case "pinned": return t.pinned();

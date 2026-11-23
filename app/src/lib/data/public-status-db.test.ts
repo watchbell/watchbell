@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DayCount } from "@/lib/view/uptime";
 import { type Call, fakeDb, limitOf, payloadOf } from "./fake-db";
 
@@ -184,5 +184,18 @@ describe("saveStatusPage", () => {
     const f = use([[{ id: PAGE, slug: "acme" }], []]);
     expect(await saveStatusPage({ ...value, monitors: [] }, "w1")).toMatchObject({ ok: true });
     expect(f.writes.map((w) => w.kind)).toEqual(["update", "delete"]);
+  });
+});
+
+// Final review 1.8.3 minor, fixed in 1.8.4: the demo skips the slug memo (each visitor has a database of their own), so
+// its first read is already fresh; a miss used to read the list a second time anyway.
+describe("isPublishedSlug in the demo", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it("reads the published list once for a slug that isn't there", async () => {
+    vi.stubEnv("WATCHBELL_MODE", "demo");
+    const { isPublishedSlug } = await import("./public-status-db");
+    const f = use([[{ slug: "acme" }], [{ slug: "acme" }]]);
+    expect(await isPublishedSlug("nope", 1_000_000)).toBe(false);
+    expect(f.queries).toHaveLength(1);
   });
 });

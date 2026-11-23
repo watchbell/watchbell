@@ -24,6 +24,35 @@ describe("branding (1.7)", () => {
     expect(brandProblems({ ...studio, name: "x".repeat(61) }).name).toBeDefined();
   });
 
+  // 1.8.4 (owner's test on ops, 22 Nov): "https://ops.example.com/s/monitorings" was saved, so every email link would have
+  // been …/s/monitorings/alerts (404). Watchbell always runs at the root of its address: only the address itself.
+  it("takes only the console's address, without a path, query or #", () => {
+    for (const bad of ["https://ops.example.com/s/monitorings", "https://ops.example.com/alerts", "https://ops.example.com/?x=1", "https://ops.example.com/#top"]) {
+      expect(brandProblems({ ...studio, publicUrl: bad }).publicUrl).toMatch(/no path/);
+    }
+    expect(brandProblems({ ...studio, publicUrl: "https://ops.example.com" })).toEqual({});
+    expect(brandProblems({ ...studio, publicUrl: "https://ops.example.com/" })).toEqual({});
+    expect(brandProblems({ ...studio, publicUrl: "https://ops.example.com:8443" })).toEqual({});
+  });
+
+  // Final review 1.8.4 M4: an empty ? or #, a user:password@ and a line break inside the host all passed the URL check,
+  // and the raw text is what the email links are built on. The form keeps the address's origin; a stored value must be one.
+  it("keeps only the origin: an empty ? or #, credentials and line breaks never reach the links", () => {
+    for (const bad of ["https://ops.example.com?", "https://ops.example.com#", "https://user:pw@ops.example.com", "https://ops.example\n.com"]) {
+      expect(brandProblems({ ...studio, publicUrl: bad }).publicUrl).toBeDefined();
+    }
+    const form = (publicUrl: string) => parseBrandForm({ name: "", accent: "", senderName: "", publicUrl, poweredBy: "on" });
+    expect(form("https://OPS.example.com:443/")).toMatchObject({ ok: true, value: { publicUrl: "https://ops.example.com" } });
+    expect(form("https://ops.example.com?")).toMatchObject({ ok: true, value: { publicUrl: "https://ops.example.com" } });
+    expect(form("https://user:pw@ops.example.com")).toMatchObject({ ok: false });
+    expect(form("https://ops.example.com/s/monitorings")).toMatchObject({ ok: false });
+  });
+
+  it("a stored address with a path (saved before 1.8.4) is read as blank, so links use the address Watchbell runs at", () => {
+    expect(parseBrand({ ...studio, publicUrl: "https://ops.example.com/s/monitorings" }).publicUrl).toBeNull();
+    expect(parseBrand({ ...studio, publicUrl: "https://ops.example.com" }).publicUrl).toBe("https://ops.example.com");
+  });
+
   it("takes a square PNG up to 512 px and 256 KB, nothing else", () => {
     expect(logoProblem(png(256, 256))).toBeNull();
     expect(logoProblem(png(256, 240))).toBeNull(); // within 10%
