@@ -53,7 +53,7 @@ export function isUnreachableStatus(status: number): boolean {
 }
 
 export function failureKind(f: Pick<ProviderFailure, "status" | "errorClass">): FailureKind {
-  if (f.errorClass === "network" || f.errorClass === "timeout" || isUnreachableStatus(f.status)) return "unreachable";
+  if (f.errorClass === "network" || f.errorClass === "timeout" || f.status === 408 || isUnreachableStatus(f.status)) return "unreachable";
   if (f.errorClass === "auth_rejected" || f.errorClass === "project_denied" || f.errorClass === "project_restricted" || f.status === 401 || f.status === 403) return "auth";
   if (f.errorClass === "rate_limited" || f.status === 429) return "rate_limited";
   if (f.errorClass === "bad_response") return "unreadable";
@@ -64,7 +64,7 @@ export function failureKind(f: Pick<ProviderFailure, "status" | "errorClass">): 
 // 1.8.4: a provider that answered too slowly (504 Gateway Timeout, Cloudflare 524, or our own timeout) is still
 // "unreachable" for trying another one, but its message says timeout: "tunnel is down" sent the owner looking at the
 // wrong thing on 18 Nov.
-const isTimeout = (f: Pick<ProviderFailure, "status" | "errorClass">) => f.errorClass === "timeout" || f.status === 504 || f.status === 524;
+const isTimeout = (f: Pick<ProviderFailure, "status" | "errorClass">) => f.errorClass === "timeout" || f.status === 408 || f.status === 504 || f.status === 524;
 
 // Whether another provider may be tried after this failure: it is down, busy or broken. Never on a refused key or a
 // 4xx about the request itself (the same request would fail the same way, or the key needs the owner).

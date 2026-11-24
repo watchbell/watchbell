@@ -164,6 +164,25 @@ export const OPS: ApiOp[] = [
     examples: [{ name: "Everything" }, { name: "Only alerts", query: { include: "alerts" } }],
   },
   {
+    id: "metrics", operationId: "getMetrics", tag: "Console", method: "get", path: "/api/v1/metrics", access: "key", scope: "read:status", scopeLabel: "read:status",
+    summary: "Prometheus metrics",
+    description: "The active monitors (up, degraded, latency, 30-day uptime; monitors sharing app, path and kind merged to the worst reading) and the open alerts by severity in the Prometheus text format, for a Prometheus or Grafana Cloud scrape with this key as the bearer token. Same scrubbed labels as /api/v1/status. Read at most once a minute per server, so scrape every 60 s; only failed scrapes are written to the API log.",
+    docsOnly: false,
+    params: [xClient],
+    response: {
+      status: 200, contentType: "text/plain", description: "Prometheus text format 0.0.4.",
+      example: [
+        "# HELP watchbell_monitor_up 1 when the last check passed (up or degraded), 0 when the monitor is down.",
+        "# TYPE watchbell_monitor_up gauge",
+        'watchbell_monitor_up{app="orbit-blog",path="/",kind="http",workspace="Personal"} 1',
+        "# HELP watchbell_alerts_open Open alerts by severity.",
+        "# TYPE watchbell_alerts_open gauge",
+        'watchbell_alerts_open{severity="critical"} 1',
+      ].join("\n"),
+    },
+    examples: [{ name: "Scrape" }],
+  },
+  {
     id: "status-app", operationId: "getAppStatus", tag: "Console", method: "get", path: "/api/v1/status/apps/{app}", access: "key", scope: "read:status", scopeLabel: "read:status",
     summary: "One app with its Why problems", description: "Same shape as one entry of apps[], plus its monitors and the remedies. The app is its name or console id; 404 not_found when it isn't a watched app.",
     docsOnly: false,

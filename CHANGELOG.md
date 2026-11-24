@@ -2,6 +2,24 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.5
+
+Prometheus metrics, and the small fixes left from the review of 1.8.4.
+
+### Added
+
+- **Prometheus metrics:** `GET /api/v1/metrics` gives the active monitors (up, degraded, latency, 30-day uptime) and
+  the open alerts by severity in the Prometheus text format, so Prometheus or Grafana Cloud can scrape Watchbell with a
+  `read:status` key. The labels are the same scrubbed names as `/api/v1/status`, never a URL; monitors that share an
+  app, path and kind are one series with the worst reading. Console data is read at most once a minute per server,
+  and a successful scrape isn't written to the API log. See [AI › Prometheus and Grafana](docs/ai.md#prometheus-and-grafana).
+
+### Fixed
+
+- **Reports:** a very long client name no longer pushes the time zone off page 1, and a long brand name is shortened
+  in page 2's "Note from" heading instead of running off the page.
+- **AI:** a provider that answers 408 (Request Timeout) is reported as a timeout and another provider is tried.
+
 ## 1.8.4
 
 Small fixes from the review of 1.8.3, and one found while testing Branding.

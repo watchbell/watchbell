@@ -88,12 +88,44 @@ Setiap key punya scope:
 | Scope | Mengizinkan |
 |---|---|
 | `ai:invoke` | Chat completions dan daftar model lewat connection provider Anda (default) |
-| `read:status` | Data console read-only: `GET /api/v1/status` dan server MCP. Nama database berupa alias; tanpa URL, email, atau secret |
+| `read:status` | Data console read-only: `GET /api/v1/status`, `GET /api/v1/metrics` (Prometheus) dan server MCP. Nama database berupa alias; tanpa URL, email, atau secret |
 | `write:notes` | Mati kecuali Anda mencentangnya. Mengizinkan agent memposting AI notes dan menjawab pertanyaan dari Ask. Tidak lebih |
 
 Anda juga memilih masa berlaku (7 hari sampai tidak pernah kedaluwarsa; default 90 hari) dan rate limit per menit
 (default 20, maksimal 600). Paling banyak 20 key bisa aktif. **API explorer** mendokumentasikan setiap endpoint dan
 memungkinkan Anda mencobanya dengan sebuah key.
+
+### Prometheus dan Grafana
+
+`GET /api/v1/metrics` memberi monitor yang aktif dan alert yang terbuka dalam format teks Prometheus, jadi Prometheus atau
+Grafana Cloud bisa men-scrape Watchbell. Pakai key yang punya `read:status`:
+
+```yaml
+scrape_configs:
+  - job_name: watchbell
+    scrape_interval: 60s
+    scheme: https
+    metrics_path: /api/v1/metrics
+    authorization:
+      credentials: <key Anda>
+    static_configs:
+      - targets: ["monitor.example.com"]
+```
+
+| Metrik | Arti |
+|---|---|
+| `watchbell_monitor_up` | 1 kalau pengecekan terakhir lolos (up atau degraded), 0 kalau monitor down |
+| `watchbell_monitor_degraded` | 1 kalau monitor menjawab tapi lambat atau ada peringatan |
+| `watchbell_monitor_latency_seconds` | Waktu respons pengecekan terakhir |
+| `watchbell_monitor_uptime_ratio` | Porsi pengecekan yang berhasil selama 30 hari (`window="30d"`), 0 sampai 1 |
+| `watchbell_alerts_open` | Alert yang terbuka, per `severity` (`critical`, `warning`, `info`; 0 kalau tidak ada) |
+
+Monitor membawa label `app`, `path`, `kind` dan `workspace`: nama yang sudah dibersihkan, sama seperti `/api/v1/status`,
+tidak pernah URL. Label `workspace` muncul begitu ada dua workspace atau lebih. Monitor yang di-pause, dan yang belum
+pernah dicek, tidak ikut. Monitor dengan app, path dan kind yang sama (misalnya `www` dan domain tanpa www, keduanya
+di `/`) jadi satu series dengan nilai terburuk, jadi monitor yang down tidak pernah tertutup. Watchbell membaca datanya
+paling sering sekali per menit per server, jadi scrape yang lebih cepat hanya mengulang angka yang sama; scrape yang
+berhasil tidak dicatat di log API.
 
 ## Gateway: AI untuk aplikasi Anda sendiri
 

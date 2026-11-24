@@ -203,7 +203,9 @@ function pageOne(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null
   // Review M-5: the zone every time in the report is in (its name in the middle of the month).
   // 1.8.3: wrapped (two lines at most) so a long client name stays inside the margins; the calendar follows it.
   const lead = 9.5 * 1.45;
-  y = para(c, `${t.preparedFor} ${o.clientName} · ${m.sites.length} ${t.sites} · ${zoneText(o.zone, o.lang, new Date(`${m.month}-15T12:00:00Z`))}`, M, y, W - 2 * M, { size: 9.5, color: SOFT, lead, maxLines: 2 });
+  // 1.8.5 (final review 1.8.4 M1): the name is cut to one line first, so the sites and the time zone always fit the second.
+  const clientRoom = W - 2 * M - c.regular.widthOfTextAtSize(`${t.preparedFor} `, 9.5);
+  y = para(c, `${t.preparedFor} ${fit(c.regular, o.clientName, 9.5, clientRoom)} · ${m.sites.length} ${t.sites} · ${zoneText(o.zone, o.lang, new Date(`${m.month}-15T12:00:00Z`))}`, M, y, W - 2 * M, { size: 9.5, color: SOFT, lead, maxLines: 2 });
   y = calendar(c, m, o, y + lead - 22);
   text(c, t.incidents, M, y, { size: 11, font: c.bold });
   y -= 16;
@@ -303,7 +305,7 @@ function pageTwo(c: Ctx, m: ReportModel, o: RenderOptions, logo: PDFImage | null
   y = lines(c, m.incidents.map((l) => incidentSentence(l, o.lang, o.zone)), y, BOTTOM + noteRoom + 64, o.lang);
   if (o.note?.trim()) {
     y -= 8;
-    text(c, `${t.noteFrom} ${displayName(o.brand)}`, M, y, { size: 11, font: c.bold });
+    text(c, fit(c.bold, `${t.noteFrom} ${displayName(o.brand)}`, 11, W - 2 * M), M, y, { size: 11, font: c.bold }); // 1.8.5 (M3)
     y -= 16;
     c.page.drawRectangle({ x: M, y: y - 2, width: 2.5, height: 12, color: c.accent });
     y = para(c, o.note.trim(), M + 10, y, W - 2 * M - 10, { maxLines: 4 });

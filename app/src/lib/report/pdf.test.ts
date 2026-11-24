@@ -145,8 +145,8 @@ describe("renderReportPdf with a long client name (1.8.3)", () => {
 
 // Final review 1.8.3 minors. Fixed in 1.8.4: a 120-character title under the brand ran into the right-aligned line; one
 // word longer than the line (a pasted link) was drawn past the margin. Pinned only: a realistic all-caps 120-character
-// client name keeps the time zone on page 1 (it already did). A name of 120 wide letters (W…) still pushes it past the
-// second line — deferred (final review 1.8.4 M1).
+// client name keeps the time zone on page 1 (it already did). A name of 120 wide letters (W…) pushed it past the
+// second line until 1.8.5 (final review 1.8.4 M1; the name is now cut to one line first).
 describe("renderReportPdf edge cases (1.8.4)", () => {
   it("shortens a 120-character title in the header, and keeps a short one whole", async () => {
     const title = "Laporan Bulanan Pemantauan Situs Web dan Layanan Daring untuk Seluruh Cabang Toko Kopi di Wilayah Jawa Barat dan Banten";
@@ -181,5 +181,26 @@ describe("renderReportPdf edge cases (1.8.4)", () => {
     await renderReportPdf(buildReportModel(input()), opts({ clientName: name }), trace);
     expect(trace.join(" ")).toContain("Waktu dalam WIB");
     expect(trace.join(" ")).toContain("1 website");
+  });
+});
+
+// Final review 1.8.4 minors, fixed in 1.8.5: a client name of 120 wide letters filled both subtitle lines (the time zone
+// fell off); page 2's "note from <brand>" heading ran off the page for a 60-character wide brand. (M2, the "…" after a cut
+// last line overhanging the margin by ~5 pt, stays deferred.)
+describe("renderReportPdf edge cases (1.8.5)", () => {
+  it("keeps the time zone on page 1 under a client name of 120 wide letters", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ clientName: "W".repeat(120) }), trace);
+    expect(trace.join(" ")).toContain("Waktu dalam WIB");
+    const words: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ clientName: "WWWWWWWWWW ".repeat(11).trim() }), words);
+    expect(words.join(" ")).toContain("Waktu dalam WIB");
+  });
+
+  it("shortens page 2's note heading under a 60-character brand of wide letters", async () => {
+    const trace: string[] = [];
+    await renderReportPdf(buildReportModel(input()), opts({ brand: { ...brand, name: "W".repeat(60) } }), trace);
+    const heading = trace.find((s) => s.startsWith("Catatan dari "));
+    expect(heading?.endsWith("…")).toBe(true);
   });
 });

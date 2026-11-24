@@ -83,11 +83,42 @@ Each key has scopes:
 | Scope | Allows |
 |---|---|
 | `ai:invoke` | Chat completions and the model list through your provider connections (the default) |
-| `read:status` | Read-only console data: `GET /api/v1/status` and the MCP server. Database names are aliases; no URLs, emails or secrets |
+| `read:status` | Read-only console data: `GET /api/v1/status`, `GET /api/v1/metrics` (Prometheus) and the MCP server. Database names are aliases; no URLs, emails or secrets |
 | `write:notes` | Off unless you tick it. Lets an agent post AI notes and answer questions from Ask. Nothing else |
 
 You also choose an expiry (7 days to never; 90 days by default) and a rate limit per minute (20 by default, at most
 600). At most 20 keys can be active. **API explorer** documents every endpoint and lets you try them with a key.
+
+### Prometheus and Grafana
+
+`GET /api/v1/metrics` gives the active monitors and the open alerts in the Prometheus text format, so Prometheus or
+Grafana Cloud can scrape Watchbell. Use a key with `read:status`:
+
+```yaml
+scrape_configs:
+  - job_name: watchbell
+    scrape_interval: 60s
+    scheme: https
+    metrics_path: /api/v1/metrics
+    authorization:
+      credentials: <your key>
+    static_configs:
+      - targets: ["monitor.example.com"]
+```
+
+| Metric | Meaning |
+|---|---|
+| `watchbell_monitor_up` | 1 when the last check passed (up or degraded), 0 when the monitor is down |
+| `watchbell_monitor_degraded` | 1 when the monitor answers but slowly or with warnings |
+| `watchbell_monitor_latency_seconds` | Response time of the last check |
+| `watchbell_monitor_uptime_ratio` | Share of successful checks over 30 days (`window="30d"`), 0 to 1 |
+| `watchbell_alerts_open` | Open alerts, by `severity` (`critical`, `warning`, `info`; 0 when none is open) |
+
+Monitors carry the labels `app`, `path`, `kind` and `workspace`: the same scrubbed names as `/api/v1/status`, never a
+URL. The `workspace` label appears once you have two or more workspaces. Paused monitors, and ones not checked yet,
+are left out. Monitors that share an app, path and kind (say `www` and the bare domain, both on `/`) are one series
+with the worst reading, so a down one is never hidden. Watchbell reads its data for this at most once a minute per
+server, so a faster scrape only repeats the same numbers; a successful scrape isn't written to the API log.
 
 ## The gateway: AI for your own apps
 

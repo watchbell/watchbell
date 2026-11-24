@@ -7,7 +7,7 @@ export type Scope = (typeof SCOPES)[number];
 
 export const SCOPE_INFO: Record<Scope, { short: string; long: string }> = {
   "ai:invoke": { short: "models", long: "Chat completions and the model list through your provider connections." },
-  "read:status": { short: "console data, MCP", long: "Read-only console data: GET /api/v1/status and the MCP server. Database names are aliases; no URLs, emails or secrets." },
+  "read:status": { short: "console data, MCP", long: "Read-only console data: GET /api/v1/status, GET /api/v1/metrics (Prometheus) and the MCP server. Database names are aliases; no URLs, emails or secrets." },
   "write:notes": { short: "post AI notes", long: KEYS_COPY.writeNotesLong },
 };
 

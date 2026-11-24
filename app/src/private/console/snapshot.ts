@@ -96,12 +96,18 @@ const appsSection = cache(async (ms: number, ws: string | null = null): Promise<
 });
 export const snapApps = (now: Date, ws: string | null = null): Promise<SnapshotApp[]> => appsSection(now.getTime(), ws);
 
-const monitorsSection = cache(async (ms: number, ws: string | null = null): Promise<ConsoleSnapshot["monitors"]> => {
+// Every watched monitor, scrubbed (1.8.5: also read whole by /api/v1/metrics).
+const monitorItemsSection = cache(async (ms: number, ws: string | null = null): Promise<SnapshotMonitor[]> => {
   const [rows, book, names] = await Promise.all([monitorsAt(ms, ws), bookOnce(), wsNamesOnce()]);
-  const items: SnapshotMonitor[] = rows.filter((m) => !m.appGone).map((m) => ({
+  return rows.filter((m) => !m.appGone).map((m) => ({
     app: m.appName, path: scrubText(m.path, book), kind: m.kind, state: monitorState(m), lastStatus: m.lastStatus, latencyMs: m.lastLatencyMs,
     uptime30d: round2(m.uptime30), lastCheckedAt: m.lastCheckedAt?.toISOString() ?? null, ...named(names, m.workspaceId),
   }));
+});
+export const snapMonitorItems = (now: Date, ws: string | null = null): Promise<SnapshotMonitor[]> => monitorItemsSection(now.getTime(), ws);
+
+const monitorsSection = cache(async (ms: number, ws: string | null = null): Promise<ConsoleSnapshot["monitors"]> => {
+  const items = await monitorItemsSection(ms, ws);
   const count = (s: SnapshotMonitor["state"]) => items.filter((m) => m.state === s).length;
   // The counts cover every monitor; the list only the ones that need a look (not up), to keep the answer small.
   return { up: count("up"), degraded: count("degraded"), down: count("down"), paused: count("paused"), items: items.filter((m) => m.state !== "up") };
@@ -123,6 +129,13 @@ const alertsSection = cache(async (ws: string | null = null): Promise<ConsoleSna
   return { open: rows.length, critical: rows.filter((r) => r.severity === "critical").length, items };
 });
 export const snapAlerts = (ws: string | null = null): Promise<ConsoleSnapshot["alerts"]> => alertsSection(ws);
+
+// 1.8.5: every firing alert counted by severity, across workspaces (/api/v1/metrics). Counts only: no title or message.
+export async function snapAlertCounts(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  for (const r of await firingOnce()) out[r.severity] = (out[r.severity] ?? 0) + 1;
+  return out;
+}
 
 const advisorSection = cache(async (ms: number): Promise<SnapshotAdvice[]> => {
   const [recs, apps, book] = await Promise.all([recsAt(ms), appsAt(ms, null), bookOnce()]);

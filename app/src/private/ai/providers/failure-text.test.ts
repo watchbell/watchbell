@@ -151,3 +151,12 @@ describe("a timeout says timeout (1.8.4)", () => {
     expect(providerFailureMessage(slow(530, "upstream_error"), { kind: "none" })).toMatch(/is unreachable \(its endpoint or tunnel is down\)/);
   });
 });
+
+// Final review 1.8.4 M5, fixed in 1.8.5: 408 Request Timeout is a timeout too (and tries another provider).
+describe("408 is a timeout (1.8.5)", () => {
+  it("says timeout and tries another provider", () => {
+    const f: ProviderFailure = { provider: "test", status: 408, errorClass: "upstream_error" };
+    expect(providerFailureMessage(f, { kind: "none" })).toMatch(/^AI provider "test" didn't answer in time \(timeout\)\. /);
+    expect(triesAnother(f)).toBe(true);
+  });
+});

@@ -52,7 +52,7 @@ describe("openApiDocument", () => {
   it("lists every /api/v1 route and the other documented endpoints", () => {
     expect(Object.keys(doc.paths).sort()).toEqual([
       "/api/collect", "/api/daily", "/api/health", "/api/ping/{token}", "/api/ping/{token}/fail", "/api/ping/{token}/start", "/api/v1/advice", "/api/v1/ai/chat/completions",
-      "/api/v1/ai/models", "/api/v1/ai/questions", "/api/v1/ai/questions/{id}", "/api/v1/mcp", "/api/v1/me", "/api/v1/openapi.json", "/api/v1/status", "/api/v1/status/apps/{app}", "/api/watchdog",
+      "/api/v1/ai/models", "/api/v1/ai/questions", "/api/v1/ai/questions/{id}", "/api/v1/mcp", "/api/v1/me", "/api/v1/metrics", "/api/v1/openapi.json", "/api/v1/status", "/api/v1/status/apps/{app}", "/api/watchdog",
     ]);
   });
   it("declares every path template variable as a path parameter", () => {
