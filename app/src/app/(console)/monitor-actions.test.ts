@@ -20,6 +20,7 @@ const h = vi.hoisted(() => ({
   updateHeartbeat: vi.fn(),
   rotateToken: vi.fn(),
   recordTestPing: vi.fn(),
+  setDailyJobHeartbeat: vi.fn(),
   moveMonitorToDomain: vi.fn(),
 }));
 vi.mock("@/lib/data/monitor-move-db", () => ({ moveMonitorToDomain: h.moveMonitorToDomain }));
@@ -31,12 +32,13 @@ vi.mock("@/lib/data/monitors-db", () => ({
   createMonitor: h.createMonitor, updateMonitor: h.updateMonitor, setMonitorPaused: h.setMonitorPaused,
   setAppMonitorsPaused: h.setAppMonitorsPaused, deleteMonitor: h.deleteMonitor, checkMonitorNow: h.checkMonitorNow,
   createHeartbeat: h.createHeartbeat, updateHeartbeat: h.updateHeartbeat, rotateToken: h.rotateToken, recordTestPing: h.recordTestPing,
+  setDailyJobHeartbeat: h.setDailyJobHeartbeat,
 }));
 vi.mock("@/lib/env", () => ({ serverEnv: () => ({ SITE_URL: "https://ops.example.com/" }) }));
 vi.mock("@/lib/collector/run", () => ({ runCollector: h.runCollector }));
 
 import { LIMITS } from "@/lib/rate-limit";
-import { addHeartbeat, addMonitor, checkNow, editHeartbeat, editMonitor, newPingUrl, pauseAppMonitors, pauseMonitor, recordTestPingAction, removeMonitor, updateMonitorDomain } from "./monitor-actions";
+import { addHeartbeat, addMonitor, checkNow, editHeartbeat, editMonitor, newPingUrl, pauseAppMonitors, pauseMonitor, pingFromDailyJob, recordTestPingAction, removeMonitor, updateMonitorDomain } from "./monitor-actions";
 import { refreshNow } from "./refresh-action";
 
 const form = { url: "https://web.example.com/api/health", expectedStatus: "200", timeoutS: "5" };
@@ -252,5 +254,24 @@ describe("recordTestPingAction", () => {
     expect(await recordTestPingAction(UUID, "start" as unknown as "ok")).toEqual({ ok: false, error: "Something in that request wasn't valid." });
     expect(h.limit).not.toHaveBeenCalled();
     expect(h.recordTestPing).not.toHaveBeenCalled();
+  });
+});
+
+describe("pingFromDailyJob (27 Nov)", () => {
+  it("needs the owner: an operator is refused before the limit and the database", async () => {
+    h.requireActionMember.mockRejectedValue(new AuthError("forbidden"));
+    expect(await pingFromDailyJob(UUID)).toEqual({ ok: false, error: "You don't have permission to do that." });
+    expect(h.requireActionMember).toHaveBeenCalledWith("owner");
+    expect(h.setDailyJobHeartbeat).not.toHaveBeenCalled();
+  });
+
+  it("links the heartbeat by id, audited and refreshed, and rejects a malformed id first", async () => {
+    h.requireActionMember.mockResolvedValue({ ...member, role: "owner" });
+    h.setDailyJobHeartbeat.mockResolvedValue(done());
+    expect(await pingFromDailyJob("nope")).toEqual({ ok: false, error: "Something in that request wasn't valid." });
+    expect(h.setDailyJobHeartbeat).not.toHaveBeenCalled();
+    expect((await pingFromDailyJob(UUID)).ok).toBe(true);
+    expect(h.setDailyJobHeartbeat).toHaveBeenCalledWith(UUID);
+    expect(h.recordAction).toHaveBeenCalled();
   });
 });

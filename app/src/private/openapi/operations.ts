@@ -6,7 +6,7 @@ import type { Scope } from "@/private/auth/api-key";
 // page are both built from it, so they can't disagree. Pure: the explorer's client component imports it too.
 // The mockup's API_OPS (mockup/index.html) is the source of the texts and examples.
 
-export type OpTag = "AI" | "Console" | "MCP" | "Health" | "Heartbeats" | "Scheduler";
+export type OpTag = "AI" | "Console" | "MCP" | "Alerts" | "Health" | "Heartbeats" | "Scheduler";
 export type ParamIn = "path" | "query" | "header";
 export type ParamSpec = {
   name: string; in: ParamIn; type: "string" | "integer"; required: boolean; description: string;
@@ -243,6 +243,19 @@ export const OPS: ApiOp[] = [
     response: { status: 200, contentType: "application/json", description: "Always ok while the console answers.", example: pretty({ ok: true, service: "watchbell" }) },
   },
   {
+    id: "alertmanager", operationId: "postAlertmanager", tag: "Alerts", method: "post", path: "/api/alertmanager/{token}", access: "token", scope: null, scopeLabel: "source token",
+    summary: "Alertmanager webhook (version 4)",
+    description: "Prometheus Alertmanager posts its alerts here; set the URL up in Alerts › Sources, where it is shown once. Firing opens an alert of the rule ExternalAlert, resolved closes it; Alertmanager's fingerprint keeps one alert per fingerprint. At most 256 KB and 100 alerts a call, 120 alerts a minute per source. Answers 400 for a body that isn't webhook version 4, 404 for an unknown or revoked token, 413 for a body over 256 KB, 429 with Retry-After when over the limit, 503 to retry.",
+    docsOnly: false,
+    params: [{ name: "token", in: "path", type: "string", required: true, secret: true, example: "am_8f2kQwErTyUiPaSdFgHjKz", description: "The source token (am_ and 22 base-58 characters)." }],
+    body: pretty({
+      version: "4", status: "firing", receiver: "watchbell", groupKey: "{}:{alertname=\"HighErrorRate\"}",
+      alerts: [{ status: "firing", labels: { alertname: "HighErrorRate", job: "pos-api", severity: "critical" }, annotations: { summary: "5xx responses above 5% for 10 minutes." }, startsAt: "2026-11-25T09:52:00Z", endsAt: "0001-01-01T00:00:00Z", fingerprint: "a3f9c21e07b4" }],
+    }),
+    bodyDescription: "Alertmanager's webhook body (version 4).",
+    response: { status: 200, contentType: "application/json", description: "How many alerts were taken in.", example: pretty({ accepted: 1 }) },
+  },
+  {
     id: "ping", operationId: "pingHeartbeat", tag: "Heartbeats", method: "post", path: "/api/ping/{token}", access: "token", scope: null, scopeLabel: "heartbeat token",
     summary: "Heartbeat ping (GET and HEAD work too)",
     description: "A job tells Watchbell it ran. The token is shown once when the heartbeat monitor is created; Watchbell keeps only its hash, so this page can't fill it in. Paste it below to try a ping: it is used for this request only and never stored. A real ping changes the monitor's state.",
@@ -289,11 +302,12 @@ export const OPS: ApiOp[] = [
   },
 ];
 
-export const TAGS: OpTag[] = ["AI", "Console", "MCP", "Health", "Heartbeats", "Scheduler"];
+export const TAGS: OpTag[] = ["AI", "Console", "MCP", "Alerts", "Health", "Heartbeats", "Scheduler"];
 export const TAG_DESCRIPTION: Record<OpTag, string> = {
   AI: "OpenAI-compatible calls through the providers you connected.",
   Console: "Read-only console data for agents and apps.",
   MCP: "Model Context Protocol server.",
+  Alerts: "Alerts other tools send in (Prometheus Alertmanager).",
   Health: "Liveness.",
   Heartbeats: "Pings from your own jobs.",
   Scheduler: "Called by the schedulers, not by you.",

@@ -32,8 +32,10 @@ Catatan:
   jaringan Anda sendiri (`localhost`, `127.x`, `10.x`, `172.16.x` sampai `172.31.x`, `192.168.x`, `*.local`). Misalnya
   Ollama di `http://localhost:11434/v1` atau LM Studio di `http://localhost:1234/v1`. Alamat link-local dan alamat
   metadata cloud (`169.254.x`) ditolak.
-- Server lokal biasanya tidak butuh key, tetapi form-nya meminta key minimal 8 karakter: ketik placeholder apa saja,
-  misalnya `ollama-local`.
+- Server lokal di mesin atau jaringan Anda sendiri biasanya tanpa key: di Watchbell self-host, kosongkan saja key-nya.
+- Tombol pintasan di samping **Connect a custom server** mengisi form-nya: **DeepSeek** (`https://api.deepseek.com/v1`,
+  butuh API key-nya) dan, di Watchbell self-host, **Ollama** (`http://127.0.0.1:11434/v1`, tanpa key). Di console
+  cloud, Ollama di balik alamat `https://` publik dihubungkan lewat **Connect a custom server**.
 - Satu connection menjadi default. Key dienkripsi dengan `OPS_ENCRYPTION_KEY`, tidak pernah dikirim ke browser dan
   tidak pernah dicatat di log, dan Watchbell tidak pernah berganti-ganti akun.
 

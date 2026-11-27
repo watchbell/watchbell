@@ -8,6 +8,10 @@ const RULES: [RegExp, string][] = [
   [/(?:\b|(?<=%2F))hb(?:_|%5F)[0-9a-f]{32}\b/gi, "hb_[hidden]"],
   // Whatever else follows the ping prefix (encoded letters such as %68%62_…, an encoded slash) is hidden whole.
   [/(\/api(?:\/|%2F)ping(?:\/|%2F))(?!hb_\[hidden\])[^/?#\s]+/gi, "$1[hidden]"],
+  // 1.8.6 (final review C1): an Alertmanager source token (am_ + 22 base-58) is a write credential, same treatment:
+  // the token anywhere, then whatever else follows the /api/alertmanager/ prefix.
+  [/(?:\b|(?<=%2F))am(?:_|%5F)[1-9A-HJ-NP-Za-km-z]{22}\b/gi, "am_[hidden]"],
+  [/(\/api(?:\/|%2F)alertmanager(?:\/|%2F))(?!am_\[hidden\])[^/?#\s]+/gi, "$1[hidden]"],
   [/\b(postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|rediss):\/\/\S+/gi, "$1://[hidden]"],
   [/\b(https?):\/\/[^\s/@:]+:[^\s/@]+@/gi, "$1://[hidden]@"],
   [/\b(Bearer|Basic)\s+[^\s"',;]+/gi, "$1 [hidden]"],

@@ -11,7 +11,7 @@ vi.mock("@/lib/collector/http-check", () => ({ checkUrl: h.checkUrl }));
 
 import { tokenHash } from "@/lib/heartbeat-token";
 import {
-  appOptions, checkMonitorNow, createHeartbeat, createMonitor, deleteMonitor, recordTestPing, rotateToken, setAppMonitorsPaused, setMonitorPaused, updateHeartbeat, updateMonitor,
+  appOptions, checkMonitorNow, createHeartbeat, createMonitor, deleteMonitor, recordTestPing, rotateToken, setAppMonitorsPaused, setDailyJobHeartbeat, setMonitorPaused, updateHeartbeat, updateMonitor,
 } from "./monitors-db";
 
 const use = (results: unknown[][], writeResults: (unknown[] | Error)[] = []) => {
@@ -615,5 +615,24 @@ describe("recordTestPing (U3: Record a test ping)", () => {
     expect(f.writes).toHaveLength(0);
     use([[]]);
     expect(await recordTestPing("m1", "ok")).toEqual({ ok: false, error: "That monitor no longer exists." });
+  });
+});
+
+describe("setDailyJobHeartbeat (27 Nov: the daily job pings a heartbeat by id)", () => {
+  it("stores the heartbeat's id in settings, names it and audits it", async () => {
+    const at = new Date("2026-11-27T06:00:00Z");
+    const f = use([loaded(hbRow)]);
+    const r = await setDailyJobHeartbeat("m1", at);
+    expect(r).toMatchObject({ ok: true, audit: { message: "Daily job heartbeat set: backup job", resourceId: "a1" } });
+    expect(f.writes).toHaveLength(1);
+    expect(payloadOf(f.writes[0].calls)).toEqual({ key: "daily.heartbeat", value: { monitorId: "m1" } });
+  });
+
+  it("refuses an HTTP check and a deleted monitor without writing", async () => {
+    const f = use([loaded()]);
+    expect(await setDailyJobHeartbeat("m1")).toEqual({ ok: false, error: "That monitor isn't a heartbeat." });
+    expect(f.writes).toHaveLength(0);
+    use([[]]);
+    expect(await setDailyJobHeartbeat("m1")).toEqual({ ok: false, error: "That monitor no longer exists." });
   });
 });

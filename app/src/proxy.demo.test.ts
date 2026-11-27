@@ -63,7 +63,7 @@ describe("proxy in demo (cookie check only)", () => {
   it("answers 404 JSON for the routes the demo doesn't have, signed in or not, before any route code", async () => {
     const cookie = signDemoCookie({ email: "ana@visitor.test", seed: SEED }, KEY);
     const gone = [
-      "/api/ping/hb_0123456789abcdef0123456789abcdef", "/api/runner/poll", "/api/runner/jobs/x/report", "/api/v1", "/api/v1/status",
+      "/api/ping/hb_0123456789abcdef0123456789abcdef", "/api/alertmanager/am_8f2kQwErTyUiPaSdFgHjKz", "/api/runner/poll", "/api/runner/jobs/x/report", "/api/v1", "/api/v1/status",
       "/api/v1/ai/chat/completions", "/api/v1/mcp", "/api/telegram/webhook", "/api/collect", "/api/daily", "/api/watchdog",
       "/auth/confirm", "/auth/google/callback", "/auth/google/create/callback", "/setup",
     ];

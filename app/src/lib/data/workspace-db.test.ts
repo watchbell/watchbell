@@ -30,7 +30,9 @@ beforeAll(async () => {
   cpSync(real, folder, { recursive: true });
   const journalPath = join(folder, "meta", "_journal.json");
   const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: { tag: string }[] };
-  journal.entries = journal.entries.filter((e) => !e.tag.startsWith("0013"));
+  // 1.7 = everything before 0013. Later migrations (1.8.6's 0014, 0015 …) must wait too: the migrator skips an older
+  // migration once a newer one has run, so leaving them in would skip 0013 itself.
+  journal.entries = journal.entries.filter((e) => e.tag.slice(0, 4) < "0013");
   writeFileSync(journalPath, JSON.stringify(journal));
 
   client = await PGlite.create();

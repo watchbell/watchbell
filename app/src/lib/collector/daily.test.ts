@@ -20,7 +20,7 @@ vi.mock("./db-tasks", () => ({ taskDatabasesDaily: h.taskDatabasesDaily }));
 vi.mock("@/lib/data/security-db", () => ({ runSecurityChecks: h.runSecurityChecks }));
 vi.mock("@/lib/data/advisor-db", () => ({ runAdvisor: h.runAdvisor }));
 vi.mock("@/lib/data/events-write", () => ({ recordEvents: h.recordEvents }));
-vi.mock("@/lib/data/heartbeats-db", () => ({ recordPing: h.recordPing }));
+vi.mock("@/lib/data/heartbeats-db", () => ({ recordDailyPing: h.recordPing }));
 const os = vi.hoisted(() => ({ runOsScan: vi.fn() }));
 vi.mock("@/lib/data/os-scan-db", () => ({ runOsScan: os.runOsScan, osState: () => (process.env.WATCHBELL_MODE === "selfhost" ? "on" : "off-cloud") }));
 // Watchbell 1.2 (D11): the sections the owner turned off (none unless a test says so).
@@ -37,6 +37,7 @@ import { runDaily } from "./daily";
 
 beforeEach(() => {
   for (const f of [h.revalidateTag, h.syncAccount, h.taskDatabasesDaily, h.runSecurityChecks, h.recordEvents, h.recordPing, h.runAdvisor, h.runKeepAlive, h.monthlyBackupStep, h.readRetentionDays, h.githubDailyStep]) f.mockReset();
+  h.recordPing.mockResolvedValue("none"); // 27 Nov: every run pings (by the console's link or the env token)
   h.githubDailyStep.mockResolvedValue(null);
   h.monthlyBackupStep.mockResolvedValue(null);
   h.readRetentionDays.mockResolvedValue({ ...RETENTION_DAYS });
@@ -230,7 +231,7 @@ describe("runDaily: its own heartbeat (U3)", () => {
   it("pings ok after a clean run, straight to the database", async () => {
     vi.stubEnv("DAILY_HEARTBEAT_TOKEN", T);
     h.current = fakeDb([], [[{ id: "run-1" }]]);
-    h.recordPing.mockResolvedValue({ status: "ok" });
+    h.recordPing.mockResolvedValue("ok");
     await runDaily();
     expect(h.recordPing).toHaveBeenCalledWith(T, "ok", expect.any(Date));
   });
@@ -243,13 +244,16 @@ describe("runDaily: its own heartbeat (U3)", () => {
     expect(h.recordPing).toHaveBeenCalledWith(T, "fail", expect.any(Date));
     expect(r.errors).toHaveLength(1);
   });
-  it("does nothing without a well-formed token", async () => {
+  it("still pings by the console's link without a token (27 Nov: a new ping URL can't cut it off)", async () => {
     for (const v of ["", "not-a-token"]) {
       vi.stubEnv("DAILY_HEARTBEAT_TOKEN", v);
       h.current = fakeDb([], [[{ id: "run-1" }]]);
+      h.recordPing.mockResolvedValue("none");
       await runDaily();
     }
-    expect(h.recordPing).not.toHaveBeenCalled();
+    expect(h.recordPing).toHaveBeenCalledTimes(2);
+    expect(h.recordPing).toHaveBeenNthCalledWith(1, null, "ok", expect.any(Date));
+    expect(h.recordPing).toHaveBeenNthCalledWith(2, null, "ok", expect.any(Date));
   });
 });
 

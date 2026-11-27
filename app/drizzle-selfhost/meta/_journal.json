@@ -99,6 +99,20 @@
       "when": 1794726005748,
       "tag": "0013_workspaces",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1795547628220,
+      "tag": "0014_ingest_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1795547637880,
+      "tag": "0015_external_alert_rule",
+      "breakpoints": true
     }
   ]
 }

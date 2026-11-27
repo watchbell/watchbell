@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { RowMenu } from "@/components/row-menu";
 import { actionsLabel } from "@/lib/view/labels";
-import { checkNow, newPingUrl, pauseMonitor, recordTestPingAction, removeMonitor } from "../monitor-actions";
+import { checkNow, newPingUrl, pauseMonitor, pingFromDailyJob, recordTestPingAction, removeMonitor } from "../monitor-actions";
 import { type EditableMonitor, MonitorDialog } from "./monitor-dialog";
 import { PingUrlDialog } from "./ping-url-dialog";
 
@@ -53,6 +53,8 @@ export function MonitorMenu({ monitor }: Props) {
         ...(heartbeat ? [
           { label: "Record a test ping: OK", onSelect: () => run(() => recordTestPingAction(monitor.id, "ok")) },
           { label: "Record a test ping: Fail", onSelect: () => run(() => recordTestPingAction(monitor.id, "fail")) },
+          // 27 Nov: the console's own daily job pings this one by id (owner only; the action says so to others).
+          { label: "Ping from the daily job", onSelect: () => run(() => pingFromDailyJob(monitor.id)) },
         ] : []),
         edit, pause,
         "---",

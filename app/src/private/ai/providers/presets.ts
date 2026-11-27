@@ -96,6 +96,15 @@ export const PRESETS: Record<PresetKind, Preset> = {
   },
 };
 
+// Watchbell 1.8.6: Bring your own key › shortcuts that only fill the custom OpenAI-compatible form (name, base URL).
+// Ollama listens on the user's own machine, which cloud refuses (LOCAL_URL), so its shortcut is offered in self-host only;
+// on cloud an Ollama behind a public HTTPS address still connects through "Connect a custom server".
+export const PROVIDER_SHORTCUTS = [
+  { id: "ollama", name: "Ollama", baseUrl: "http://127.0.0.1:11434/v1", key: false, selfhostOnly: true },
+  { id: "deepseek", name: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", key: true, selfhostOnly: false },
+] as const;
+export type ProviderShortcut = (typeof PROVIDER_SHORTCUTS)[number];
+
 export function isPresetKind(k: string): k is PresetKind {
   return (PRESET_KINDS as readonly string[]).includes(k);
 }

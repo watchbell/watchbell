@@ -32,8 +32,10 @@ Notes:
   (`localhost`, `127.x`, `10.x`, `172.16.x` to `172.31.x`, `192.168.x`, `*.local`). For example Ollama at
   `http://localhost:11434/v1` or LM Studio at `http://localhost:1234/v1`. Link-local and cloud metadata addresses
   (`169.254.x`) are refused.
-- Local servers usually need no key, but the form asks for one of at least 8 characters: type any placeholder, such as
-  `ollama-local`.
+- A local server on your own machine or network usually has no key: on a self-hosted Watchbell, leave the key empty.
+- Shortcuts beside **Connect a custom server** fill the form in: **DeepSeek** (`https://api.deepseek.com/v1`, needs
+  its API key) and, on a self-hosted Watchbell, **Ollama** (`http://127.0.0.1:11434/v1`, no key). On the cloud
+  console, an Ollama behind a public `https://` address connects through **Connect a custom server**.
 - One connection is the default. Keys are encrypted with `OPS_ENCRYPTION_KEY`, never sent to the browser and never
   logged, and Watchbell never rotates between accounts.
 

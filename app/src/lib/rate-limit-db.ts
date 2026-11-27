@@ -4,16 +4,17 @@ import { db } from "@/db/client";
 import { rateLimits } from "@/db/schema";
 import { decide, type Limit, type LimitDecision, peekDecision, subjectKey, windowStart } from "@/lib/rate-limit";
 
-// One atomic statement per hit: insert the window's row or bump it, and read the new count back.
-async function dbHit(key: string, start: Date): Promise<number> {
+// One atomic statement per hit: insert the window's row or bump it, and read the new count back. `weight` > 1 counts
+// one call as several (1.8.6: Alertmanager's limit counts the alerts a call carries).
+async function dbHit(key: string, start: Date, weight = 1): Promise<number> {
   const [row] = await db()
     .insert(rateLimits)
-    .values({ key, windowStart: start, count: 1 })
-    .onConflictDoUpdate({ target: [rateLimits.key, rateLimits.windowStart], set: { count: sql`${rateLimits.count} + 1` } })
+    .values({ key, windowStart: start, count: weight })
+    .onConflictDoUpdate({ target: [rateLimits.key, rateLimits.windowStart], set: { count: sql`${rateLimits.count} + ${weight}` } })
     .returning({ count: rateLimits.count });
   // The first hit of a window also sweeps windows older than a day, so the table stays tiny. The hit is
   // already counted, so a failed sweep must not turn into a failed decision; the next window retries it.
-  if (row.count === 1) {
+  if (row.count === weight) {
     try {
       await db().delete(rateLimits).where(lt(rateLimits.windowStart, new Date(Date.now() - 86_400_000)));
     } catch {
@@ -29,12 +30,12 @@ export function limit(l: Limit, subject: string): Promise<LimitDecision> {
 
 // limit(), plus the window the hit landed in and the new count: for callers that may give the hit back (refundLimit)
 // or act on a threshold.
-export async function hitLimit(l: Limit, subject: string): Promise<LimitDecision & { windowStart: Date; count: number }> {
+export async function hitLimit(l: Limit, subject: string, weight = 1): Promise<LimitDecision & { windowStart: Date; count: number }> {
   const now = new Date();
   let count = 0;
   const d = await decide(l, subject, {
     now,
-    hit: async (key, start) => (count = await dbHit(key, start)),
+    hit: async (key, start) => (count = await dbHit(key, start, weight)),
   });
   return { ...d, windowStart: windowStart(now, l.windowSeconds), count };
 }

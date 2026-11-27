@@ -18,6 +18,7 @@ Halaman-halaman ini menjelaskan cara memasangnya dan cara memakai setiap bagiann
 
 - [Halaman](pages.md): setiap halaman di console dan apa yang ditampilkannya.
 - [Notifikasi](notifications.md): Telegram, Discord, webhook, email lewat mail server sendiri, dan ringkasan email harian.
+- [Alertmanager](alertmanager.md): alert dari Prometheus Alertmanager masuk ke Watchbell, dengan notifikasi yang sama.
 - [Auto-actions](auto-actions.md): perbaikan yang diusulkan untuk alert yang aktif, auto-run yang aman, dan approval
   lewat Telegram.
 - [AI](ai.md): key AI provider milik Anda sendiri, gateway, API key, dan server MCP untuk AI agent.

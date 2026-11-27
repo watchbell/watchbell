@@ -229,13 +229,14 @@ encrypted (AES-256-GCM) with `OPS_ENCRYPTION_KEY` before they are stored and nev
 everything in an account and you tick what to watch. A banner at the top lists connections that stopped working. See
 [Connect providers](providers.md).
 
-**Alerts.** Three tabs:
+**Alerts.** Four tabs:
 
 - Firing: what is wrong now, and what resolved in the last 7 days. Operators can silence an alert for a while.
 - Rules: the built-in rules (an app down or slow, a failed deployment, a paused or nearly full database, a domain or
   certificate about to expire, an expiring token, a vulnerable dependency or Next.js version, the collector not running,
   and more), with their thresholds. Rules run after every collector run, and unknown data never opens or resolves an
   alert.
+- Sources: Prometheus Alertmanager sending its alerts in. See [Alertmanager](alertmanager.md).
 - Notifications: where alerts go. See [Notifications](notifications.md).
 
 **Auto-actions** (owner only). Fixes Watchbell proposes for firing alerts, waiting for your approval, and a history of

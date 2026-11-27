@@ -22,6 +22,7 @@ export const ALARM_ROOM: Record<RuleKey, ActionArea> = {
   FrameworkVulnerable: "workloads", // Watchbell 1.2: the app's Next.js version (its Security card)
   MonitorDomainMoved: "workloads", // Watchbell 1.2.1: an app's monitor on a domain it no longer has
   CiFailing: "workloads", // Watchbell 1.4: an app's CI, like its deployments
+  ExternalAlert: "observe", // Watchbell 1.8.6: an alert from Prometheus Alertmanager, like the collector's own health
   OsSecurityUpdate: "observe", // owner 12 Nov: the machine Watchbell runs on, like the collector
   ReportSendFailed: "observe", // Watchbell 1.7: the monthly client report, Watchbell's own work
 };

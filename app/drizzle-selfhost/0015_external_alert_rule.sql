@@ -1,0 +1,3 @@
+-- Watchbell 1.8.6: the ingest_sources value checks and the alert rule ExternalAlert, the same as the cloud migration 0068 (MonitorDown's channels, else the default).
+alter table ops.ingest_sources add constraint ingest_sources_values_check check (kind in ('alertmanager') and char_length(name) between 1 and 40 and char_length(token_prefix) = 7 and (month_key is null or month_key ~ '^\d{4}-\d{2}$') and received_month >= 0 and refused_month >= 0);--> statement-breakpoint
+insert into ops.alert_rules (key, severity, threshold, channels) select 'ExternalAlert', 'warning', null, coalesce((select channels from ops.alert_rules where key = 'MonitorDown'), '["telegram","email_digest"]'::jsonb) on conflict (key) do nothing;

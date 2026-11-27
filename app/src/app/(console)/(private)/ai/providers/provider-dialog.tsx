@@ -15,16 +15,17 @@ const PLACEHOLDER: Record<PresetKind, string> = { gemini: "AQ.… or AIza…", c
 // Mockup EXTRA_DLG.prov: Connect or Replace one provider. Watchbell lists the models and makes one tiny generation call
 // before saving (owner finding 07:58: a Google project can list models and still be denied generation).
 export function ProviderDialog({
-  kind, replace, primary, label, selfhost = false,
-}: { kind: PresetKind; replace?: { id: string; name: string; baseUrl: string }; primary?: boolean; label?: string; selfhost?: boolean }) {
+  kind, replace, primary, label, selfhost = false, prefill,
+}: { kind: PresetKind; replace?: { id: string; name: string; baseUrl: string }; primary?: boolean; label?: string; selfhost?: boolean; prefill?: { name: string; baseUrl: string } }) {
   const p = PRESETS[kind];
   const Icon = PROVIDER_ICONS[kind];
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const [apiKey, setApiKey] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState(replace?.baseUrl ?? "");
+  // 1.8.6: a shortcut (Ollama, DeepSeek) opens the custom form with its name and base URL filled in.
+  const [name, setName] = useState(prefill?.name ?? "");
+  const [baseUrl, setBaseUrl] = useState(replace?.baseUrl ?? prefill?.baseUrl ?? "");
   const [makeDefault, setMakeDefault] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState<string | null>(null);
@@ -35,7 +36,7 @@ export function ProviderDialog({
     setOpen(next);
     if (!next) {
       setFound(null);
-      setApiKey(""); setAccountId(""); setName(""); setBaseUrl(replace?.baseUrl ?? ""); setMakeDefault(false); setErrors({}); setProblem(null);
+      setApiKey(""); setAccountId(""); setName(prefill?.name ?? ""); setBaseUrl(replace?.baseUrl ?? prefill?.baseUrl ?? ""); setMakeDefault(false); setErrors({}); setProblem(null);
     }
   }
 

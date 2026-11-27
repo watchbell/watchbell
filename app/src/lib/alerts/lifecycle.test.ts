@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { RULE_KEYS, RULES, type RuleConfig } from "./catalog";
 import type { Observation } from "./evaluate";
+import { evaluate } from "./evaluate";
 import { type OpenAlert, type PlanContext, planAlerts } from "./lifecycle";
 
 const now = new Date("2026-10-13T12:00:00Z");
@@ -118,5 +119,15 @@ describe("planAlerts", () => {
 
   it("keeps alerts of rules that weren't evaluated this time", () => {
     expect(planAlerts([alert()], [], ev(["CollectorStale"]), rules, ctx())).toEqual({ open: [], touch: [], resolve: [] });
+  });
+
+  // Watchbell 1.8.6: an ExternalAlert is opened and closed by Alertmanager (POST /api/alertmanager/{token}); the
+  // collector's evaluation has no observations for it and must never resolve it.
+  it("never resolves an ExternalAlert, which the collector doesn't evaluate", () => {
+    const { observations, evaluated } = evaluate({ now, lastMinuteRunAt: min(1), monitors: [], apps: [], accounts: [], dbs: null, domains: null, dns: null, links: [] }, rules);
+    expect(evaluated.has("ExternalAlert")).toBe(false);
+    const p = planAlerts([alert({ ruleKey: "ExternalAlert", subject: "am:a3f9c21e07b4" })], observations, evaluated, rules, ctx());
+    expect(p.resolve).toEqual([]);
+    expect(p.touch).toEqual([]);
   });
 });

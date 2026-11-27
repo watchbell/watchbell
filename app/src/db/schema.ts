@@ -406,6 +406,8 @@ export const alerts = ops.table(
     pendingSince: timestamp("pending_since", { withTimezone: true }),
     // The delivery claim: set while one process is sending this notice, so a second one skips it (see deliverPending).
     claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    // 1.8.6: the labels an ExternalAlert arrived with (≤ 20, values ≤ 200 characters); null for Watchbell's own rules.
+    labels: jsonb("labels").$type<Record<string, string>>(),
   },
   (t) => [
     uniqueIndex("alerts_open_rule_subject").on(t.ruleKey, t.subject).where(sql`resolved_at is null`),

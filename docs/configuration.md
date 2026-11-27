@@ -65,7 +65,7 @@ can be changed at any time.
 | `RESEND_API_KEY` | A Resend API key with sending access (starts with `re_`), for the daily email digest. |
 | `DIGEST_FROM` | The From address of the digest, on a domain verified in Resend, for example `Watchbell <noreply@your-domain.example>`. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Your own Google OAuth client, for [Backups](backups.md#set-up-your-own-google-oauth-client) and for creating Firebase projects. |
-| `DAILY_HEARTBEAT_TOKEN` | The token of a heartbeat you add on Uptime (period 1 day, grace 6 hours). The daily job then pings it, so a daily job that never runs raises an alert like any missed job. |
+| `DAILY_HEARTBEAT_TOKEN` | The token of a heartbeat you add on Uptime (period 1 day, grace 6 hours). The daily job then pings it, so a daily job that never runs raises an alert like any missed job. Optional: on Uptime, the heartbeat's menu › **Ping from the daily job** does the same without this variable, and after the first ping the job keeps pinging that heartbeat even when you make it a new ping URL. |
 | `WATCHBELL_TRUSTED_PROXY_HOPS` | How many reverse proxies in front of Watchbell add a trusted `X-Forwarded-For` entry. Leave unset without a proxy. See [Behind a reverse proxy](#behind-a-reverse-proxy). |
 | `WATCHBELL_MIGRATIONS_DIR` | Folder with the database migrations, only needed if you start the server from outside `app/` (default `drizzle-selfhost`). |
 | `WATCHBELL_TIMEZONE` | The time zone of every time shown and sent, the daily job and the digest, as an IANA name such as `Europe/Berlin`. Unset means `Asia/Jakarta` (WIB). See [Time zone](#time-zone). |

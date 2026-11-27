@@ -184,6 +184,8 @@ const EVALUATORS: Record<RuleKey, Ev> = {
     if (r.status !== "failed") return o;
     return { ...o, status: "firing" as const, message: `${what} couldn't be emailed after 3 tries${r.lastError ? `: ${r.lastError}` : "."}` };
   }) : null,
+  // Watchbell 1.8.6: opened and resolved by Alertmanager through the ingest route, never by the collector.
+  ExternalAlert: () => null,
 };
 
 const monthName = (month: string) => new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-15T12:00:00Z`));

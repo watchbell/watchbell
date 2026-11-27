@@ -13,22 +13,45 @@ import { SECTION_IDS, SECTIONS } from "@/lib/sections";
 import { hideAlert } from "@/lib/view/display-name";
 import { canAct } from "@/lib/view/labels";
 import { ChannelsCard } from "./channels-card";
-import { FiringTable, ResolvedTable } from "./firing-table";
+import { FiringTable, ResolvedTable, SourceFilterBar } from "./firing-table";
+import { SourcesCard, type SourcesView } from "./sources-card";
+import { readSources, recentExternal } from "@/lib/data/ingest-db";
+import { serverEnv } from "@/lib/env";
+import { isDemo } from "@/lib/mode";
+import { filterBySource, isSourceFilter, maskedUrl, sourceState } from "@/lib/view/sources";
 import { RulesTable } from "./rules-table";
 import { alertWorkspaceIds } from "@/lib/data/workspace-db";
 import { filterByWorkspace, workspacePrefix } from "@/lib/workspace/alerts";
 import { currentWorkspace } from "@/lib/workspace/current";
 
-export default async function AlertsPage() {
+type SearchParams = { tab?: string | string[]; source?: string | string[] };
+
+export default async function AlertsPage({ searchParams }: { searchParams?: Promise<SearchParams> } = {}) {
   const member = await requirePageMember();
   const now = new Date();
+  const sp = (await searchParams) ?? {};
+  const demo = isDemo();
   // Watchbell 1.2: the alerts of a section the owner turned off are paused and left out here until it is on again.
   const paused = await pausedSections();
-  const [allFiring, allResolved, rules, channels, book, langs, templates, ws] = await Promise.all([listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs(), readMessageTemplates(), currentWorkspace()]);
+  const [allFiring, allResolved, rules, channels, book, langs, templates, ws, sources, recent] = await Promise.all([
+    listFiring(paused), listResolved(now), rulesWithState(), channelViews(), aliasBook(), readNotifyLangs(), readMessageTemplates(), currentWorkspace(),
+    demo ? [] : readSources(), demo ? [] : recentExternal(5),
+  ]);
+  // Watchbell 1.8.6: Alertmanager (Alerts › Sources). The latest source of the kind is the one the page shows.
+  const src = sources.find((s) => s.kind === "alertmanager") ?? null;
+  const state = sourceState(src, now);
+  const sourcesView: SourcesView = {
+    state, demo, owner: member.role === "owner", url: src ? maskedUrl(serverEnv().SITE_URL, src.tokenPrefix) : null, lastAlert: src?.lastSeenAt ?? null,
+    received: src && src.monthKey === now.toISOString().slice(0, 7) ? src.receivedMonth : 0,
+    refused: src && src.monthKey === now.toISOString().slice(0, 7) ? src.refusedMonth : 0, recent, now,
+  };
+  const withSources = sources.length > 0 || allFiring.some((a) => a.ruleKey === "ExternalAlert");
+  const pick = typeof sp.source === "string" && isSourceFilter(sp.source) && withSources ? sp.source : "all";
   // Watchbell 1.8: the chosen workspace's alerts and the install's own (at most 200 open, filtered here so the count
   // under the list and the bell's always add up); with All workspaces each alert names its workspace.
   const wsOf = await alertWorkspaceIds([...allFiring, ...allResolved]);
-  const { shown: stored, elsewhere } = filterByWorkspace(allFiring, wsOf, ws.id);
+  const { shown: wsShown, elsewhere } = filterByWorkspace(allFiring, wsOf, ws.id);
+  const stored = filterBySource(wsShown, pick);
   const { shown: storedResolved } = filterByWorkspace(allResolved, wsOf, ws.id);
   const labelled = ws.id === null && ws.list.length > 1;
   const label = (id: string) => (labelled ? workspacePrefix(ws.list.find((w) => w.id === wsOf.get(id))?.name ?? "Install", ws.list.length) : "");
@@ -45,10 +68,11 @@ export default async function AlertsPage() {
         title="Alerts"
         sub="Rules run after every collector run. Unknown data never opens or resolves an alert."
       />
-      <Tabs defaultValue="firing" className="gap-4">
+      <Tabs defaultValue={sp.tab === "sources" ? "sources" : "firing"} className="gap-4">
         <TabsList variant="line">
           <TabsTrigger value="firing">Firing</TabsTrigger>
           <TabsTrigger value="rules">Rules</TabsTrigger>
+          <TabsTrigger value="sources">Sources</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
         </TabsList>
 
@@ -58,7 +82,8 @@ export default async function AlertsPage() {
               The alerts of a section that is turned off are kept but not shown, evaluated or sent until it is turned on again.
             </Banner>
           )}
-          <Card flush><FiringTable rows={firing} now={now} act={canAct(member.role)} /></Card>
+          {withSources && <SourceFilterBar active={pick} />}
+          <Card flush><FiringTable rows={firing} now={now} act={canAct(member.role)} sources={withSources} /></Card>
           {elsewhere > 0 && (
             <p className="text-[13px] text-ink-soft"><Link href="/workspaces">{elsewhere} more open in other workspaces</Link></p>
           )}
@@ -69,6 +94,10 @@ export default async function AlertsPage() {
 
         <TabsContent value="rules">
           <Card flush><RulesTable rules={rules} owner={owner} templates={templates} now={now} /></Card>
+        </TabsContent>
+
+        <TabsContent value="sources">
+          <SourcesCard v={sourcesView} />
         </TabsContent>
 
         <TabsContent value="notifications">

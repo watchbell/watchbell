@@ -17,7 +17,7 @@ export function updateSessionDemo(request: NextRequest): { response: NextRespons
 // VM runner, the public API, schedulers, the Telegram webhook), Supabase and Google sign-in callbacks, and self-host's
 // first-run setup. They answer 404 before any route code runs. /api/v1/openapi.json stays: the signed-in visitor's API
 // docs page downloads it, and it reads nothing but the session.
-const GONE_PREFIX = ["/api/ping/", "/api/runner/", "/api/v1/", "/auth/google/"];
+const GONE_PREFIX = ["/api/ping/", "/api/alertmanager/", "/api/runner/", "/api/v1/", "/auth/google/"];
 const GONE_EXACT = new Set(["/api/v1", "/api/telegram/webhook", "/api/collect", "/api/daily", "/api/watchdog", "/auth/confirm", "/setup"]);
 const KEPT = new Set(["/api/v1/openapi.json"]);
 

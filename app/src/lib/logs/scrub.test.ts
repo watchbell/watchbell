@@ -37,6 +37,20 @@ describe("scrubLog", () => {
     expect(scrubLog("GET /api/ping/ 404")).toBe("GET /api/ping/ 404");
     expect(scrubLog("GET /api/pingdom/status")).toBe("GET /api/pingdom/status");
   });
+  // 1.8.6 final review C1: an Alertmanager source token (am_ + 22 base-58) in a request line or message is a write
+  // credential: Logs › Live (operators), stored logs, MCP and AI must never carry it.
+  it("hides an Alertmanager source token in a message or a path, encoded or not", () => {
+    const t = "8f2kQwErTyUiPaSdFgHjKz";
+    expect(scrubLog(`POST /api/alertmanager/am_${t} → 503`)).toBe("POST /api/alertmanager/am_[hidden] → 503");
+    expect(pathOnly(scrubLog(`/api/alertmanager/am_${t}?x=1`))).toBe("/api/alertmanager/am_[hidden]");
+    expect(scrubLog(`token am_${t} in a message`)).toBe("token am_[hidden] in a message");
+    expect(scrubLog(`POST /api/alertmanager/am%5F${t}`)).toBe("POST /api/alertmanager/am_[hidden]");
+    // Anything else after the prefix (encoded letters, an encoded slash, a wrong shape) is hidden whole.
+    expect(scrubLog(`POST /api/alertmanager/%61m_${t} → 404`)).toBe("POST /api/alertmanager/[hidden] → 404");
+    expect(scrubLog(`/api%2Falertmanager%2Fam_${t}`)).toBe("/api%2Falertmanager%2Fam_[hidden]");
+    expect(scrubLog("POST /api/alertmanager/nope → 404")).toBe("POST /api/alertmanager/[hidden] → 404");
+    expect(scrubLog("POST /api/alertmanager/ 404")).toBe("POST /api/alertmanager/ 404");
+  });
   it("masks Basic credentials too", () => {
     expect(scrubLog("authorization: Basic dXNlcjpwYXNz")).toBe("authorization: Basic [hidden]");
   });

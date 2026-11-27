@@ -98,7 +98,9 @@ const DENY = ["failed", "expires", "expired", "over the last", "returned", "cons
 describe("translateAlertText", () => {
   it("has a firing fixture for every rule", () => {
     const covered = new Set(firing.map((o) => o.rule));
-    expect(RULE_KEYS.filter((k) => !covered.has(k))).toEqual([]);
+    // 1.8.6: ExternalAlert carries Alertmanager's own summary (the user's words, any language); the collector never
+    // writes it, so there is nothing of Watchbell's to translate and it stays as sent.
+    expect(RULE_KEYS.filter((k) => k !== "ExternalAlert" && !covered.has(k))).toEqual([]);
   });
 
   it.each(firing.map((o) => [o.rule, o.message] as [RuleKey, string]))("%s: %s", (rule, message) => {

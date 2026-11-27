@@ -32,6 +32,15 @@ describe("proxy", () => {
     expect(h.updateSession).not.toHaveBeenCalled();
   });
 
+  it("lets an Alertmanager post through without session work: the token in the path is the credential (1.8.6)", async () => {
+    for (const path of ["/api/alertmanager/am_8f2kQwErTyUiPaSdFgHjKz", "/api/alertmanager/nope"]) {
+      const res = await proxy(req(path));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.headers.get("set-cookie")).toBeNull();
+    }
+    expect(h.updateSession).not.toHaveBeenCalled();
+  });
+
   it("still reads the session everywhere else, and sends a signed-out visitor to sign in", async () => {
     for (const path of ["/api/ping", "/api/pingx", "/uptime"]) {
       const res = await proxy(req(path));

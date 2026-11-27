@@ -67,6 +67,8 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     CiFailing: "open the run on GitHub from the app page; Watchbell reads it once a day, so a fix shows after the next sync.",
     OsSecurityUpdate: "open DevOps › OS vulnerabilities for the command to copy (Watchbell never installs anything), run it on the machine, reboot for a new kernel, then Scan now.",
     ReportSendFailed: "open Manage › Reports, check the email sender and the recipients, then use Send test; or download the PDF and send it yourself.",
+    // Watchbell 1.8.6
+    ExternalAlert: "look at it in Prometheus or Alertmanager; it resolves here when Alertmanager sends resolved, or after 24 h without word.",
     MonitorDomainMoved: "press Update monitor on the Uptime page (or approve the proposal) so the monitor checks the new domain; the app itself is fine.",
   },
   // The owner's own words, as they were before 62caff7.
@@ -84,6 +86,7 @@ const NEXT_STEP: Record<NotifyLang, Partial<Record<string, string>>> = {
     CiFailing: "buka run-nya di GitHub dari halaman app; Watchbell baca sekali sehari, jadi fix-nya kelihatan setelah sync berikutnya.",
     OsSecurityUpdate: "buka DevOps › OS vulnerabilities, copy perintahnya (Watchbell nggak install apa-apa sendiri), jalanin di mesinnya, reboot kalau ada kernel baru, terus Scan now.",
     ReportSendFailed: "buka Manage › Reports, cek pengirim email dan penerimanya, terus coba Send test; atau download PDF-nya dan kirim sendiri.",
+    ExternalAlert: "cek di Prometheus atau Alertmanager; di sini selesai sendiri waktu Alertmanager kirim resolved, atau setelah 24 jam tanpa kabar.",
     MonitorDomainMoved: "pencet Update monitor di halaman Uptime (atau approve usulannya) biar monitor ngecek domain baru; app-nya sendiri aman.",
   },
 };

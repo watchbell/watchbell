@@ -7,7 +7,7 @@ export type RuleKey =
   | "StorageAlmostFull" | "NeonComputeHigh" | "FirestoreQuotaHigh" | "AutoPauseRisk" | "DnsProxiedToVercel" | "CredentialExpiring"
   | "ComputeHigh" | "DbQuotaHigh"
   | "VulnerableDependency" | "FrameworkVulnerable" | "MonitorDomainMoved" | "CiFailing" | "OsSecurityUpdate"
-  | "ReportSendFailed";
+  | "ReportSendFailed" | "ExternalAlert";
 
 export type RuleDef = {
   key: RuleKey; severity: Severity; threshold: number | null; bounds: [number, number] | null; source: "own" | "api" | "test";
@@ -49,6 +49,9 @@ export const RULES: Record<RuleKey, RuleDef> = {
   OsSecurityUpdate: { key: "OsSecurityUpdate", severity: "warning", threshold: 7, bounds: [0, 10], source: "own", needs: null, sampled: false, condition: (n) => `A waiting security update fixes a CVE scored ${(n ?? 7).toFixed(1)}+ (CVSS), or a new kernel waits for a reboot` },
   // Watchbell 1.7 (spec §6): a monthly client report that couldn't be emailed on the 1st, 2nd or 3rd.
   ReportSendFailed: { key: "ReportSendFailed", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "A monthly client report couldn't be emailed after 3 tries" },
+  // Watchbell 1.8.6: an alert Prometheus Alertmanager posted (POST /api/alertmanager/{token}). Alertmanager opens and
+  // resolves it; the collector never evaluates it. The alert's own severity label wins over this default.
+  ExternalAlert: { key: "ExternalAlert", severity: "warning", threshold: null, bounds: null, source: "api", needs: null, sampled: false, condition: () => "An alert sent by Alertmanager is firing (its own severity label wins)" },
   // Watchbell 1.2.1: an HTTP monitor still checks a domain its app no longer has (the app moved to a new domain). Fires
   // instead of MonitorDown for that monitor; the fix is Update monitor, never a redeploy.
   MonitorDomainMoved: { key: "MonitorDomainMoved", severity: "warning", threshold: null, bounds: null, source: "own", needs: null, sampled: false, condition: () => "The monitor's domain is no longer one of the app's domains" },
@@ -106,6 +109,7 @@ export const RULE_NAMES: Record<RuleKey, string> = {
   CiFailing: "CI is failing",
   OsSecurityUpdate: "Security updates waiting on this machine",
   ReportSendFailed: "Client report not sent",
+  ExternalAlert: "External alert",
   MonitorDomainMoved: "App moved to a new domain",
 };
 export const ruleName = (key: string): string => (isRuleKey(key) ? RULE_NAMES[key] : key);

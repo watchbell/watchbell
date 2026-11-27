@@ -244,7 +244,7 @@ untuk menambahkan akun. Token dienkripsi (AES-256-GCM) dengan `OPS_ENCRYPTION_KE
 sampai ke browser. **Sync** menampilkan semua isi sebuah akun dan Anda mencentang apa saja yang mau dipantau. Banner di
 bagian atas menampilkan connection yang berhenti bekerja. Lihat [Menghubungkan provider](providers.md).
 
-**Alerts.** Tiga tab:
+**Alerts.** Empat tab:
 
 - Firing: apa yang sedang bermasalah sekarang, dan apa yang sudah resolved dalam 7 hari terakhir. Operator bisa
   men-silence alert untuk sementara.
@@ -252,6 +252,7 @@ bagian atas menampilkan connection yang berhenti bekerja. Lihat [Menghubungkan p
   sertifikat yang hampir kedaluwarsa, token yang akan kedaluwarsa, dependency atau versi Next.js yang
   rentan, collector yang tidak berjalan, dan lainnya), beserta threshold-nya. Rule dijalankan setelah setiap run collector, dan data yang tidak
   diketahui tidak pernah membuka atau me-resolve alert.
+- Sources: alert dari Prometheus Alertmanager yang masuk ke Watchbell. Lihat [Alertmanager](alertmanager.md).
 - Notifications: ke mana alert dikirim. Lihat [Notifikasi](notifications.md).
 
 **Auto-actions** (khusus owner). Perbaikan yang diusulkan Watchbell untuk alert yang sedang firing, yang menunggu

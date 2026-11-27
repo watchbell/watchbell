@@ -11,7 +11,7 @@ import { runAdvisor } from "@/lib/data/advisor-db";
 import { DEPS_HARD_STOP_MS, DEPS_STEP_MS, depsDailyStep } from "@/lib/data/deps-db";
 import { githubDailyStep } from "@/lib/data/github-db";
 import { recordEvents } from "@/lib/data/events-write";
-import { recordPing } from "@/lib/data/heartbeats-db";
+import { recordDailyPing } from "@/lib/data/heartbeats-db";
 import { runKeepAlive } from "@/lib/data/keep-active-db";
 import { tokenFromSetting } from "@/lib/heartbeat";
 import { runSecurityChecks } from "@/lib/data/security-db";
@@ -200,19 +200,16 @@ export async function runDaily(): Promise<RunSummary> {
 // token in DAILY_HEARTBEAT_TOKEN), so a daily run that never happens shows up like any other missed job. Recorded
 // directly, no HTTP round trip. A ping that can't be written is not the daily run's failure.
 // 15 Oct: it never pinged although the run was fine, and said nothing. The setting is now read leniently
-// (tokenFromSetting) and every way it can miss is logged, never with the value.
+// (tokenFromSetting) and every way it can miss is logged, never with the value. 27 Nov: a new ping URL made the env
+// token stale and the heartbeat alarmed every day; the ping now goes by id (recordDailyPing).
 async function selfHeartbeat(failed: boolean): Promise<void> {
+  // 27 Nov: by id first (Uptime › the heartbeat › "Ping from the daily job"); the env token only links it once.
   const raw = process.env.DAILY_HEARTBEAT_TOKEN;
-  if (!raw) return; // not set up: nothing to ping
-  const token = tokenFromSetting(raw);
-  if (!token) {
-    console.warn("daily heartbeat: DAILY_HEARTBEAT_TOKEN holds no single hb_ token; set it to the heartbeat's token");
-    return;
-  }
-  const r = await recordPing(token, failed ? "fail" : "ok", new Date()).catch((e: unknown) => {
+  const token = raw ? tokenFromSetting(raw) : null;
+  if (raw && !token) console.warn("daily heartbeat: DAILY_HEARTBEAT_TOKEN holds no single hb_ token; set it to the heartbeat's token");
+  const r = await recordDailyPing(token, failed ? "fail" : "ok", new Date()).catch((e: unknown) => {
     console.warn("daily heartbeat: the ping couldn't be stored:", e instanceof Error ? e.name : "error");
     return null;
   });
-  if (r?.status === "unknown") console.warn("daily heartbeat: DAILY_HEARTBEAT_TOKEN matches no heartbeat monitor (was it regenerated?)");
-  else if (r?.status === "limited") console.warn("daily heartbeat: the ping was rate limited");
+  if (r === "unknown") console.warn("daily heartbeat: no heartbeat matches; pick one with \"Ping from the daily job\" on Uptime");
 }

@@ -1,7 +1,7 @@
 import "server-only";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
-import { checks, monitors, resources } from "@/db/schema";
+import { checks, monitors, resources, settings } from "@/db/schema";
 import { monitorEvent, type NewEvent } from "@/lib/collector/rules";
 import { recheckable } from "@/lib/collector/schedule";
 import { recordEvents } from "@/lib/data/events-write";
@@ -29,6 +29,47 @@ export async function recordPing(token: string, kind: "ok" | "fail" | "start", n
   if (!q.allowed) return { status: "limited", retryAfter: q.retryAfter };
   await db().update(monitors).set({ lastPingAt: now, lastPingKind: kind, updatedAt: now }).where(eq(monitors.id, m.id));
   return { status: "ok" };
+}
+
+// 27 Nov: the console's own daily job pings its heartbeat by id, kept in ops.settings, so "Show ping URL" (a new
+// token) can't cut it off any more; before, DAILY_HEARTBEAT_TOKEN went stale on every new URL and the heartbeat
+// alarmed although the daily run was fine. The link is made from the console (the heartbeat's "Ping from the daily
+// job") or, the first time the env token still matches, by that ping. "unknown": a token or link that matches no
+// heartbeat (deleted, or a stale token); "none": nothing set up.
+export const DAILY_HEARTBEAT_KEY = "daily.heartbeat";
+export type DailyPing = "ok" | "unknown" | "none";
+
+const linkedId = (value: unknown): string | null => {
+  const id = value && typeof value === "object" ? (value as { monitorId?: unknown }).monitorId : null;
+  return typeof id === "string" && id.length > 0 ? id : null;
+};
+
+export async function dailyHeartbeatId(): Promise<string | null> {
+  const [row] = await db().select({ value: settings.value }).from(settings).where(eq(settings.key, DAILY_HEARTBEAT_KEY)).limit(1);
+  return linkedId(row?.value);
+}
+
+export async function linkDailyHeartbeat(monitorId: string, now: Date = new Date()): Promise<void> {
+  const value = { monitorId };
+  await db().insert(settings).values({ key: DAILY_HEARTBEAT_KEY, value })
+    .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: now } });
+}
+
+export async function recordDailyPing(token: string | null, kind: "ok" | "fail", now: Date): Promise<DailyPing> {
+  const ping = { lastPingAt: now, lastPingKind: kind, updatedAt: now };
+  const linked = await dailyHeartbeatId();
+  if (linked) {
+    const done = await db().update(monitors).set(ping).where(and(eq(monitors.id, linked), eq(monitors.kind, "heartbeat")))
+      .returning({ id: monitors.id });
+    if (done.length) return "ok";
+  }
+  if (!token) return linked ? "unknown" : "none";
+  const [m] = await db().select({ id: monitors.id }).from(monitors)
+    .where(and(eq(monitors.tokenHash, tokenHash(token)), eq(monitors.kind, "heartbeat"))).limit(1);
+  if (!m) return "unknown";
+  await db().update(monitors).set(ping).where(eq(monitors.id, m.id));
+  await linkDailyHeartbeat(m.id, now);
+  return "ok";
 }
 
 // The `heartbeats` task (every run): recompute each heartbeat's state, store one check per run (ok unless down) so the

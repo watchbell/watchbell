@@ -40,6 +40,9 @@ describe("openApiDocument", () => {
     expect(doc.paths["/api/v1/status"].get!["x-watchbell-scope"]).toBe("read:status");
     expect(doc.paths["/api/v1/ai/chat/completions"].post!["x-watchbell-scope"]).toBe("ai:invoke");
     expect(doc.paths["/api/v1/me"].get!["x-watchbell-scope"]).toBe("any");
+    // 1.8.6: Alertmanager's webhook authenticates by the token in its path, like a heartbeat ping.
+    expect(doc.paths["/api/alertmanager/{token}"].post!.tags).toEqual(["Alerts"]);
+    expect(doc.paths["/api/alertmanager/{token}"].post!.security).toEqual([]);
   });
   it("marks exactly the scheduler endpoints docs-only, without a security property", () => {
     const docs = ops.filter((o) => o.op["x-watchbell-docs-only"]);
@@ -51,7 +54,7 @@ describe("openApiDocument", () => {
   });
   it("lists every /api/v1 route and the other documented endpoints", () => {
     expect(Object.keys(doc.paths).sort()).toEqual([
-      "/api/collect", "/api/daily", "/api/health", "/api/ping/{token}", "/api/ping/{token}/fail", "/api/ping/{token}/start", "/api/v1/advice", "/api/v1/ai/chat/completions",
+      "/api/alertmanager/{token}", "/api/collect", "/api/daily", "/api/health", "/api/ping/{token}", "/api/ping/{token}/fail", "/api/ping/{token}/start", "/api/v1/advice", "/api/v1/ai/chat/completions",
       "/api/v1/ai/models", "/api/v1/ai/questions", "/api/v1/ai/questions/{id}", "/api/v1/mcp", "/api/v1/me", "/api/v1/metrics", "/api/v1/openapi.json", "/api/v1/status", "/api/v1/status/apps/{app}", "/api/watchdog",
     ]);
   });

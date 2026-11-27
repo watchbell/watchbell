@@ -3,7 +3,7 @@ import { Banner, Card, PageHeader } from "@/components/kit";
 import { Status } from "@/components/status";
 import { rowClass, tableClass, td, tdWrap, TableHead } from "@/components/table";
 import { type ConnectionView, listConnections, MAX_CUSTOM } from "@/private/ai/providers/providers-db";
-import { PRESETS } from "@/private/ai/providers/presets";
+import { PRESETS, PROVIDER_SHORTCUTS } from "@/private/ai/providers/presets";
 import { DefaultProviderSelect, EnabledSwitch, ProviderMenu, TestProviderButton } from "./provider-actions";
 import { ProviderDialog } from "./provider-dialog";
 import { PROVIDER_ICONS } from "./provider-icons";
@@ -125,7 +125,14 @@ export default async function ProvidersPage() {
               <table className={tableClass}><TableHead head={HEAD} /><tbody>{custom.map((c) => <Row key={c.id} c={c} />)}</tbody></table>
             </div>
           )}
-          {custom.length < MAX_CUSTOM && <div className="mt-2"><ProviderDialog kind="custom" label="Connect a custom server" selfhost={selfhost()} /></div>}
+          {custom.length < MAX_CUSTOM && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <ProviderDialog kind="custom" label="Connect a custom server" selfhost={selfhost()} />
+              {PROVIDER_SHORTCUTS.filter((p) => !p.selfhostOnly || selfhost()).map((p) => (
+                <ProviderDialog key={p.id} kind="custom" label={p.name} selfhost={selfhost()} prefill={{ name: p.name, baseUrl: p.baseUrl }} />
+              ))}
+            </div>
+          )}
         </details>
       </Card>
       <div className="grid gap-4 md:grid-cols-2">

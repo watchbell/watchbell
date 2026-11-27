@@ -5,7 +5,7 @@ import { type ActionResult, type GuardMember, runGuarded } from "@/lib/action";
 import { requireActionMember } from "@/lib/auth";
 import { recordAction } from "@/lib/data/audit-db";
 import {
-  checkMonitorNow, createHeartbeat, createMonitor, deleteMonitor, type Done, recordTestPing, rotateToken, setAppMonitorsPaused, setMonitorPaused, updateHeartbeat, updateMonitor,
+  checkMonitorNow, createHeartbeat, createMonitor, deleteMonitor, type Done, recordTestPing, rotateToken, setAppMonitorsPaused, setMonitorPaused, updateHeartbeat, updateMonitor, setDailyJobHeartbeat,
 } from "@/lib/data/monitors-db";
 import { moveMonitorToDomain } from "@/lib/data/monitor-move-db";
 import { serverEnv } from "@/lib/env";
@@ -139,5 +139,14 @@ export async function recordTestPingAction(id: string, kind: "ok" | "fail"): Pro
   return runGuarded("operator", async (member): Promise<Result> => {
     if (!isUuid(id) || (kind !== "ok" && kind !== "fail")) return { ok: false, error: INVALID };
     return (await writeQuota(member)) ?? (await result(await recordTestPing(id, kind), member));
+  }, deps, "local");
+}
+
+// 27 Nov: make this heartbeat the one the console's own daily job pings (by id). Owner only: it changes what the
+// console reports about itself.
+export async function pingFromDailyJob(id: string): Promise<Result> {
+  return runGuarded("owner", async (member): Promise<Result> => {
+    if (!isUuid(id)) return { ok: false, error: INVALID };
+    return (await writeQuota(member)) ?? (await result(await setDailyJobHeartbeat(id), member));
   }, deps, "local");
 }

@@ -21,7 +21,7 @@ import type { State } from "@/lib/status";
 import { appDomain, hostPath } from "@/lib/view/format";
 import { type DayCount, lastDays, UPTIME_DAYS, uptimePct } from "@/lib/view/uptime";
 import { PAGE_ROWS } from "@/lib/view/windows";
-import { taskHeartbeats } from "./heartbeats-db";
+import { linkDailyHeartbeat, taskHeartbeats } from "./heartbeats-db";
 import { listRawWindows } from "./maintenance-db";
 import { monitorDays } from "./metrics-db";
 
@@ -239,6 +239,21 @@ export async function rotateToken(id: string): Promise<Done> {
   return {
     ok: true, message: `New ping URL for ${name}. The old one no longer works.`, token,
     audit: { message: `Ping URL replaced: ${name}`, resourceId: row.m.resourceId },
+  };
+}
+
+// 27 Nov: "Ping from the daily job" — the console's own daily job pings this heartbeat by id from its next run on,
+// whatever its ping URL (a new URL no longer cuts the daily job off). One heartbeat at a time: picking another moves
+// the link.
+export async function setDailyJobHeartbeat(id: string, now: Date = new Date()): Promise<Done> {
+  const row = await loadMonitor(id);
+  if (!row) return GONE;
+  if (!isHeartbeat(row.m)) return NOT_HEARTBEAT;
+  await linkDailyHeartbeat(id, now);
+  const name = targetOf(row.m);
+  return {
+    ok: true, message: `The daily job pings ${name} from its next run on. A new ping URL doesn't change that.`,
+    audit: { message: `Daily job heartbeat set: ${name}`, resourceId: row.m.resourceId },
   };
 }
 

@@ -1,6 +1,6 @@
 import { PgDialect } from "drizzle-orm/pg-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { checks, monitors } from "@/db/schema";
+import { checks, monitors, settings } from "@/db/schema";
 import { tokenHash } from "@/lib/heartbeat-token";
 import { LIMITS } from "@/lib/rate-limit";
 import { fakeDb, payloadOf, whereOf } from "./fake-db";
@@ -14,7 +14,7 @@ vi.mock("@/db/client", () => ({ db: () => (h.current as { db: () => unknown }).d
 vi.mock("@/lib/rate-limit-db", () => ({ limit: h.limit }));
 vi.mock("@/lib/data/events-write", () => ({ recordEvents: h.recordEvents }));
 
-import { recordPing, taskHeartbeats } from "./heartbeats-db";
+import { DAILY_HEARTBEAT_KEY, recordDailyPing, recordPing, taskHeartbeats } from "./heartbeats-db";
 
 const T = "hb_0123456789abcdef0123456789abcdef";
 const now = new Date("2026-10-13T12:00:00Z");
@@ -153,5 +153,37 @@ describe("taskHeartbeats", () => {
     const f = use([[{ m: hb() }]], [[{ id: "m1" }]]);
     await taskHeartbeats(now, (id, app) => id === "m1" && app === "a1");
     expect(payloadOf(f.writes[1].calls)).toEqual([expect.objectContaining({ inMaintenance: true })]);
+  });
+});
+
+describe("recordDailyPing (27 Nov: the daily job pings by id)", () => {
+  const ping = { lastPingAt: now, lastPingKind: "ok", updatedAt: now };
+  it("pings the linked heartbeat by id, without the token or a rate limit", async () => {
+    const f = use([[{ value: { monitorId: "m1" } }]], [[{ id: "m1" }]]);
+    expect(await recordDailyPing(T, "ok", now)).toBe("ok");
+    expect(f.queries).toHaveLength(1);
+    expect(f.writes).toHaveLength(1);
+    expect(payloadOf(f.writes[0].calls)).toEqual(ping);
+    expect(sqlOf(f.writes[0].calls).params).toContain("m1");
+    expect(h.limit).not.toHaveBeenCalled();
+  });
+  it("links the heartbeat the first time the env token still matches, so a new ping URL can't cut it off", async () => {
+    const f = use([[], [{ id: "m2" }]]);
+    expect(await recordDailyPing(T, "fail", now)).toBe("ok");
+    expect(sqlOf(f.queries[1]).params).toContain(tokenHash(T));
+    expect(payloadOf(f.writes[0].calls)).toEqual({ ...ping, lastPingKind: "fail" });
+    expect(f.writes[1].table).toBe(settings);
+    expect(payloadOf(f.writes[1].calls)).toEqual({ key: DAILY_HEARTBEAT_KEY, value: { monitorId: "m2" } });
+  });
+  it("falls back to the token when the linked heartbeat is gone, and says unknown when nothing matches", async () => {
+    const f = use([[{ value: { monitorId: "gone" } }], []], [[]]);
+    expect(await recordDailyPing(T, "ok", now)).toBe("unknown");
+    expect(f.writes).toHaveLength(1);
+    expect(await (use([[{ value: { monitorId: "gone" } }]], [[]]), recordDailyPing(null, "ok", now))).toBe("unknown");
+  });
+  it("says none when neither a link nor a token is set up", async () => {
+    const f = use([[]]);
+    expect(await recordDailyPing(null, "ok", now)).toBe("none");
+    expect(f.writes).toEqual([]);
   });
 });

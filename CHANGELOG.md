@@ -2,6 +2,35 @@
 
 All notable changes to Watchbell are listed here. Versions follow [Semantic Versioning](https://semver.org).
 
+## 1.8.6
+
+Prometheus Alertmanager's alerts in Watchbell, and AI provider shortcuts.
+
+### Added
+
+- **Alertmanager:** Prometheus Alertmanager can send its alerts to `POST /api/alertmanager/{token}` (webhook version
+  4). Firing opens an alert of the new rule ExternalAlert, resolved closes it, and Alertmanager's fingerprint keeps one
+  alert per fingerprint; they get the same notices, silences and Ask AI as Watchbell's own alerts, and resolve as
+  stale after 24 hours without word. Set it up on the new **Alerts › Sources** tab with a three-step wizard that shows
+  the secret URL once, fills `alertmanager.yml` in and waits for a test alert. Replace, revoke and a Watchbell test
+  alert are there too. At most 256 KB and 100 alerts a call, 120 alerts a minute per source; Watchbell keeps only a
+  hash of the token and never logs a body. **Alerts › Firing** shows each alert's source, a source filter and the
+  labels Alertmanager sent. See [Alertmanager](docs/alertmanager.md).
+- **AI:** shortcuts beside **Connect a custom server** fill the form in for DeepSeek and, on a self-hosted
+  Watchbell, for Ollama (no key). See [AI › Add a provider](docs/ai.md#add-a-provider).
+
+### Fixed
+
+- **The daily job's own heartbeat** alarmed every day although the daily job ran fine, once its ping URL had been
+  replaced: the job pinged with the old token from `DAILY_HEARTBEAT_TOKEN`. It now pings its heartbeat by id, so a new
+  ping URL can't cut it off. Pick the heartbeat on **Uptime** with its menu › **Ping from the daily job** (owner
+  only); an existing `DAILY_HEARTBEAT_TOKEN` that still matches links it by itself on the next run.
+
+### Upgrading
+
+The cloud edition needs migrations `0067` and `0068` (the table `ingest_sources`, a `labels` column on alerts, and
+the rule ExternalAlert); a self-hosted Watchbell applies its own on start.
+
 ## 1.8.5
 
 Prometheus metrics, and the small fixes left from the review of 1.8.4.
